@@ -1,0 +1,6 @@
+{
+  "name": "GPU: San Nabilo — Jakarta Open World",
+  "description": "Game open-world 3D aksi petualangan berlatar kota Jakarta dengan alur cerita bercabang, kendaraan khas Indonesia, dan sistem reputasi dinamis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
