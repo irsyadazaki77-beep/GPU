@@ -15,18 +15,28 @@ import {
   StoryMission,
   VEHICLE_SPECS,
   WARUNG_STALL_LOCATIONS,
-  WEAPONS,
+  getEffectiveWeaponSpec,
   getGroundElevationAt,
   getPlayerStaminaSpeedMultiplier,
+  resolveCameraWallPullIn,
   resolveCircleAABBCollision,
   stepEnemyMovementPolicy,
 } from '../game/rules';
 import { soundEngine } from '../game/sound';
 import {
+  INTERIOR_ROOM_CENTERS,
   buildCharacterRig,
   buildCombatDroneMesh,
 } from '../game/world/geometryBuilders';
-import type { RadarEnemyBlip } from '../state/gameStore';
+import type {
+  CombatHitFeedbackEvent,
+  TrafficSignalPhase,
+} from '../game/types';
+import {
+  gameStore,
+  virtualInputRef,
+  type RadarEnemyBlip,
+} from '../state/gameStore';
 import { TrafficSystem, VehicleEntity } from './TrafficSystem';
 
 export interface EnemyEntity {
@@ -62,6 +72,18 @@ interface ParticleSlot {
   colorHex: number;
 }
 
+interface TracerSlot {
+  active: boolean;
+  midX: number;
+  midY: number;
+  midZ: number;
+  yaw: number;
+  length: number;
+  life: number;
+  maxLife: number;
+  colorHex: number;
+}
+
 export interface PlayerControllerCallbacks {
   getGameState: () => string;
   getPlayerState: () => PlayerProgressState;
@@ -76,9 +98,14 @@ export interface PlayerControllerCallbacks {
   onCompleteActiveObjective: () => void;
   onToggleTpsAim: () => void;
   onEnterOrExitInterior: (target?: EnterableInteriorSpec | null) => void;
+  onCombatHitFeedback?: (evt: CombatHitFeedbackEvent) => void;
+  onPlayerHitAngle?: (angleRad: number) => void;
+  onWeaponNoise?: (x: number, z: number, radius: number, isBlast: boolean) => void;
 }
 
-const PARTICLE_CAP = 96;
+const PARTICLE_CAP = 112;
+const TRACER_CAP = 16;
+const SKIDMARK_CAP = 140;
 
 export class PlayerController {
   private readonly scene: THREE.Scene;
@@ -94,7 +121,9 @@ export class PlayerController {
   >;
   public readonly enemies: EnemyEntity[] = [];
   public readonly beaconGroup: THREE.Group;
+  public readonly waypointBeaconGroup: THREE.Group;
   public readonly droneMesh: THREE.Group;
+  public readonly muzzleFlashLight: THREE.PointLight;
   public readonly crewCompanions: {
     rig: ReturnType<typeof buildCharacterRig>;
     x: number;
@@ -132,17 +161,35 @@ export class PlayerController {
     lastStageSound: 0,
   };
 
+  public readonly cutsceneDirector = {
+    active: false,
+    focusX: 0,
+    focusZ: 26,
+    elapsed: 0,
+    duration: 3.5,
+  };
+
   public objectiveProgress = 0;
   private checkpointStage = 0;
   private droneFireCooldown = 0.5;
   private hitstopTimer = 0;
   private cameraTrauma = 0;
+  private damagePulse = 0;
+  private muzzleLightTimer = 0;
   private tourElapsed = 0;
   private customsOrbitAngle = 0;
+  private prevGamepadBtns: boolean[] = [];
   private sirenSoundCooldown = 0;
   private camYaw = Math.PI;
   private camPitch = 0.28;
   private userOrbitTimer = 0;
+  private skidSpawnAccum = 0;
+  private driftChainScore = 0;
+  private driftChainTimer = 0;
+  private cameraNeedsSnap = true;
+  private lastAppliedOutfitId = '';
+  private prevParticleCount = -1;
+  private prevTracerCount = -1;
 
   private readonly particleGeo: THREE.BoxGeometry;
   private readonly particleMat: THREE.MeshBasicMaterial;
@@ -150,10 +197,22 @@ export class PlayerController {
   private readonly particles: ParticleSlot[];
   private particleCursor = 0;
 
+  private readonly tracerGeo: THREE.BoxGeometry;
+  private readonly tracerMat: THREE.MeshBasicMaterial;
+  private readonly tracerInst: THREE.InstancedMesh;
+  private readonly tracers: TracerSlot[];
+  private tracerCursor = 0;
+
+  private readonly skidGeo: THREE.PlaneGeometry;
+  private readonly skidMat: THREE.MeshBasicMaterial;
+  private readonly skidInst: THREE.InstancedMesh;
+  private skidCursor = 0;
+
   private readonly _v1 = new THREE.Vector3();
   private readonly _v2 = new THREE.Vector3();
   private readonly _scale = new THREE.Vector3();
   private readonly _quat = new THREE.Quaternion();
+  private readonly _euler = new THREE.Euler();
   private readonly _mat4 = new THREE.Matrix4();
   private readonly _color = new THREE.Color();
 
@@ -206,6 +265,34 @@ export class PlayerController {
     this.beaconGroup.add(beaconRing);
     scene.add(this.beaconGroup);
 
+    // 1b. Custom GPS Waypoint Beacon (Tactical Purple/Cyan Pillar + Ring)
+    this.waypointBeaconGroup = new THREE.Group();
+    const wpCyl = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.35, 1.35, 22, 16, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xc084fc,
+        transparent: true,
+        opacity: 0.34,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    );
+    wpCyl.position.y = 11;
+    this.waypointBeaconGroup.add(wpCyl);
+
+    const wpRing = new THREE.Mesh(
+      new THREE.RingGeometry(1.4, 2.1, 24).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    );
+    wpRing.position.y = 0.08;
+    this.waypointBeaconGroup.add(wpRing);
+    this.waypointBeaconGroup.visible = false;
+    scene.add(this.waypointBeaconGroup);
+
     // 2. Pooled Particles InstancedMesh
     this.particleGeo = new THREE.BoxGeometry(0.24, 0.24, 0.24);
     this.particleMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -214,6 +301,7 @@ export class PlayerController {
       this.particleMat,
       PARTICLE_CAP
     );
+    this.particleInst.count = 0;
     this.particleInst.frustumCulled = false;
     scene.add(this.particleInst);
 
@@ -230,6 +318,65 @@ export class PlayerController {
       size: 1,
       colorHex: 0xfef08a,
     }));
+
+    // 2b. Muzzle Flash PointLight & Pooled Bullet Tracer Beams
+    this.muzzleFlashLight = new THREE.PointLight(0xfbbf24, 0, 14, 1.8);
+    scene.add(this.muzzleFlashLight);
+
+    this.tracerGeo = new THREE.BoxGeometry(0.06, 0.06, 1.0);
+    this.tracerMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.tracerInst = new THREE.InstancedMesh(
+      this.tracerGeo,
+      this.tracerMat,
+      TRACER_CAP
+    );
+    this.tracerInst.count = 0;
+    this.tracerInst.frustumCulled = false;
+    scene.add(this.tracerInst);
+
+    this.tracers = Array.from({ length: TRACER_CAP }, () => ({
+      active: false,
+      midX: 0,
+      midY: -100,
+      midZ: 0,
+      yaw: 0,
+      length: 1,
+      life: 0,
+      maxLife: 0.09,
+      colorHex: 0xfde047,
+    }));
+
+    // 2c. Ring-Buffered Asphalt Skidmarks
+    this.skidGeo = new THREE.PlaneGeometry(0.32, 1.45);
+    this.skidGeo.rotateX(-Math.PI / 2);
+    this.skidMat = new THREE.MeshBasicMaterial({
+      color: 0x090c12,
+      transparent: true,
+      opacity: 0.56,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    });
+    this.skidInst = new THREE.InstancedMesh(
+      this.skidGeo,
+      this.skidMat,
+      SKIDMARK_CAP
+    );
+    this.skidInst.frustumCulled = false;
+    this._v1.set(0, -100, 0);
+    this._scale.setScalar(0.001);
+    this._mat4.compose(this._v1, this._quat.identity(), this._scale);
+    for (let i = 0; i < SKIDMARK_CAP; i++) {
+      this.skidInst.setMatrixAt(i, this._mat4);
+    }
+    this.skidInst.instanceMatrix.needsUpdate = true;
+    scene.add(this.skidInst);
 
     // 3. Player + Idle Trio Protagonists
     this.playerRig = buildCharacterRig('player');
@@ -340,7 +487,7 @@ export class PlayerController {
 
   private onPointerMove = (e: PointerEvent) => {
     if (this.callbacks.getGameState() !== 'playing') return;
-    if (this.callbacks.getCustomsOpen() || this.callbacks.getWheelSlowMo()) {
+    if (this.callbacks.getWheelSlowMo()) {
       return;
     }
     if (!this.isOrbitDragging && !this.rightMouseHeld) return;
@@ -354,11 +501,16 @@ export class PlayerController {
       this.dragDistance += Math.abs(dx) + Math.abs(dy);
     }
 
+    if (this.callbacks.getCustomsOpen()) {
+      this.customsOrbitAngle += dx * 0.008;
+      return;
+    }
+
     this.camYaw -= dx * 0.0055;
     this.camPitch = THREE.MathUtils.clamp(
       this.camPitch + dy * 0.004,
-      0.1,
-      0.88
+      0.08,
+      0.92
     );
     this.userOrbitTimer = 2.0;
   };
@@ -411,6 +563,73 @@ export class PlayerController {
     }
   }
 
+  public spawnTracer(
+    fromX: number,
+    fromY: number,
+    fromZ: number,
+    toX: number,
+    toY: number,
+    toZ: number,
+    colorHex: number = 0xfde047
+  ): void {
+    const slot = this.tracers[this.tracerCursor];
+    this.tracerCursor = (this.tracerCursor + 1) % TRACER_CAP;
+    const dx = toX - fromX;
+    const dz = toZ - fromZ;
+    slot.active = true;
+    slot.midX = (fromX + toX) * 0.5;
+    slot.midY = (fromY + toY) * 0.5;
+    slot.midZ = (fromZ + toZ) * 0.5;
+    slot.yaw = Math.atan2(dx, dz);
+    slot.length = Math.max(0.6, Math.hypot(dx, dz));
+    slot.life = 0;
+    slot.maxLife = 0.085;
+    slot.colorHex = colorHex;
+  }
+
+  private dropSkidmarkPair(
+    cx: number,
+    cy: number,
+    cz: number,
+    heading: number
+  ): void {
+    const sinH = Math.sin(heading);
+    const cosH = Math.cos(heading);
+    const backX = cx - sinH * 1.15;
+    const backZ = cz - cosH * 1.15;
+    const sideX = cosH * 0.72;
+    const sideZ = -sinH * 0.72;
+
+    this._euler.set(0, heading, 0);
+    this._quat.setFromEuler(this._euler);
+    this._scale.set(1, 1, 1);
+
+    for (const sign of [-1, 1]) {
+      const idx = this.skidCursor;
+      this.skidCursor = (this.skidCursor + 1) % SKIDMARK_CAP;
+      this._v1.set(backX + sideX * sign, cy + 0.055, backZ + sideZ * sign);
+      this._mat4.compose(this._v1, this._quat, this._scale);
+      this.skidInst.setMatrixAt(idx, this._mat4);
+    }
+    this.skidInst.instanceMatrix.needsUpdate = true;
+  }
+
+  public startCutsceneFraming(focusX: number, focusZ: number, duration: number = 3.2): void {
+    this.cutsceneDirector.active = true;
+    this.cutsceneDirector.focusX = focusX;
+    this.cutsceneDirector.focusZ = focusZ;
+    this.cutsceneDirector.elapsed = 0;
+    this.cutsceneDirector.duration = duration;
+  }
+
+  public stopCutsceneFraming(): void {
+    this.cutsceneDirector.active = false;
+  }
+
+  public getDamagePulse(): number {
+    return this.damagePulse;
+  }
+
   public spawnEnemyGroup(
     centerX: number,
     centerZ: number,
@@ -426,8 +645,15 @@ export class PlayerController {
       const spec = ENEMY_ARCHETYPES[policy];
       const rig = buildCharacterRig(policy);
       const ang = (i / count) * Math.PI * 2;
-      const ex = centerX + Math.cos(ang) * 6.5;
-      const ez = centerZ + Math.sin(ang) * 6.5;
+      const safePos = resolveCircleAABBCollision(
+        centerX + Math.cos(ang) * 6.5,
+        centerZ + Math.sin(ang) * 6.5,
+        0.9,
+        undefined,
+        this.buildingGrid
+      );
+      const ex = safePos.x;
+      const ez = safePos.z;
       rig.group.position.set(ex, getGroundElevationAt(ex, ez), ez);
       this.scene.add(rig.group);
       this.enemies.push({
@@ -536,6 +762,7 @@ export class PlayerController {
     this.camYaw = Math.PI;
     this.camPitch = 0.28;
     this.userOrbitTimer = 0;
+    this.cameraNeedsSnap = true;
     this.playerRig.group.visible = true;
     this.objectiveProgress = 0;
     this.checkpointStage = 0;
@@ -569,6 +796,7 @@ export class PlayerController {
     this.camYaw = this.playerPhys.facing;
     this.camPitch = 0.28;
     this.userOrbitTimer = 0;
+    this.cameraNeedsSnap = true;
     this.playerRig.group.position.set(
       this.playerPhys.x,
       this.playerPhys.y,
@@ -608,6 +836,7 @@ export class PlayerController {
       this.playerPhys.y,
       this.playerPhys.z
     );
+    this.cameraNeedsSnap = true;
     this.spawnParticles(safe.x, gY + 1.4, safe.z, 22, 0x38bdf8, 9);
     soundEngine.playPickup();
   }
@@ -655,7 +884,7 @@ export class PlayerController {
 
   private triggerPlayerAttack(): void {
     const pState = this.callbacks.getPlayerState();
-    const wSpec = WEAPONS[pState.activeWeapon];
+    const wSpec = getEffectiveWeaponSpec(pState.activeWeapon, pState);
     if (this.playerPhys.attackCooldown > 0) return;
 
     if (!wSpec.isMelee) {
@@ -674,11 +903,31 @@ export class PlayerController {
     const fwdX = Math.sin(this.playerPhys.facing);
     const fwdZ = Math.cos(this.playerPhys.facing);
     const muzzleX = this.playerPhys.x + fwdX * 1.1;
+    const muzzleY = this.playerPhys.y + 1.25;
     const muzzleZ = this.playerPhys.z + fwdZ * 1.1;
+
+    if (!wSpec.isMelee) {
+      this.muzzleFlashLight.position.set(muzzleX, muzzleY + 0.15, muzzleZ);
+      this.muzzleFlashLight.color.setHex(
+        wSpec.id === 'pasopati' || wSpec.id === 'gatotkaca'
+          ? 0x38bdf8
+          : wSpec.silent
+          ? 0x10b981
+          : 0xfbbf24
+      );
+      this.muzzleFlashLight.intensity = wSpec.silent ? 2.5 : 6.5;
+      this.muzzleLightTimer = 0.065;
+      this.callbacks.onWeaponNoise?.(
+        this.playerPhys.x,
+        this.playerPhys.z,
+        wSpec.splashRadius > 0 ? 28 : wSpec.silent ? 6.5 : 20,
+        wSpec.splashRadius > 0
+      );
+    }
 
     this.spawnParticles(
       muzzleX,
-      this.playerPhys.y + 1.25,
+      muzzleY,
       muzzleZ,
       wSpec.isMelee ? 5 : 8,
       wSpec.isMelee ? 0xfef08a : 0xf97316,
@@ -706,6 +955,17 @@ export class PlayerController {
         }
       }
 
+      this.spawnTracer(
+        muzzleX,
+        muzzleY,
+        muzzleZ,
+        blastX,
+        this.playerPhys.y + 1.2,
+        blastZ,
+        wSpec.id === 'pasopati' ? 0x38bdf8 : 0xf97316
+      );
+      this.callbacks.onWeaponNoise?.(blastX, blastZ, wSpec.splashRadius * 2.2, true);
+
       this.spawnParticles(
         blastX,
         this.playerPhys.y + 1.5,
@@ -721,20 +981,36 @@ export class PlayerController {
         const d = Math.hypot(en.x - blastX, en.z - blastZ);
         if (d <= wSpec.splashRadius) {
           const dmgMult = pState.fokusActive ? 1.75 : 1.0;
-          en.hp -= Math.round(wSpec.damage * dmgMult);
+          const dealtDmg = Math.round(wSpec.damage * dmgMult);
+          en.hp -= dealtDmg;
           en.hitFlashTimer = 0.08;
           const pushAng = Math.atan2(en.x - blastX, en.z - blastZ);
           en.vx += Math.sin(pushAng) * 12;
           en.vz += Math.cos(pushAng) * 12;
           hitAny = true;
 
-          if (en.hp <= 0) {
+          const ko = en.hp <= 0;
+          const isCrit = pState.fokusActive || wSpec.id === 'gatotkaca';
+          this.callbacks.onCombatHitFeedback?.({
+            id: Math.floor(performance.now() * 1000) + Math.floor(Math.random() * 999),
+            damage: dealtDmg,
+            isCrit,
+            isKo: ko,
+            label: ko ? 'K.O!' : isCrit ? 'KRITIS!' : `${dealtDmg}`,
+            screenX: 46 + Math.random() * 8,
+            screenY: 36 + Math.random() * 7,
+          });
+
+          if (ko) {
             this.markEnemyKo(en, activeChoice);
           }
         }
       }
       return;
     }
+
+    let tracerEndX = muzzleX + fwdX * Math.min(26, wSpec.range);
+    let tracerEndZ = muzzleZ + fwdZ * Math.min(26, wSpec.range);
 
     for (const en of this.enemies) {
       if (en.state !== 'alive') continue;
@@ -750,24 +1026,58 @@ export class PlayerController {
 
       if (dot >= minDot || dist < 2.2) {
         const dmgMult = pState.fokusActive ? 1.75 : 1.0;
-        en.hp -= Math.round(wSpec.damage * dmgMult);
+        const dealtDmg = Math.round(wSpec.damage * dmgMult);
+        en.hp -= dealtDmg;
         en.hitFlashTimer = 0.06;
-        en.vx += dirX * (wSpec.isMelee ? 9 : 5);
-        en.vz += dirZ * (wSpec.isMelee ? 9 : 5);
+        en.vx += dirX * (wSpec.isMelee ? 9.5 : 5.5);
+        en.vz += dirZ * (wSpec.isMelee ? 9.5 : 5.5);
         hitAny = true;
+        tracerEndX = en.x;
+        tracerEndZ = en.z;
 
         this.spawnParticles(en.x, 1.2, en.z, 14, 0xef4444, 8);
 
-        if (en.hp <= 0) {
+        const ko = en.hp <= 0;
+        const isCrit =
+          pState.fokusActive ||
+          wSpec.id === 'pasopati' ||
+          Math.random() < wSpec.critBonus;
+        const critDmg = isCrit ? Math.round(dealtDmg * 1.25) : dealtDmg;
+        if (isCrit && !ko) {
+          en.hp -= critDmg - dealtDmg;
+        }
+        this.callbacks.onCombatHitFeedback?.({
+          id: Math.floor(performance.now() * 1000) + Math.floor(Math.random() * 999),
+          damage: critDmg,
+          isCrit,
+          isKo: en.hp <= 0,
+          label: en.hp <= 0 ? 'K.O!' : isCrit ? 'KRITIS!' : `${critDmg}`,
+          screenX: 46 + Math.random() * 8,
+          screenY: 36 + Math.random() * 7,
+        });
+
+        if (ko) {
           this.markEnemyKo(en, activeChoice);
         } else {
-          this.hitstopTimer = 0.03;
-          this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.2);
+          this.hitstopTimer = 0.042;
+          this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.22);
           soundEngine.playHit(false);
         }
 
         if (!wSpec.isMelee) break;
       }
+    }
+
+    if (!wSpec.isMelee) {
+      this.spawnTracer(
+        muzzleX,
+        muzzleY,
+        muzzleZ,
+        tracerEndX,
+        this.playerPhys.y + 1.2,
+        tracerEndZ,
+        wSpec.id === 'pasopati' ? 0x38bdf8 : 0xfde047
+      );
     }
 
     if (!hitAny && !wSpec.isMelee) {
@@ -806,7 +1116,11 @@ export class PlayerController {
   ): StoryMission | null {
     const outfitSpec =
       NABILO_OUTFITS.find((o) => o.id === pState.outfitId) || NABILO_OUTFITS[0];
-    if (this.playerRig.group.userData.jacketMat) {
+    if (
+      this.lastAppliedOutfitId !== outfitSpec.id &&
+      this.playerRig.group.userData.jacketMat
+    ) {
+      this.lastAppliedOutfitId = outfitSpec.id;
       (
         this.playerRig.group.userData.jacketMat as THREE.MeshStandardMaterial
       ).color.setHex(outfitSpec.jacketHex);
@@ -934,6 +1248,44 @@ export class PlayerController {
     }
     this.beaconGroup.rotation.y += dt * 1.4;
 
+    // Update Custom GPS Waypoint 3D Beacon & auto-clear on arrival
+    const storeSnap = gameStore.getState();
+    const wp = storeSnap.customWaypoint;
+    const activeContract = storeSnap.activeContract;
+    if (wp && pState.currentInterior === 'exterior') {
+      const wpY = getGroundElevationAt(wp.x, wp.z);
+      this.waypointBeaconGroup.position.set(wp.x, wpY, wp.z);
+      this.waypointBeaconGroup.visible = true;
+      this.waypointBeaconGroup.rotation.y -= dt * 1.8;
+
+      if (isPlaying) {
+        const distWp = Math.hypot(
+          this.playerPhys.x - wp.x,
+          this.playerPhys.z - wp.z
+        );
+        if (distWp < 8.5) {
+          this.spawnParticles(wp.x, wpY + 1.5, wp.z, 18, 0xc084fc, 8);
+          if (
+            activeContract &&
+            Math.hypot(
+              activeContract.targetX - wp.x,
+              activeContract.targetZ - wp.z
+            ) < 4
+          ) {
+            gameStore.completeStreetContract();
+          } else {
+            soundEngine.playPickup();
+            gameStore.setState({
+              customWaypoint: null,
+              lastOutcomeText: `Tiba di Tujuan GPS: ${wp.label}`,
+            });
+          }
+        }
+      }
+    } else {
+      this.waypointBeaconGroup.visible = false;
+    }
+
     return nextStoryMission;
   }
 
@@ -950,16 +1302,122 @@ export class PlayerController {
     nearbyMission: StoryMission | null;
     activeVehicle: VehicleEntity | null;
     spottedByPolice: boolean;
+    signalPhase: TrafficSignalPhase;
+    isDrifting: boolean;
   } {
+    this.damagePulse = Math.max(0, this.damagePulse - dt * 2.2);
+    if (this.muzzleLightTimer > 0) {
+      this.muzzleLightTimer = Math.max(0, this.muzzleLightTimer - dt);
+      this.muzzleFlashLight.intensity =
+        (this.muzzleLightTimer / 0.065) * 6.5;
+    } else {
+      this.muzzleFlashLight.intensity = 0;
+    }
     const isTpsAim = this.callbacks.getTpsAiming();
     const isWheelSlowMo = this.callbacks.getWheelSlowMo();
     const isCustomsOpen = this.callbacks.getCustomsOpen();
 
+    const storeState = gameStore.getState();
+    const isPhotoMode = storeState.photoModeOpen;
     if (this.hitstopTimer > 0) {
       this.hitstopTimer = Math.max(0, this.hitstopTimer - dt);
     }
-    const rawSimDt = this.hitstopTimer > 0 ? 0 : dt;
+    const rawSimDt = this.hitstopTimer > 0 || isPhotoMode ? 0 : dt;
     const simDt = isWheelSlowMo ? rawSimDt * 0.25 : rawSimDt;
+
+    // Poll HTML5 Gamepad API (60Hz) and merge with Virtual Touch Input Ref
+    let gpMoveX = 0;
+    let gpMoveY = 0;
+    let gpLookX = 0;
+    let gpLookY = 0;
+    let gpSprint = false;
+    let gpFireHeld = false;
+    let gpDriftHeld = false;
+
+    if (typeof navigator !== 'undefined' && navigator.getGamepads) {
+      const pads = navigator.getGamepads();
+      const pad = pads ? pads[0] || pads[1] || pads[2] || pads[3] : null;
+      if (pad && pad.connected) {
+        if (!virtualInputRef.gamepadConnected) {
+          virtualInputRef.gamepadConnected = true;
+          virtualInputRef.gamepadName = pad.id || 'Gamepad Controller';
+          gameStore.setState({ gamepadActive: true });
+        }
+        const deadzone = (v: number) => (Math.abs(v) < 0.16 ? 0 : v);
+        gpMoveX = deadzone(pad.axes[0] || 0);
+        gpMoveY = -deadzone(pad.axes[1] || 0);
+        gpLookX = deadzone(pad.axes[2] || 0);
+        gpLookY = deadzone(pad.axes[3] || 0);
+
+        const btnPressed = (idx: number) => Boolean(pad.buttons[idx]?.pressed);
+        const btnJustPressed = (idx: number) =>
+          btnPressed(idx) && !this.prevGamepadBtns[idx];
+
+        const rtVal = pad.buttons[7]?.value || 0;
+        const ltVal = pad.buttons[6]?.value || 0;
+        if (this.playerPhys.drivingVehicleId) {
+          if (rtVal > 0.12 || ltVal > 0.12) {
+            gpMoveY = rtVal - ltVal;
+          }
+          gpDriftHeld = btnPressed(0) || btnPressed(5); // A / RB handbrake drift
+        } else {
+          gpFireHeld = rtVal > 0.35 || btnPressed(0);
+          gpSprint = btnPressed(10) || btnPressed(1);
+        }
+
+        if (btnJustPressed(3)) {
+          // Y / Triangle -> Enter/Exit Vehicle
+          virtualInputRef.enterVehicleTap = true;
+        }
+        if (btnJustPressed(2)) {
+          // X / Square -> Attack or Horn
+          if (this.playerPhys.drivingVehicleId) {
+            virtualInputRef.hornTap = true;
+          } else {
+            virtualInputRef.fireTap = true;
+          }
+        }
+        if (btnJustPressed(4)) {
+          // LB / L1 -> Toggle Fokus / Nitro
+          virtualInputRef.fokusTap = true;
+        }
+        if (btnJustPressed(11)) {
+          // R3 -> Toggle TPS Aim
+          this.callbacks.onToggleTpsAim();
+        }
+
+        this.prevGamepadBtns = pad.buttons.map((b) => Boolean(b?.pressed));
+      } else if (virtualInputRef.gamepadConnected) {
+        virtualInputRef.gamepadConnected = false;
+        gameStore.setState({ gamepadActive: false });
+      }
+    }
+
+    // Apply virtual touch + gamepad camera look deltas
+    if (
+      Math.abs(virtualInputRef.lookDeltaX) > 0.001 ||
+      Math.abs(virtualInputRef.lookDeltaY) > 0.001 ||
+      Math.abs(gpLookX) > 0.01 ||
+      Math.abs(gpLookY) > 0.01
+    ) {
+      const yawDelta =
+        virtualInputRef.lookDeltaX * 0.0065 + gpLookX * 2.5 * dt;
+      const pitchDelta =
+        virtualInputRef.lookDeltaY * 0.0045 + gpLookY * 1.6 * dt;
+      virtualInputRef.lookDeltaX = 0;
+      virtualInputRef.lookDeltaY = 0;
+      if (isCustomsOpen) {
+        this.customsOrbitAngle += yawDelta;
+      } else {
+        this.camYaw -= yawDelta;
+        this.camPitch = THREE.MathUtils.clamp(
+          this.camPitch + pitchDelta,
+          0.08,
+          0.92
+        );
+        this.userOrbitTimer = 1.8;
+      }
+    }
 
     let nearbyInterior: EnterableInteriorSpec | null = null;
     if (pState.currentInterior === 'exterior') {
@@ -986,7 +1444,8 @@ export class PlayerController {
       }
     }
 
-    if (this.keysJustPressed.has('KeyF')) {
+    if (this.keysJustPressed.has('KeyF') || virtualInputRef.enterVehicleTap) {
+      virtualInputRef.enterVehicleTap = false;
       this.toggleEnterExitVehicle();
     }
     if (this.keysJustPressed.has('KeyG')) {
@@ -999,12 +1458,17 @@ export class PlayerController {
     if (this.keysJustPressed.has('KeyX')) {
       this.callbacks.onToggleTpsAim();
     }
+    if (this.keysJustPressed.has('KeyR') && this.playerPhys.drivingVehicleId) {
+      gameStore.cycleRadioStation();
+    }
     if (
       (this.keysJustPressed.has('AltLeft') ||
-        this.keysJustPressed.has('ControlLeft')) &&
+        this.keysJustPressed.has('ControlLeft') ||
+        virtualInputRef.rollTap) &&
       !this.playerPhys.drivingVehicleId &&
       this.playerPhys.combatRollTimer <= 0
     ) {
+      virtualInputRef.rollTap = false;
       this.playerPhys.combatRollTimer = 0.32;
       soundEngine.playTone(220, 0.12, 'triangle', 0.14, 1.5);
       this.spawnParticles(
@@ -1017,14 +1481,22 @@ export class PlayerController {
       );
     }
 
-    if (this.keysJustPressed.has('KeyK')) {
+    if (this.keysJustPressed.has('KeyK') || virtualInputRef.hornTap) {
+      virtualInputRef.hornTap = false;
       if (this.playerPhys.drivingVehicleId) {
         this.triggerHorn();
       } else {
         this.triggerPlayerAttack();
       }
-    } else if (this.keysJustPressed.has('Space') || this.mouseJustClicked) {
-      if (!this.playerPhys.drivingVehicleId) {
+    } else if (
+      this.keysJustPressed.has('Space') ||
+      this.mouseJustClicked ||
+      virtualInputRef.fireTap ||
+      virtualInputRef.fireHeld ||
+      gpFireHeld
+    ) {
+      virtualInputRef.fireTap = false;
+      if (!this.playerPhys.drivingVehicleId && !isPhotoMode) {
         this.triggerPlayerAttack();
       }
     }
@@ -1032,22 +1504,39 @@ export class PlayerController {
     let nearbyMission: StoryMission | null = null;
     if (!activeChoice && nextStoryMission) {
       nearbyMission = nextStoryMission;
-      if (this.keysJustPressed.has('KeyE')) {
+      if (this.keysJustPressed.has('KeyE') || virtualInputRef.interactTap) {
+        virtualInputRef.interactTap = false;
         this.callbacks.onOpenMissionDialog(nextStoryMission);
       }
     }
+    virtualInputRef.interactTap = false;
+    virtualInputRef.rollTap = false;
 
     this.keysJustPressed.clear();
     this.mouseJustClicked = false;
 
-    const moveForward =
+    const kbForward =
       (this.keysHeld.has('KeyW') || this.keysHeld.has('ArrowUp') ? 1 : 0) -
       (this.keysHeld.has('KeyS') || this.keysHeld.has('ArrowDown') ? 1 : 0);
-    const moveTurn =
+    const kbTurn =
       (this.keysHeld.has('KeyA') || this.keysHeld.has('ArrowLeft') ? 1 : 0) -
       (this.keysHeld.has('KeyD') || this.keysHeld.has('ArrowRight') ? 1 : 0);
+
+    const moveForward = THREE.MathUtils.clamp(
+      kbForward + virtualInputRef.moveY + gpMoveY,
+      -1,
+      1
+    );
+    const moveTurn = THREE.MathUtils.clamp(
+      kbTurn - virtualInputRef.moveX - gpMoveX,
+      -1,
+      1
+    );
     const sprinting =
-      this.keysHeld.has('ShiftLeft') || this.keysHeld.has('ShiftRight');
+      this.keysHeld.has('ShiftLeft') ||
+      this.keysHeld.has('ShiftRight') ||
+      virtualInputRef.sprintHeld ||
+      gpSprint;
 
     let activeVehicle: VehicleEntity | null = null;
     if (this.playerPhys.drivingVehicleId) {
@@ -1065,16 +1554,23 @@ export class PlayerController {
     const staminaMult = getPlayerStaminaSpeedMultiplier(pState);
 
     if (pState.currentInterior !== 'exterior') {
-      if (!this.savedExteriorPos) {
-        this.savedExteriorPos = {
-          x: this.playerPhys.x,
-          z: this.playerPhys.z,
-          facing: this.playerPhys.facing,
-        };
-        this.playerPhys.x = 0;
+      const roomCenterX = INTERIOR_ROOM_CENTERS[pState.currentInterior] ?? 0;
+      if (
+        !this.savedExteriorPos ||
+        Math.abs(this.playerPhys.x - roomCenterX) > 14
+      ) {
+        if (!this.savedExteriorPos) {
+          this.savedExteriorPos = {
+            x: this.playerPhys.x,
+            z: this.playerPhys.z,
+            facing: this.playerPhys.facing,
+          };
+        }
+        this.playerPhys.x = roomCenterX;
         this.playerPhys.z = 4.5;
         this.playerPhys.facing = Math.PI;
         this.camYaw = Math.PI;
+        this.cameraNeedsSnap = true;
       }
       const inputX = camFwdX * moveForward + camRightX * strafeRight;
       const inputZ = camFwdZ * moveForward + camRightZ * strafeRight;
@@ -1082,8 +1578,8 @@ export class PlayerController {
       if (mag > 0.01) {
         this.playerPhys.x = THREE.MathUtils.clamp(
           this.playerPhys.x + (inputX / mag) * 7.5 * staminaMult * simDt,
-          -11,
-          11
+          roomCenterX - 11,
+          roomCenterX + 11
         );
         this.playerPhys.z = THREE.MathUtils.clamp(
           this.playerPhys.z + (inputZ / mag) * 7.5 * staminaMult * simDt,
@@ -1109,7 +1605,21 @@ export class PlayerController {
         (pState.fokusActive ? 1.18 : 1.0) *
         rakaBoost;
 
-      if (moveForward !== 0) {
+      const prevSpeed = activeVehicle.speed;
+      const handbrakeHeld =
+        !vSpec.isAircraft &&
+        (this.keysHeld.has('Space') ||
+          virtualInputRef.driftHeld ||
+          gpDriftHeld);
+      const isDrifting =
+        handbrakeHeld &&
+        Math.abs(activeVehicle.speed) > 6.5 &&
+        Math.abs(moveTurn) > 0;
+      activeVehicle.isDrifting = isDrifting;
+
+      if (handbrakeHeld) {
+        activeVehicle.speed *= Math.exp(-1.9 * simDt);
+      } else if (moveForward !== 0) {
         activeVehicle.speed +=
           moveForward * vSpec.acceleration * turboMult * simDt;
       } else {
@@ -1124,15 +1634,28 @@ export class PlayerController {
       if (vSpec.isAircraft || Math.abs(activeVehicle.speed) > 0.4) {
         const dirSign =
           vSpec.isAircraft || activeVehicle.speed >= 0 ? 1 : -1;
-        activeVehicle.heading += moveTurn * vSpec.turnRate * dirSign * simDt;
+        const driftTurnBoost = isDrifting ? 1.52 : 1.0;
+        activeVehicle.heading +=
+          moveTurn * vSpec.turnRate * driftTurnBoost * dirSign * simDt;
       }
+
+      // Slip angle & lateral skid motion while handbrake drifting
+      const targetDriftAngle = isDrifting ? -moveTurn * 0.38 : 0;
+      activeVehicle.driftAngle = THREE.MathUtils.damp(
+        activeVehicle.driftAngle,
+        targetDriftAngle,
+        8,
+        simDt
+      );
+      const travelAngle =
+        activeVehicle.heading - activeVehicle.driftAngle * 0.55;
 
       const nextVX =
         activeVehicle.x +
-        Math.sin(activeVehicle.heading) * activeVehicle.speed * simDt;
+        Math.sin(travelAngle) * activeVehicle.speed * simDt;
       const nextVZ =
         activeVehicle.z +
-        Math.cos(activeVehicle.heading) * activeVehicle.speed * simDt;
+        Math.cos(travelAngle) * activeVehicle.speed * simDt;
 
       const surfaceElev = getGroundElevationAt(nextVX, nextVZ);
       if (vSpec.isAircraft) {
@@ -1170,21 +1693,150 @@ export class PlayerController {
       }
       activeVehicle.x = col.x;
       activeVehicle.z = col.z;
+
+      // Ground vehicle-to-vehicle physical collision pushback & momentum transfer
+      if (!vSpec.isAircraft || activeVehicle.y < 2.2) {
+        for (const other of this.traffic.vehicles) {
+          if (other.id === activeVehicle.id) continue;
+          if (Math.abs(other.y - activeVehicle.y) > 2.2) continue;
+          const otherSpec = VEHICLE_SPECS[other.type];
+          const minDist = vSpec.radius + otherSpec.radius;
+          const dxV = activeVehicle.x - other.x;
+          const dzV = activeVehicle.z - other.z;
+          const distSq = dxV * dxV + dzV * dzV;
+          if (distSq < minDist * minDist) {
+            const dist = Math.sqrt(distSq) || 0.01;
+            const nx = dxV / dist;
+            const nz = dzV / dist;
+            const overlap = minDist - dist;
+            activeVehicle.x += nx * overlap * 0.45;
+            activeVehicle.z += nz * overlap * 0.45;
+
+            const safeOther = resolveCircleAABBCollision(
+              other.x - nx * overlap * 0.65,
+              other.z - nz * overlap * 0.65,
+              otherSpec.radius,
+              undefined,
+              this.buildingGrid
+            );
+            other.x = safeOther.x;
+            other.z = safeOther.z;
+            other.mesh.position.set(other.x, other.y, other.z);
+
+            const impactSpeed = Math.abs(activeVehicle.speed);
+            if (impactSpeed > 6) {
+              activeVehicle.speed *= 0.58;
+              other.stopTimer = Math.max(other.stopTimer, 0.9);
+              this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.28);
+              this.spawnParticles(
+                (activeVehicle.x + other.x) * 0.5,
+                activeVehicle.y + 0.85,
+                (activeVehicle.z + other.z) * 0.5,
+                8,
+                0xfbbf24,
+                7
+              );
+              soundEngine.playPropCrash(0);
+            } else {
+              activeVehicle.speed *= 0.82;
+            }
+          }
+        }
+      }
+
+      // Damped 4-wheel spring suspension pitch (acceleration squat / brake dive) & body roll
+      const accelDelta = (activeVehicle.speed - prevSpeed) / Math.max(0.008, simDt);
+      const targetPitch = vSpec.isAircraft
+        ? -moveForward * 0.08
+        : THREE.MathUtils.clamp(-accelDelta * 0.0028, -0.075, 0.075);
+      activeVehicle.pitchAngle = THREE.MathUtils.damp(
+        activeVehicle.pitchAngle,
+        targetPitch,
+        9,
+        simDt
+      );
+
+      const speedLeanRatio = Math.min(1, Math.abs(activeVehicle.speed) / 14);
+      const targetRoll =
+        -moveTurn *
+        speedLeanRatio *
+        (vSpec.isAircraft ? 0.24 : isDrifting ? 0.12 : 0.08);
+      activeVehicle.rollAngle = THREE.MathUtils.damp(
+        activeVehicle.rollAngle,
+        targetRoll,
+        9,
+        simDt
+      );
+
       activeVehicle.mesh.position.set(
         activeVehicle.x,
         activeVehicle.y,
         activeVehicle.z
       );
-      activeVehicle.mesh.rotation.y = activeVehicle.heading;
-      const speedLeanRatio = Math.min(1, Math.abs(activeVehicle.speed) / 14);
-      const targetRoll =
-        -moveTurn * speedLeanRatio * (vSpec.isAircraft ? 0.22 : 0.075);
-      activeVehicle.mesh.rotation.z = THREE.MathUtils.damp(
-        activeVehicle.mesh.rotation.z,
-        targetRoll,
-        8,
-        simDt
-      );
+      activeVehicle.mesh.rotation.y =
+        activeVehicle.heading + activeVehicle.driftAngle * 0.45;
+      activeVehicle.mesh.rotation.x = activeVehicle.pitchAngle;
+      activeVehicle.mesh.rotation.z = activeVehicle.rollAngle;
+
+      // Tire smoke, asphalt skidmarks & live Drift Combo Scoring during drift
+      const driftSkillLv = pState.characterSkills?.driftControl ?? 1;
+      if (isDrifting && activeVehicle.y < 1.2) {
+        const driftIntensity = Math.min(1, Math.abs(activeVehicle.speed) / 18);
+        soundEngine.updateDriftAudio(driftIntensity, true);
+        this.driftChainTimer += simDt;
+        const mult = Math.min(
+          5,
+          1 + Math.floor(this.driftChainTimer / 1.4) + Math.floor((driftSkillLv - 1) * 0.5)
+        );
+        this.driftChainScore +=
+          Math.abs(activeVehicle.speed) * (1 + driftSkillLv * 0.18) * mult * simDt * 8;
+        if (
+          Math.round(this.driftChainScore) !== storeState.driftScore ||
+          mult !== storeState.driftMultiplier
+        ) {
+          gameStore.setState({
+            driftScore: Math.round(this.driftChainScore),
+            driftMultiplier: mult,
+          });
+        }
+        this.skidSpawnAccum += simDt;
+        if (this.skidSpawnAccum >= 0.045) {
+          this.skidSpawnAccum = 0;
+          this.dropSkidmarkPair(
+            activeVehicle.x,
+            activeVehicle.y,
+            activeVehicle.z,
+            activeVehicle.heading
+          );
+          const backX = activeVehicle.x - Math.sin(activeVehicle.heading) * 1.3;
+          const backZ = activeVehicle.z - Math.cos(activeVehicle.heading) * 1.3;
+          this.spawnParticles(backX, activeVehicle.y + 0.25, backZ, 2, 0xcbd5e1, 3.2);
+        }
+      } else {
+        soundEngine.updateDriftAudio(0, false);
+        if (this.driftChainScore >= 120) {
+          const bonusRp = Math.round(this.driftChainScore * 35);
+          const pts = Math.round(this.driftChainScore);
+          this.driftChainScore = 0;
+          this.driftChainTimer = 0;
+          soundEngine.playPickup();
+          gameStore.updatePlayerState((prev) => ({
+            ...prev,
+            rupiah: prev.rupiah + bonusRp,
+            score: prev.score + pts,
+            bestScore: Math.max(prev.bestScore, prev.score + pts),
+          }));
+          gameStore.setState({
+            driftScore: 0,
+            driftMultiplier: 1,
+            lastOutcomeText: `Kombo Drift Malam Tuntas: +${pts.toLocaleString('id-ID')} Poin (+Rp ${bonusRp.toLocaleString('id-ID')})`,
+          });
+        } else if (this.driftChainScore > 0) {
+          this.driftChainScore = 0;
+          this.driftChainTimer = 0;
+          gameStore.setState({ driftScore: 0, driftMultiplier: 1 });
+        }
+      }
 
       this.playerPhys.x = activeVehicle.x;
       this.playerPhys.y = activeVehicle.y;
@@ -1206,6 +1858,7 @@ export class PlayerController {
         }
       }
     } else if (simDt > 0) {
+      soundEngine.updateDriftAudio(0, false);
       if (this.savedExteriorPos) {
         this.playerPhys.x = this.savedExteriorPos.x;
         this.playerPhys.z = this.savedExteriorPos.z;
@@ -1381,8 +2034,15 @@ export class PlayerController {
 
       if (distC > 0.35) {
         const stepC = Math.min(distC, 9.2 * simDt);
-        comp.x += (dxC / distC) * stepC;
-        comp.z += (dzC / distC) * stepC;
+        const safeCrew = resolveCircleAABBCollision(
+          comp.x + (dxC / distC) * stepC,
+          comp.z + (dzC / distC) * stepC,
+          0.65,
+          undefined,
+          this.buildingGrid
+        );
+        comp.x = safeCrew.x;
+        comp.z = safeCrew.z;
         comp.facing = Math.atan2(dxC, dzC);
         comp.walkDist += stepC;
         const swing = Math.sin(comp.walkDist * 2.2) * 0.5;
@@ -1437,7 +2097,7 @@ export class PlayerController {
       comp.rig.group.rotation.y = comp.facing;
     }
 
-    let spottedByPolice = this.traffic.stepTrafficAI(
+    const trafficRes = this.traffic.stepTrafficAI(
       simDt,
       nowMs,
       this.playerPhys.drivingVehicleId,
@@ -1449,6 +2109,8 @@ export class PlayerController {
       nightFactor,
       isWheelSlowMo
     );
+    let spottedByPolice = trafficRes.spottedByPolice;
+    const signalPhase = trafficRes.signalPhase;
 
     if (pState.wantedLevel > 0) {
       for (const en of this.enemies) {
@@ -1554,7 +2216,13 @@ export class PlayerController {
             this.playerPhys.combatRollTimer <= 0
           ) {
             this.callbacks.onPlayerDamage(spec.damage);
+            this.damagePulse = 1.0;
             this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.35);
+            const hitAngle = Math.atan2(
+              en.x - this.playerPhys.x,
+              en.z - this.playerPhys.z
+            ) - this.camYaw;
+            this.callbacks.onPlayerHitAngle?.(hitAngle);
             soundEngine.playHit(false);
             this.spawnParticles(
               this.playerPhys.x,
@@ -1598,16 +2266,11 @@ export class PlayerController {
       this.spawnEnemyGroup(this.playerPhys.x - 16, this.playerPhys.z - 16, 2);
     }
 
-    // Update Zero-GC Pooled Particles
+    // Update Zero-GC Compacted Pooled Particles (draw only live count)
+    let activeParticleCount = 0;
     for (let i = 0; i < PARTICLE_CAP; i++) {
       const p = this.particles[i];
-      if (!p.active) {
-        this._v1.set(0, -100, 0);
-        this._scale.setScalar(0.001);
-        this._mat4.compose(this._v1, this._quat.identity(), this._scale);
-        this.particleInst.setMatrixAt(i, this._mat4);
-        continue;
-      }
+      if (!p.active) continue;
       p.life += dt;
       if (p.life >= p.maxLife) {
         p.active = false;
@@ -1622,14 +2285,49 @@ export class PlayerController {
       this._v1.set(p.x, Math.max(0.05, p.y), p.z);
       this._scale.setScalar(p.size * t);
       this._mat4.compose(this._v1, this._quat.identity(), this._scale);
-      this.particleInst.setMatrixAt(i, this._mat4);
+      this.particleInst.setMatrixAt(activeParticleCount, this._mat4);
       this._color.setHex(p.colorHex);
-      this.particleInst.setColorAt(i, this._color);
+      this.particleInst.setColorAt(activeParticleCount, this._color);
+      activeParticleCount++;
     }
-    this.particleInst.instanceMatrix.needsUpdate = true;
-    if (this.particleInst.instanceColor) {
-      this.particleInst.instanceColor.needsUpdate = true;
+    this.particleInst.count = activeParticleCount;
+    if (activeParticleCount > 0 || this.prevParticleCount > 0) {
+      this.particleInst.instanceMatrix.needsUpdate = true;
+      if (this.particleInst.instanceColor) {
+        this.particleInst.instanceColor.needsUpdate = true;
+      }
     }
+    this.prevParticleCount = activeParticleCount;
+
+    // Update Compacted Pooled Bullet Tracers
+    let activeTracerCount = 0;
+    for (let i = 0; i < TRACER_CAP; i++) {
+      const tr = this.tracers[i];
+      if (!tr.active) continue;
+      tr.life += dt;
+      if (tr.life >= tr.maxLife) {
+        tr.active = false;
+        continue;
+      }
+      const alphaScale = Math.max(0.1, 1 - tr.life / tr.maxLife);
+      this._v1.set(tr.midX, tr.midY, tr.midZ);
+      this._euler.set(0, tr.yaw, 0);
+      this._quat.setFromEuler(this._euler);
+      this._scale.set(alphaScale, alphaScale, tr.length);
+      this._mat4.compose(this._v1, this._quat, this._scale);
+      this.tracerInst.setMatrixAt(activeTracerCount, this._mat4);
+      this._color.setHex(tr.colorHex);
+      this.tracerInst.setColorAt(activeTracerCount, this._color);
+      activeTracerCount++;
+    }
+    this.tracerInst.count = activeTracerCount;
+    if (activeTracerCount > 0 || this.prevTracerCount > 0) {
+      this.tracerInst.instanceMatrix.needsUpdate = true;
+      if (this.tracerInst.instanceColor) {
+        this.tracerInst.instanceColor.needsUpdate = true;
+      }
+    }
+    this.prevTracerCount = activeTracerCount;
 
     // Camera Choreography
     if (this.userOrbitTimer > 0) {
@@ -1644,17 +2342,40 @@ export class PlayerController {
             Math.max(1, VEHICLE_SPECS[activeVehicle.type].maxSpeed)
         )
       : 0;
-    const targetFov = isTpsAim
+    const photoCfg = storeState.photoConfig;
+    const targetFov = isPhotoMode
+      ? photoCfg.fov
+      : isTpsAim
       ? 46
       : isDriving
-      ? 60 + speedRatio * 10 + (pState.fokusActive ? 3.5 : 0)
+      ? 60 + speedRatio * 12 + (pState.fokusActive ? 4.5 : 0)
       : 60;
     if (Math.abs(camera.fov - targetFov) > 0.15) {
       camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, dt * 8);
       camera.updateProjectionMatrix();
     }
 
-    if (this.skySwitch.active) {
+    if (isPhotoMode) {
+      // Photo Mode Free-Orbit & Dutch Roll Camera
+      this.playerRig.group.visible =
+        !this.playerPhys.drivingVehicleId && !photoCfg.hidePlayer;
+      const focusX = activeVehicle ? activeVehicle.x : this.playerPhys.x;
+      const focusY = activeVehicle ? activeVehicle.y : this.playerPhys.y;
+      const focusZ = activeVehicle ? activeVehicle.z : this.playerPhys.z;
+      const orbitAng = this.camYaw + photoCfg.orbitOffset;
+      const dist = photoCfg.distance;
+      const targetCamX = focusX - Math.sin(orbitAng) * dist;
+      const targetCamZ = focusZ - Math.cos(orbitAng) * dist;
+      const targetCamY = focusY + photoCfg.heightOffset + Math.sin(this.camPitch) * 3.5;
+
+      camera.position.x = THREE.MathUtils.damp(camera.position.x, targetCamX, 10, dt);
+      camera.position.y = THREE.MathUtils.damp(camera.position.y, targetCamY, 10, dt);
+      camera.position.z = THREE.MathUtils.damp(camera.position.z, targetCamZ, 10, dt);
+      camera.lookAt(focusX, focusY + 1.25, focusZ);
+      if (Math.abs(photoCfg.rollDeg) > 0.1) {
+        camera.rotateZ((photoCfg.rollDeg * Math.PI) / 180);
+      }
+    } else if (this.skySwitch.active) {
       this.skySwitch.elapsed += dt;
       const progress = Math.min(
         1,
@@ -1706,8 +2427,40 @@ export class PlayerController {
       if (progress >= 1) {
         this.skySwitch.active = false;
       }
+    } else if (this.cutsceneDirector.active) {
+      this.cutsceneDirector.elapsed += dt;
+      const panAngle = this.cutsceneDirector.elapsed * 0.42;
+      const focusY = getGroundElevationAt(
+        this.cutsceneDirector.focusX,
+        this.cutsceneDirector.focusZ
+      );
+      camera.position.set(
+        THREE.MathUtils.lerp(
+          camera.position.x,
+          this.cutsceneDirector.focusX + Math.sin(panAngle) * 14,
+          1 - Math.exp(-3.5 * dt)
+        ),
+        THREE.MathUtils.lerp(
+          camera.position.y,
+          focusY + 6.5,
+          1 - Math.exp(-3.5 * dt)
+        ),
+        THREE.MathUtils.lerp(
+          camera.position.z,
+          this.cutsceneDirector.focusZ + Math.cos(panAngle) * 14,
+          1 - Math.exp(-3.5 * dt)
+        )
+      );
+      camera.lookAt(
+        this.cutsceneDirector.focusX,
+        focusY + 2.0,
+        this.cutsceneDirector.focusZ
+      );
+      if (this.cutsceneDirector.elapsed >= this.cutsceneDirector.duration) {
+        this.cutsceneDirector.active = false;
+      }
     } else if (isCustomsOpen) {
-      this.customsOrbitAngle += dt * 0.65;
+      const preset = storeState.garageCameraPreset;
       const focusVeh =
         activeVehicle ||
         this.traffic.vehicles.find((v) => v.type === 'supercar') ||
@@ -1715,13 +2468,54 @@ export class PlayerController {
       const vx = focusVeh ? focusVeh.x : this.playerPhys.x;
       const vy = focusVeh ? focusVeh.y : this.playerPhys.y;
       const vz = focusVeh ? focusVeh.z : this.playerPhys.z;
-      camera.position.set(
-        vx + Math.cos(this.customsOrbitAngle) * 7.2,
-        vy + 2.6,
-        vz + Math.sin(this.customsOrbitAngle) * 7.2
-      );
-      camera.lookAt(vx, vy + 0.9, vz);
+      const vHeading = focusVeh ? focusVeh.heading : this.playerPhys.facing;
+
+      let targetCamX = vx;
+      let targetCamY = vy + 2.6;
+      let targetCamZ = vz;
+      let lookY = vy + 0.9;
+
+      if (preset === 'free_orbit') {
+        if (!this.isOrbitDragging) {
+          this.customsOrbitAngle += dt * 0.55;
+        }
+        targetCamX = vx + Math.cos(this.customsOrbitAngle) * 7.2;
+        targetCamY = vy + 2.5;
+        targetCamZ = vz + Math.sin(this.customsOrbitAngle) * 7.2;
+      } else if (preset === 'front_low') {
+        const ang = vHeading + 0.32;
+        targetCamX = vx + Math.sin(ang) * 4.8;
+        targetCamY = vy + 1.05;
+        targetCamZ = vz + Math.cos(ang) * 4.8;
+        lookY = vy + 0.65;
+      } else if (preset === 'side_profile') {
+        const ang = vHeading + Math.PI * 0.5;
+        targetCamX = vx + Math.sin(ang) * 5.8;
+        targetCamY = vy + 1.35;
+        targetCamZ = vz + Math.cos(ang) * 5.8;
+        lookY = vy + 0.7;
+      } else if (preset === 'rear_exhaust') {
+        const ang = vHeading + Math.PI - 0.35;
+        targetCamX = vx + Math.sin(ang) * 5.0;
+        targetCamY = vy + 1.25;
+        targetCamZ = vz + Math.cos(ang) * 5.0;
+        lookY = vy + 0.72;
+      } else if (preset === 'top_down') {
+        const ang = vHeading + 0.2;
+        targetCamX = vx + Math.sin(ang) * 3.8;
+        targetCamY = vy + 7.2;
+        targetCamZ = vz + Math.cos(ang) * 3.8;
+        lookY = vy + 0.5;
+      }
+
+      camera.position.x = THREE.MathUtils.damp(camera.position.x, targetCamX, 8.5, dt);
+      camera.position.y = THREE.MathUtils.damp(camera.position.y, targetCamY, 8.5, dt);
+      camera.position.z = THREE.MathUtils.damp(camera.position.z, targetCamZ, 8.5, dt);
+      camera.lookAt(vx, lookY, vz);
     } else {
+      if (!this.playerPhys.drivingVehicleId && !this.playerRig.group.visible) {
+        this.playerRig.group.visible = true;
+      }
       if (
         isDriving &&
         activeVehicle &&
@@ -1760,23 +2554,35 @@ export class PlayerController {
         desiredZ += orbitRightZ * 1.1;
       }
 
+      const pulledCam = resolveCameraWallPullIn(
+        this.playerPhys.x,
+        this.playerPhys.z,
+        desiredX,
+        desiredY,
+        desiredZ,
+        this.buildingGrid
+      );
+
       const dampFactor =
-        Math.abs(camera.position.y - desiredY) > 25
+        this.cameraNeedsSnap ||
+        Math.abs(camera.position.y - pulledCam.y) > 25
           ? 1
           : 1 - Math.exp(-(isTpsAim ? 14 : 9.5) * dt);
+      this.cameraNeedsSnap = false;
+
       camera.position.x = THREE.MathUtils.lerp(
         camera.position.x,
-        desiredX,
+        pulledCam.x,
         dampFactor
       );
       camera.position.y = THREE.MathUtils.lerp(
         camera.position.y,
-        desiredY,
+        pulledCam.y,
         dampFactor
       );
       camera.position.z = THREE.MathUtils.lerp(
         camera.position.z,
-        desiredZ,
+        pulledCam.z,
         dampFactor
       );
 
@@ -1802,6 +2608,8 @@ export class PlayerController {
       nearbyMission,
       activeVehicle,
       spottedByPolice,
+      signalPhase,
+      isDrifting: Boolean(activeVehicle?.isDrifting),
     };
   }
 
@@ -1809,6 +2617,7 @@ export class PlayerController {
     dt: number,
     camera: THREE.PerspectiveCamera
   ): void {
+    this.cameraNeedsSnap = true;
     this.tourElapsed += dt;
     const orbitAngle = this.tourElapsed * 0.22;
     const camX = Math.sin(orbitAngle) * 46;
@@ -1844,7 +2653,12 @@ export class PlayerController {
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
     window.removeEventListener('contextmenu', this.onContextMenu);
+    soundEngine.stopDriftAudio();
     this.particleGeo.dispose();
     this.particleMat.dispose();
+    this.tracerGeo.dispose();
+    this.tracerMat.dispose();
+    this.skidGeo.dispose();
+    this.skidMat.dispose();
   }
 }

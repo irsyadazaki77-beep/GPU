@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { TRAFFIC_ROUTES, stepTrafficVehicleAI } from '../racing';
 import { CITY_BUILDINGS, WORLD_MAX_BOUND } from './bounds';
 import {
   SpatialHashGrid,
@@ -7,7 +8,9 @@ import {
   hash2D,
   isNearBuilding,
   isOnRoadway,
+  resolveCameraWallPullIn,
   resolveCircleAABBCollision,
+  stepSidewalkPatrol,
 } from './spatial';
 
 test('hash2D returns deterministic normalized numbers in [0, 1)', () => {
@@ -90,4 +93,54 @@ test('createBuildingSpatialGrid and resolveCircleAABBCollision match linear coll
   assert.equal(outOfBounds.collided, true);
   assert.equal(outOfBounds.x <= WORLD_MAX_BOUND, true);
   assert.equal(outOfBounds.z >= -WORLD_MAX_BOUND, true);
+});
+
+test('resolveCameraWallPullIn pulls camera boom in front of obstructing buildings and leaves clear rays untouched', () => {
+  const grid = createBuildingSpatialGrid(CITY_BUILDINGS, 18);
+
+  // Clear open avenue behind player at (0, 26)
+  const clearCam = resolveCameraWallPullIn(0, 26, 0, 4.5, 35.4, grid);
+  assert.equal(clearCam.pulledIn, false);
+  assert.equal(clearCam.x, 0);
+  assert.equal(clearCam.z, 35.4);
+
+  // Obstructed boom reaching behind Wisma Nabilo (-22, -42, width 12, depth 12)
+  const blockedCam = resolveCameraWallPullIn(-12, -42, -26, 4.5, -42, grid);
+  assert.equal(blockedCam.pulledIn, true);
+  assert.equal(blockedCam.x > -16.5, true);
+  assert.equal(blockedCam.y >= 4.5, true);
+});
+
+test('stepSidewalkPatrol constrains pedestrians inside assigned sidewalk bounds and reverses at curb ends', () => {
+  const stepFwd = stepSidewalkPatrol(9.2, 23.8, 1, 2.0, 0.5, 7.05, 11.35, 19, 25, 'ns', 0.5);
+  assert.equal(stepFwd.x >= 7.55 && stepFwd.x <= 10.85, true);
+  assert.equal(stepFwd.z <= 24.5, true);
+  assert.equal(stepFwd.dir, -1);
+
+  const stepClamp = stepSidewalkPatrol(5.0, 22.0, 1, 1.5, 0.2, 7.05, 11.35, 19, 25, 'ew', 0.5);
+  assert.equal(stepClamp.x >= 7.55 && stepClamp.x <= 10.85, true);
+});
+
+test('stepTrafficVehicleAI uses provided buildingGrid to keep ground AI vehicles out of buildings', () => {
+  const grid = createBuildingSpatialGrid(CITY_BUILDINGS, 18);
+  const bldg = CITY_BUILDINGS[1];
+  const next = stepTrafficVehicleAI(
+    {
+      vehicleType: 'sedan',
+      x: bldg.x - bldg.width * 0.5 - 0.5,
+      z: bldg.z,
+      heading: Math.PI / 2,
+      speed: 10,
+      waypointIndex: 0,
+      stopTimer: 0,
+      preferredSpeed: 12,
+      layer: 'ground',
+    },
+    TRAFFIC_ROUTES.ring_clockwise,
+    30,
+    0.1,
+    { buildingGrid: grid }
+  );
+
+  assert.equal(next.x <= bldg.x - bldg.width * 0.5, true);
 });

@@ -1,22 +1,36 @@
 import React, { useState } from 'react';
 import {
+  CHARACTER_SKILL_SPECS,
   JAKARTA_DISTRICTS,
   JAKARTA_PROPERTIES,
   JAKARTA_STOCKS,
   PROTAGONIST_PROFILES,
-  PlayerProgressState,
-  ProtagonistId,
   RADIO_STATIONS,
-  RadioStationId,
   STORY_MISSIONS,
-  StoryMission,
+  SaveSlotId,
   WEATHER_MODES,
-  WeatherMode,
   calculatePassivePropertyIncome,
+  calculateTurfWarsIncome,
   formatRupiah,
   getDominantFactionTitle,
 } from '../game/rules';
+import {
+  exportSavedGameJson,
+  listSaveSlotSummaries,
+  parseImportedSaveJson,
+  saveGameSnapshot,
+} from '../game/save';
+import type {
+  GraphicsQualityTier,
+  PlayerProgressState,
+  ProtagonistId,
+  RadioStationId,
+  StoryMission,
+  TouchControlsMode,
+  WeatherMode,
+} from '../game/types';
 import { gameStore, useGameStore } from '../state/gameStore';
+import { InteractiveWorldMap } from './InteractiveWorldMap';
 
 interface StatusModalProps {
   mode: 'paused' | 'victory' | 'defeat';
@@ -28,12 +42,14 @@ interface StatusModalProps {
   onRestart: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onReturnTitle: () => void;
   onFastTravel?: (districtId: string) => void;
+  onTeleportCoords?: (x: number, z: number, label: string) => void;
   onTriggerMissionDialog?: (mission: StoryMission) => void;
   onChangeWeather?: (mode: WeatherMode) => void;
   onChangeRadio?: (station: RadioStationId) => void;
   onToggleMute?: () => void;
   onOpenHeistBoard?: () => void;
   onOpenCustomsGarage?: () => void;
+  onOpenPhotoMode?: () => void;
 }
 
 type PauseTab = 'peta' | 'misi' | 'aset' | 'kontrol';
@@ -47,12 +63,12 @@ const CONTROL_GROUPS: {
     items: [
       { keycap: 'W A S D', action: 'Berjalan, berlari, atau mengemudikan kendaraan' },
       { keycap: 'Seret Mouse', action: 'Putar kamera orbit 360° mengikuti pandangan' },
-      { keycap: 'Spasi / Klik', action: 'Menembak atau menyerang jarak dekat' },
+      { keycap: 'Spasi / Klik', action: 'Menembak, menyerang, atau Rem Tangan Drift (di mobil)' },
       { keycap: 'X / Klik Kanan', action: 'Aktifkan bidikan bahu TPS presisi' },
       { keycap: 'Q', action: 'Aktifkan kemampuan khusus / Nitro kendaraan' },
-      { keycap: 'F', action: 'Masuk atau keluar dari kendaraan terdekat' },
+      { keycap: 'F / R', action: 'Masuk/keluar kendaraan (F) atau Ganti Radio FM saat mengemudi (R)' },
       { keycap: 'K', action: 'Bunyikan klakson (reaksi ojol & angkot)' },
-      { keycap: 'G', action: 'Masuk atau keluar interior gedung' },
+      { keycap: 'G', action: 'Masuk atau keluar 4 ruang interior 3D gedung' },
       { keycap: 'E', action: 'Bicara dengan pemberi misi terdekat' },
     ],
   },
@@ -64,9 +80,12 @@ const CONTROL_GROUPS: {
       { keycap: 'Tab', action: 'Buka atau tutup smartphone iFruit OS' },
       { keycap: 'H', action: 'Buka Papan Strategi Grand Heist' },
       { keycap: 'B', action: 'Buka Bengkel Kustom 360°' },
+      { keycap: 'N', action: 'Buka Studio Kamera Sinematik (Photo Mode)' },
+      { keycap: 'U', action: 'Mode Layar Bersih (Sembunyikan HUD Sekunder)' },
       { keycap: 'Z', action: 'Aktifkan Drone Rajawali' },
       { keycap: 'V / M', action: 'Ganti cuaca Jakarta / Senyapkan audio' },
-      { keycap: 'Esc / P', action: 'Buka atau tutup Pause Menu Terpadu' },
+      { keycap: 'Esc / P', action: 'Buka atau tutup Pause Menu & Peta Taktis' },
+      { keycap: 'Gamepad', action: 'Stik Kiri/Kanan, RT Tembak/Gas, A/B/X/Y Aksi' },
     ],
   },
 ];
@@ -81,17 +100,26 @@ export const StatusModal: React.FC<StatusModalProps> = ({
   onRestart,
   onReturnTitle,
   onFastTravel,
+  onTeleportCoords,
   onTriggerMissionDialog,
   onChangeWeather,
   onChangeRadio,
   onToggleMute,
   onOpenHeistBoard,
   onOpenCustomsGarage,
+  onOpenPhotoMode,
 }) => {
   const [activeTab, setActiveTab] = useState<PauseTab>('peta');
+  const [saveToast, setSaveToast] = useState<string | null>(null);
   const audioVolumes = useGameStore((s) => s.audioVolumes);
+  const gameSettings = useGameStore((s) => s.gameSettings);
+  const resolvedGraphicsTier = useGameStore((s) => s.resolvedGraphicsTier);
+  const activeSaveSlot = useGameStore((s) => s.activeSaveSlot);
+  const slotSummaries = listSaveSlotSummaries();
   const dominant = getDominantFactionTitle(snapshot.reputation);
-  const passiveIncome = calculatePassivePropertyIncome(snapshot.ownedProperties);
+  const passiveIncome =
+    calculatePassivePropertyIncome(snapshot.ownedProperties) +
+    calculateTurfWarsIncome(snapshot);
 
   /* ==================== VICTORY / WASTED WIDESCREEN STAMP ==================== */
   if (mode !== 'paused') {
@@ -256,64 +284,36 @@ export const StatusModal: React.FC<StatusModalProps> = ({
 
       {/* Main Pause Tab Content */}
       <div className="flex-1 overflow-y-auto w-full max-w-6xl mx-auto px-6 py-6">
-        {/* TAB 1: PETA & DISTRIK */}
+        {/* TAB 1: PETA INTERAKTIF & GPS WAYPOINT */}
         {activeTab === 'peta' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-8 flex flex-col gap-3">
-              <div className="flex items-baseline justify-between">
-                <h3 className="font-display text-xl font-bold uppercase text-[#f4f1ea]">
-                  13 Distrik Jakarta
-                </h3>
-                <span className="text-xs text-[#94a3b8]">
-                  Klik distrik untuk fast travel instan
-                </span>
-              </div>
+          <div className="flex flex-col gap-5">
+            <InteractiveWorldMap
+              playerState={snapshot}
+              onFastTravel={onFastTravel}
+              onTeleportCoords={onTeleportCoords}
+              onTriggerMissionDialog={onTriggerMissionDialog}
+              onResumeGame={onResume}
+            />
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {JAKARTA_DISTRICTS.map((d) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => {
-                      onFastTravel?.(d.id);
-                      onResume();
-                    }}
-                    className="p-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/8 text-left flex items-center justify-between gap-3 cursor-pointer transition-colors"
-                  >
-                    <div className="min-w-0">
-                      <div className="font-display text-base font-bold uppercase text-[#f4f1ea] truncate">
-                        {d.name}
-                      </div>
-                      <div className="text-xs text-[#94a3b8] truncate">
-                        {d.subtitle}
-                      </div>
-                    </div>
-                    <span className="text-xs font-medium text-[#38bdf8] shrink-0">
-                      Menuju
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="lg:col-span-4 flex flex-col gap-4">
-              <div className="aaa-glass rounded-xl p-5 flex flex-col gap-3">
-                <h3 className="font-display text-xl font-bold uppercase text-[#f4f1ea]">
-                  Akses Operasi Taktis
+            <div className="aaa-glass rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-display text-lg font-bold uppercase text-[#f4f1ea]">
+                  Pintasan Komando & Studio Taktis
                 </h3>
-                <p className="text-xs text-[#94a3b8] leading-relaxed">
-                  Kelola rencana perampokan Grand Heist atau modifikasi kendaraan 360° langsung dari sini.
+                <p className="text-xs text-[#94a3b8]">
+                  Akses cepat ke ruang strategi Grand Heist, Bengkel Kustom 360°, atau Studio Kamera Sinematik.
                 </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {
                     onResume();
                     onOpenHeistBoard?.();
                   }}
-                  className="w-full py-2.5 px-4 rounded-lg bg-[#f59e0b] hover:bg-[#fbbf24] text-[#090c12] font-semibold text-xs cursor-pointer text-left flex items-center justify-between"
+                  className="py-2 px-3.5 rounded-lg bg-[#f59e0b] hover:bg-[#fbbf24] text-[#090c12] font-semibold text-xs cursor-pointer whitespace-nowrap"
                 >
-                  <span>Papan Strategi Grand Heist</span>
-                  <span className="font-mono-num">[H]</span>
+                  Papan Grand Heist [H]
                 </button>
                 <button
                   type="button"
@@ -321,10 +321,19 @@ export const StatusModal: React.FC<StatusModalProps> = ({
                     onResume();
                     onOpenCustomsGarage?.();
                   }}
-                  className="w-full py-2.5 px-4 rounded-lg bg-white/10 hover:bg-white/15 text-[#f4f1ea] font-semibold text-xs cursor-pointer text-left flex items-center justify-between"
+                  className="py-2 px-3.5 rounded-lg bg-white/10 hover:bg-white/15 text-[#f4f1ea] font-semibold text-xs cursor-pointer whitespace-nowrap"
                 >
-                  <span>Bengkel Kustom 360°</span>
-                  <span className="font-mono-num text-[#c084fc]">[B]</span>
+                  Bengkel Kustom 360° [B]
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onResume();
+                    onOpenPhotoMode?.();
+                  }}
+                  className="py-2 px-3.5 rounded-lg bg-[#38bdf8]/20 hover:bg-[#38bdf8]/30 border border-[#38bdf8]/40 text-[#38bdf8] font-semibold text-xs cursor-pointer whitespace-nowrap"
+                >
+                  Photo Mode Sinematik [N]
                 </button>
               </div>
             </div>
@@ -462,18 +471,24 @@ export const StatusModal: React.FC<StatusModalProps> = ({
 
             <div className="aaa-glass rounded-xl p-5 flex flex-col gap-3">
               <h3 className="font-display text-xl font-bold uppercase text-[#f4f1ea]">
-                Properti Dimiliki ({snapshot.ownedProperties.length})
+                Skill Karakter & Properti ({snapshot.ownedProperties.length})
               </h3>
-              {snapshot.ownedProperties.length === 0 ? (
-                <p className="text-xs text-[#94a3b8]">
-                  Belum ada properti yang dibeli. Kunjungi aplikasi Properti di iFruit Phone.
-                </p>
-              ) : (
-                <div className="divide-y divide-white/10 text-xs">
+              <div className="divide-y divide-white/10 text-xs">
+                {CHARACTER_SKILL_SPECS.map((sk) => (
+                  <div key={sk.id} className="py-1.5 flex justify-between">
+                    <span className="text-[#cbd5e1]">{sk.name}</span>
+                    <span className="font-mono-num font-bold text-[#38bdf8]">
+                      Lv.{snapshot.characterSkills?.[sk.id] ?? 1} / 5
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {snapshot.ownedProperties.length > 0 && (
+                <div className="divide-y divide-white/10 text-xs pt-2 border-t border-white/10">
                   {JAKARTA_PROPERTIES.filter((p) =>
                     snapshot.ownedProperties.includes(p.id)
                   ).map((p) => (
-                    <div key={p.id} className="py-2 flex justify-between">
+                    <div key={p.id} className="py-1.5 flex justify-between">
                       <span className="text-[#f4f1ea]">{p.name}</span>
                       <span className="font-mono-num text-[#22c55e]">
                         +{formatRupiah(p.incomePerTick)}
@@ -592,6 +607,123 @@ export const StatusModal: React.FC<StatusModalProps> = ({
                     ))}
                   </div>
                 </div>
+
+                {/* AAA Visual Quality, Voice Acting & Cinematic Camera */}
+                <div className="pt-2 border-t border-white/10 flex flex-col gap-3">
+                  <div>
+                    <div className="flex items-center justify-between text-xs mb-2">
+                      <span className="text-[#94a3b8]">Kualitas Grafis AAA</span>
+                      <span className="font-mono-num text-[#38bdf8] uppercase">
+                        Aktif: {resolvedGraphicsTier}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {(
+                        [
+                          { id: 'auto', label: 'Auto 60 FPS' },
+                          { id: 'performance', label: 'Performance' },
+                          { id: 'balanced', label: 'Balanced' },
+                          { id: 'ultra', label: 'Ultra' },
+                        ] as { id: GraphicsQualityTier; label: string }[]
+                      ).map((tier) => (
+                        <button
+                          key={tier.id}
+                          type="button"
+                          onClick={() =>
+                            gameStore.setGameSettings({ graphicsTier: tier.id })
+                          }
+                          className={`py-2 px-3 rounded-lg text-xs font-medium cursor-pointer ${
+                            gameSettings.graphicsTier === tier.id
+                              ? 'bg-[#38bdf8] text-[#090c12] font-bold'
+                              : 'bg-white/5 text-[#cbd5e1] hover:bg-white/10'
+                          }`}
+                        >
+                          {tier.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-[#cbd5e1]">
+                      Sulih Suara NPC (Voice Acting)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        gameStore.setGameSettings({
+                          voiceActingEnabled: !gameSettings.voiceActingEnabled,
+                        })
+                      }
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                        gameSettings.voiceActingEnabled
+                          ? 'bg-[#22c55e]/20 text-[#22c55e]'
+                          : 'bg-white/10 text-[#94a3b8]'
+                      }`}
+                    >
+                      {gameSettings.voiceActingEnabled ? 'Aktif' : 'Nonaktif'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-[#cbd5e1]">
+                      Kamera Sinematik 2.39:1
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        gameStore.setGameSettings({
+                          cinematicCameraEnabled:
+                            !gameSettings.cinematicCameraEnabled,
+                        })
+                      }
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                        gameSettings.cinematicCameraEnabled
+                          ? 'bg-[#22c55e]/20 text-[#22c55e]'
+                          : 'bg-white/10 text-[#94a3b8]'
+                      }`}
+                    >
+                      {gameSettings.cinematicCameraEnabled ? 'Aktif' : 'Nonaktif'}
+                    </button>
+                  </div>
+
+                  {/* Mobile Touch Overlay Mode Selector */}
+                  <div>
+                    <div className="text-xs text-[#94a3b8] mb-2">
+                      Overlay Kontrol Sentuh Mobile
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {(
+                        [
+                          { id: 'auto', label: 'Otomatis' },
+                          { id: 'on', label: 'Selalu Aktif' },
+                          { id: 'off', label: 'Nonaktif' },
+                        ] as { id: TouchControlsMode; label: string }[]
+                      ).map((modeOpt) => {
+                        const currentMode =
+                          gameSettings.touchControlsMode ?? 'auto';
+                        return (
+                          <button
+                            key={modeOpt.id}
+                            type="button"
+                            onClick={() =>
+                              gameStore.setGameSettings({
+                                touchControlsMode: modeOpt.id,
+                              })
+                            }
+                            className={`py-2 px-2.5 rounded-lg text-xs font-medium cursor-pointer whitespace-nowrap ${
+                              currentMode === modeOpt.id
+                                ? 'bg-[#f59e0b] text-[#090c12] font-bold'
+                                : 'bg-white/5 text-[#cbd5e1] hover:bg-white/10'
+                            }`}
+                          >
+                            {modeOpt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -620,6 +752,109 @@ export const StatusModal: React.FC<StatusModalProps> = ({
                     </div>
                   </div>
                 ))}
+              </div>
+
+              {/* Multi-Slot Save Profiles & JSON Backup */}
+              <div className="pt-4 border-t border-white/10 flex flex-col gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="font-display text-lg font-bold uppercase text-[#f4f1ea]">
+                      Profil Save Multi-Slot & Cadangan JSON
+                    </div>
+                    <p className="text-xs text-[#94a3b8]">
+                      Pilih Slot 1–3 atau ekspor/impor progres kampanye Jakarta Anda dalam format JSON.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const raw = exportSavedGameJson(activeSaveSlot);
+                        if (!raw) {
+                          setSaveToast(`Slot ${activeSaveSlot} belum memiliki data.`);
+                          return;
+                        }
+                        const blob = new Blob([raw], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `san_nabilo_slot_${activeSaveSlot}.json`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        setSaveToast(`Slot ${activeSaveSlot} berhasil diekspor ke JSON!`);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-[#38bdf8] text-[#090c12] text-xs font-bold cursor-pointer"
+                    >
+                      Ekspor JSON
+                    </button>
+                    <label className="px-3 py-1.5 rounded-lg bg-[#22c55e] text-[#090c12] text-xs font-bold cursor-pointer">
+                      Impor JSON
+                      <input
+                        type="file"
+                        accept="application/json,.json"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const txt =
+                              typeof reader.result === 'string' ? reader.result : '';
+                            const parsed = parseImportedSaveJson(txt);
+                            if (!parsed) {
+                              setSaveToast('File JSON tidak valid.');
+                              return;
+                            }
+                            saveGameSnapshot(parsed, activeSaveSlot);
+                            gameStore.switchSaveSlot(activeSaveSlot);
+                            setSaveToast(
+                              `Data JSON berhasil diimpor ke Slot ${activeSaveSlot}!`
+                            );
+                          };
+                          reader.readAsText(file);
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  {slotSummaries.map((slot) => {
+                    const active = activeSaveSlot === slot.slotId;
+                    const snap = slot.snapshot;
+                    return (
+                      <button
+                        key={slot.slotId}
+                        type="button"
+                        onClick={() =>
+                          gameStore.switchSaveSlot(slot.slotId as SaveSlotId)
+                        }
+                        className={`p-2.5 rounded-lg border text-left cursor-pointer transition-colors ${
+                          active
+                            ? 'bg-[#f59e0b]/20 border-[#f59e0b] text-[#f4f1ea]'
+                            : 'bg-white/5 border-white/10 text-[#94a3b8] hover:text-white'
+                        }`}
+                      >
+                        <div className="font-display text-sm font-bold uppercase flex items-center justify-between">
+                          <span>Slot {slot.slotId}</span>
+                          {active && (
+                            <span className="text-[10px] text-[#f59e0b]">Aktif</span>
+                          )}
+                        </div>
+                        <div className="text-[11px] font-mono-num truncate mt-0.5">
+                          {snap
+                            ? `${snap.playerState.completedMissions.length}/15 Babak · ${formatRupiah(snap.playerState.rupiah)}`
+                            : 'Kosong'}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {saveToast && (
+                  <div className="text-xs font-mono-num text-[#38bdf8]">
+                    {saveToast}
+                  </div>
+                )}
               </div>
             </div>
           </div>

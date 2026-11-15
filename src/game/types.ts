@@ -15,7 +15,13 @@ export type WeaponId =
   | 'pasopati'
   | 'gatotkaca';
 
-export type RadioStationId = 'off' | 'prambors' | 'koplo' | 'synth_scbd';
+export type RadioStationId =
+  | 'off'
+  | 'prambors'
+  | 'koplo'
+  | 'synth_scbd'
+  | 'indie_senopati'
+  | 'berita_kriminal';
 
 export type OutfitId = 'jaket_jawara' | 'jas_scbd' | 'rompi_taktis' | 'hoodie_siber';
 
@@ -295,6 +301,69 @@ export interface StreetRaceSpec {
   checkpoints: [number, number][];
 }
 
+export type CharacterSkillId =
+  | 'stamina'
+  | 'aimPrecision'
+  | 'driftControl'
+  | 'negotiation'
+  | 'fokusMastery';
+
+export interface CharacterSkillSpec {
+  id: CharacterSkillId;
+  name: string;
+  subtitle: string;
+  perkSummary: string;
+  effectLabel?: string;
+  baseCostRp: number;
+  maxLevel: number;
+}
+
+export type WeaponAttachmentId =
+  | 'suppressor'
+  | 'extendedMag'
+  | 'precisionBarrel'
+  | 'gildedSkin';
+
+export interface WeaponAttachmentSpec {
+  id: WeaponAttachmentId;
+  name: string;
+  subtitle: string;
+  priceRp: number;
+  damageBonusPct: number;
+  rangeBonusPct: number;
+  ammoBonusPct: number;
+  silent: boolean;
+}
+
+export type DistrictOwnerId = 'player' | 'syndicate' | 'neutral';
+
+export interface DistrictTurfEntry {
+  districtId: string;
+  owner: DistrictOwnerId;
+  defenseLevel: number;
+  dividendRp: number;
+}
+
+export type StreetContractKind =
+  | 'ojol_delivery'
+  | 'convoy_intercept'
+  | 'turf_assault';
+
+export interface ActiveStreetContractState {
+  id: string;
+  kind: StreetContractKind;
+  title: string;
+  subtitle: string;
+  targetX: number;
+  targetZ: number;
+  districtId?: string;
+  rewardRp: number;
+  timeRemainingSec: number;
+  totalTimeSec: number;
+}
+
+export type SaveSlotId = 1 | 2 | 3;
+
 export interface PlayerProgressState {
   hp: number;
   maxHp: number;
@@ -336,6 +405,9 @@ export interface PlayerProgressState {
   currentInterior: InteriorZoneId;
   staminaBuffTimer: number;
   lastSnackEaten: WarungSnackId | null;
+  characterSkills: Record<CharacterSkillId, number>;
+  weaponAttachments: Partial<Record<WeaponId, WeaponAttachmentId[]>>;
+  districtTurf: Record<string, DistrictTurfEntry>;
 }
 
 export interface BuildingFootprint {
@@ -562,3 +634,118 @@ export interface NpcDialogueResponse {
   source: 'gemini' | 'fallback';
   sideQuest?: NpcDynamicSideQuest;
 }
+
+export type TouchControlsMode = 'auto' | 'on' | 'off';
+
+export type WaypointCategory =
+  | 'custom'
+  | 'district'
+  | 'mission'
+  | 'heist'
+  | 'race'
+  | 'property'
+  | 'bounty';
+
+export interface CustomWaypointState {
+  x: number;
+  z: number;
+  label: string;
+  category: WaypointCategory;
+}
+
+export type GarageCameraPreset =
+  | 'free_orbit'
+  | 'front_low'
+  | 'side_profile'
+  | 'rear_exhaust'
+  | 'top_down';
+
+export type PhotoFilterId =
+  | 'standar'
+  | 'senja_emas'
+  | 'noir_jakarta'
+  | 'siber_matrix'
+  | 'vintage_98';
+
+export interface PhotoModeConfig {
+  fov: number;
+  rollDeg: number;
+  orbitOffset: number;
+  heightOffset: number;
+  distance: number;
+  filter: PhotoFilterId;
+  letterbox: boolean;
+  ruleOfThirds: boolean;
+  hidePlayer: boolean;
+}
+
+export interface CashLedgerEntry {
+  id: string;
+  label: string;
+  amountRp: number;
+  category: 'misi' | 'heist' | 'saham' | 'properti' | 'belanja' | 'bounty';
+  timestampLabel: string;
+}
+
+export interface StreetBountySpec {
+  id: string;
+  title: string;
+  targetName: string;
+  districtName: string;
+  x: number;
+  z: number;
+  rewardRp: number;
+  faction: FactionId;
+  difficulty: 'Menengah' | 'Tinggi' | 'Ekstrem';
+  description: string;
+}
+
+export type GraphicsQualityTier = 'auto' | 'performance' | 'balanced' | 'ultra';
+
+export interface GameSettings {
+  graphicsTier: GraphicsQualityTier;
+  voiceActingEnabled: boolean;
+  cinematicCameraEnabled: boolean;
+  touchControlsMode?: TouchControlsMode;
+}
+
+export type TrafficSignalPhase = 'ns_green' | 'ns_amber' | 'ew_green' | 'ew_amber';
+
+export interface TrafficSignalState {
+  phase: TrafficSignalPhase;
+  timer: number;
+  cycleCount: number;
+}
+
+export interface CombatHitFeedbackEvent {
+  id: number;
+  damage: number;
+  isCrit: boolean;
+  isKo: boolean;
+  label: string;
+  screenX: number;
+  screenY: number;
+}
+
+export interface CutsceneOverlayState {
+  active: boolean;
+  mode: 'briefing' | 'heist' | 'sky_switch';
+  title: string;
+  speakerName: string;
+  subtitleText: string;
+}
+
+export interface NpcVoiceRequest {
+  text: string;
+  speakerName: string;
+  tone?: string;
+}
+
+export interface NpcVoiceResponse {
+  audioBase64: string | null;
+  mimeType: string;
+  voiceName: string;
+  source: 'gemini_tts' | 'fallback';
+}
+
+

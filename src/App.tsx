@@ -26,12 +26,14 @@ import {
   buyStockShares,
   calculateHeistBreakdown,
   calculatePassivePropertyIncome,
+  calculateTurfWarsIncome,
   completeMissionReward,
   consumeWarungSnack,
   formatRupiah,
   purchaseProperty,
   recruitCrewMember,
   resolveJakartaAmbientProfile,
+  resolveWeatherFromWorldClock,
   sellStockShares,
   stepFokusAbility,
   stepStockMarketTick,
@@ -53,7 +55,11 @@ import { RadialWheelOverlay } from './components/RadialWheelOverlay';
 import { HeistPlanningModal } from './components/HeistPlanningModal';
 import { CustomsGarageModal } from './components/CustomsGarageModal';
 import { WarungSnackModal } from './components/WarungSnackModal';
+import { CinematicOverlay } from './components/CinematicOverlay';
+import { MobileTouchControls } from './components/MobileTouchControls';
+import { PhotoModeOverlay } from './components/PhotoModeOverlay';
 import { soundEngine } from './game/sound';
+import { speakDialogueLine } from './game/voiceClient';
 import {
   SAVE_VERSION,
   SavedGameSnapshot,
@@ -81,6 +87,7 @@ export default function App() {
   const drivingVehicle = useGameStore((s) => s.drivingVehicle);
   const vehicleSpeedKmh = useGameStore((s) => s.vehicleSpeedKmh);
   const aircraftAltitude = useGameStore((s) => s.aircraftAltitude);
+  const isDrifting = useGameStore((s) => s.isDrifting);
   const nearbyVehicle = useGameStore((s) => s.nearbyVehicle);
   const nearbyMission = useGameStore((s) => s.nearbyMission);
   const nearbyInterior = useGameStore((s) => s.nearbyInterior);
@@ -95,14 +102,53 @@ export default function App() {
   const heistBoardOpen = useGameStore((s) => s.heistBoardOpen);
   const customsGarageOpen = useGameStore((s) => s.customsGarageOpen);
   const warungModalOpen = useGameStore((s) => s.warungModalOpen);
+  const photoModeOpen = useGameStore((s) => s.photoModeOpen);
   const tpsAiming = useGameStore((s) => s.tpsAiming);
   const muted = useGameStore((s) => s.muted);
   const ambientCycleStep = useGameStore((s) => s.ambientCycleStep);
   const savedGame = useGameStore((s) => s.savedGame);
   const audioVolumes = useGameStore((s) => s.audioVolumes);
+  const gameSettings = useGameStore((s) => s.gameSettings);
+  const combatHitEvents = useGameStore((s) => s.combatHitEvents);
+  const playerHitFlash = useGameStore((s) => s.playerHitFlash);
+  const cutsceneOverlay = useGameStore((s) => s.cutsceneOverlay);
   const completedDynamicQuests = useGameStore((s) => s.completedDynamicQuests);
 
   const controllerRef = useRef<WorldControllerHandle | null>(null);
+  const cutsceneTimerRef = useRef<number | null>(null);
+
+  const triggerCinematicShot = useCallback(
+    (
+      mode: 'briefing' | 'heist' | 'sky_switch',
+      title: string,
+      speakerName: string,
+      subtitleText: string,
+      focusX: number,
+      focusZ: number,
+      durationSec: number = 3.2
+    ) => {
+      const s = gameStore.getState();
+      if (!s.gameSettings.cinematicCameraEnabled) return;
+      if (cutsceneTimerRef.current !== null) {
+        window.clearTimeout(cutsceneTimerRef.current);
+      }
+      controllerRef.current?.startCutsceneFraming(focusX, focusZ, durationSec);
+      gameStore.setState({
+        cutsceneOverlay: {
+          active: true,
+          mode,
+          title,
+          speakerName,
+          subtitleText,
+        },
+      });
+      cutsceneTimerRef.current = window.setTimeout(() => {
+        gameStore.setState({ cutsceneOverlay: null });
+        cutsceneTimerRef.current = null;
+      }, durationSec * 1000);
+    },
+    []
+  );
 
   // Sync body dataset state and silence looped audio outside playing state
   useEffect(() => {
@@ -188,15 +234,56 @@ export default function App() {
     return () => clearInterval(interval);
   }, [gameState]);
 
-  // Passive property dividend, BAJSA stock ticker & Drone Rajawali-X regen (4s)
+  // Real-Time 24-Hour Jakarta Clock & Active Street Contract Countdown (1s)
+  useEffect(() => {
+    if (gameState !== 'playing') return;
+    const interval = window.setInterval(() => {
+      gameStore.setState((prev) => {
+        const nextMinutes = prev.autoTimeCycle
+          ? (prev.worldTimeMinutes + 2) % 1440
+          : prev.worldTimeMinutes;
+        const nextWeather = prev.autoTimeCycle
+          ? resolveWeatherFromWorldClock(
+              nextMinutes,
+              prev.weatherMode === 'hujan'
+            )
+          : prev.weatherMode;
+
+        let nextContract = prev.activeContract;
+        let nextOutcome = prev.lastOutcomeText;
+        let nextWaypoint = prev.customWaypoint;
+        if (nextContract) {
+          const rem = nextContract.timeRemainingSec - 1;
+          if (rem <= 0) {
+            nextContract = null;
+            nextWaypoint = null;
+            nextOutcome = `Waktu Habis: ${prev.activeContract?.title} gagal diselesaikan.`;
+          } else {
+            nextContract = { ...nextContract, timeRemainingSec: rem };
+          }
+        }
+
+        return {
+          worldTimeMinutes: nextMinutes,
+          weatherMode: nextWeather,
+          activeContract: nextContract,
+          customWaypoint: nextWaypoint,
+          lastOutcomeText: nextOutcome,
+        };
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [gameState]);
+
+  // Passive property + 13-District Turf Wars dividend, BAJSA stock ticker & Drone Rajawali-X regen (4s)
   useEffect(() => {
     if (gameState !== 'playing') return;
     const interval = window.setInterval(() => {
       gameStore.updatePlayerState((prev) => {
         const tickedStocks = stepStockMarketTick(prev);
-        const dividend = calculatePassivePropertyIncome(
-          tickedStocks.ownedProperties
-        );
+        const dividend =
+          calculatePassivePropertyIncome(tickedStocks.ownedProperties) +
+          calculateTurfWarsIncome(tickedStocks);
         const armorRegen =
           tickedStocks.droneActive && tickedStocks.droneLevel > 0
             ? tickedStocks.droneLevel * 3
@@ -228,7 +315,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, [gameState, playerState.radioStation]);
 
-  // Save v2 persistence helper + debounced & periodic auto-save
+  // Save v3 persistence helper + debounced & periodic auto-save
   const persistCurrentSave = useCallback(() => {
     const cur = gameStore.getState();
     if (cur.playerState.hp <= 0) return;
@@ -241,10 +328,12 @@ export default function App() {
       playerState: cur.playerState,
       playerPos: pos,
       audioSettings: cur.audioVolumes,
+      gameSettings: cur.gameSettings,
       completedDynamicQuests: cur.completedDynamicQuests,
+      saveAt: Date.now(),
       savedAt: Date.now(),
-    };
-    saveGameSnapshot(snapshot);
+    } as SavedGameSnapshot;
+    saveGameSnapshot(snapshot, cur.activeSaveSlot);
     gameStore.setState({ savedGame: snapshot });
   }, []);
 
@@ -261,6 +350,7 @@ export default function App() {
     selectedStage,
     weatherMode,
     audioVolumes,
+    gameSettings,
     completedDynamicQuests,
     persistCurrentSave,
   ]);
@@ -346,7 +436,8 @@ export default function App() {
   }, []);
 
   const handleContinueGame = useCallback(() => {
-    const latest = loadSavedGame() || gameStore.getState().savedGame;
+    const slot = gameStore.getState().activeSaveSlot;
+    const latest = loadSavedGame(slot) || gameStore.getState().savedGame;
     if (!latest) return;
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
@@ -360,6 +451,7 @@ export default function App() {
       playerState: latest.playerState,
       ghostHp: latest.playerState.hp,
       audioVolumes: latest.audioSettings,
+      gameSettings: latest.gameSettings,
       completedDynamicQuests: latest.completedDynamicQuests,
       activeMission: null,
       activeChoice: null,
@@ -370,6 +462,7 @@ export default function App() {
       customsGarageOpen: false,
       warungModalOpen: false,
       tpsAiming: false,
+      cutsceneOverlay: null,
       gameState: 'playing',
     });
     requestAnimationFrame(() => {
@@ -461,6 +554,10 @@ export default function App() {
           gameStore.setState({ warungModalOpen: false });
           return;
         }
+        if (s.photoModeOpen) {
+          gameStore.setState({ photoModeOpen: false });
+          return;
+        }
         if (s.phoneOpen) {
           gameStore.setState({ phoneOpen: false });
           return;
@@ -482,7 +579,22 @@ export default function App() {
           heistBoardOpen: false,
           customsGarageOpen: false,
           warungModalOpen: false,
+          photoModeOpen: false,
         }));
+      } else if (e.code === 'KeyN') {
+        e.preventDefault();
+        soundEngine.playPickup();
+        gameStore.setState((prev) => ({
+          photoModeOpen: !prev.photoModeOpen,
+          phoneOpen: false,
+          wheelMode: null,
+          heistBoardOpen: false,
+          customsGarageOpen: false,
+          warungModalOpen: false,
+        }));
+      } else if (e.code === 'KeyU') {
+        e.preventDefault();
+        gameStore.setState((prev) => ({ zenHudMode: !prev.zenHudMode }));
       } else if (e.code === 'KeyY') {
         e.preventDefault();
         gameStore.setState((prev) => ({
@@ -536,7 +648,7 @@ export default function App() {
         cycleWeather();
       } else if (e.code === 'KeyM') {
         gameStore.toggleMute();
-      } else if (e.code === 'KeyR') {
+      } else if (e.code === 'KeyR' && !s.drivingVehicle) {
         startNewGame(s.origin, s.selectedStage);
       } else {
         const slotMap: Record<string, WeaponId> = {
@@ -569,17 +681,29 @@ export default function App() {
     handleToggleDrone,
   ]);
 
-  const handleSelectChoice = useCallback((choice: StoryChoiceOption) => {
-    const mission = gameStore.getState().dialogueMission;
-    if (!mission) return;
-    gameStore.setState((prev) => ({
-      dialogueMission: null,
-      activeMission: mission,
-      activeChoice: { ...choice },
-      playerState: applyStoryChoice(prev.playerState, choice),
-    }));
-    controllerRef.current?.startMissionObjective(mission, { ...choice });
-  }, []);
+  const handleSelectChoice = useCallback(
+    (choice: StoryChoiceOption) => {
+      const mission = gameStore.getState().dialogueMission;
+      if (!mission) return;
+      gameStore.setState((prev) => ({
+        dialogueMission: null,
+        activeMission: mission,
+        activeChoice: { ...choice },
+        playerState: applyStoryChoice(prev.playerState, choice),
+      }));
+      controllerRef.current?.startMissionObjective(mission, { ...choice });
+      triggerCinematicShot(
+        'briefing',
+        mission.title,
+        mission.giverName,
+        choice.description,
+        choice.targetX,
+        choice.targetZ,
+        2.8
+      );
+    },
+    [triggerCinematicShot]
+  );
 
   const handleLaunchHeistSetup = useCallback((heistId: HeistId) => {
     const heist =
@@ -679,7 +803,28 @@ export default function App() {
     }));
     controllerRef.current?.startMissionObjective(finaleMission, finaleChoice);
     soundEngine.playMissionFanfare();
-  }, []);
+    triggerCinematicShot(
+      'heist',
+      finaleMission.title,
+      'Trio Protagonis Jakarta',
+      finaleChoice.description,
+      finaleChoice.targetX,
+      finaleChoice.targetZ,
+      3.4
+    );
+    const curS = gameStore.getState();
+    if (curS.gameSettings.voiceActingEnabled && !curS.muted) {
+      void speakDialogueLine(
+        {
+          text: finaleChoice.description,
+          speakerName: 'Kirana Larasati',
+          tone: 'Operasi Rahasia Mendesak',
+        },
+        true,
+        curS.audioVolumes.master
+      );
+    }
+  }, [triggerCinematicShot]);
 
   const handleStartStreetRace = useCallback((raceId: string) => {
     const race = STREET_RACES.find((r) => r.id === raceId) || STREET_RACES[0];
@@ -739,6 +884,7 @@ export default function App() {
     if (mission.id.startsWith('heist_setup:')) {
       const heistId = mission.id.replace('heist_setup:', '') as HeistId;
       soundEngine.playMissionFanfare();
+      gameStore.recordCashTransaction(mission.title, choice.rewardRp, 'heist');
       gameStore.updatePlayerState((prev) => ({
         ...prev,
         rupiah: prev.rupiah + choice.rewardRp,
@@ -756,6 +902,7 @@ export default function App() {
       const heistSpec =
         GRAND_HEISTS.find((h) => h.id === heistId) || GRAND_HEISTS[0];
       soundEngine.playCashRegister();
+      gameStore.recordCashTransaction(mission.title, choice.rewardRp, 'heist');
       gameStore.updatePlayerState((prev) => {
         const afterImpact = triggerStockMarketImpact(
           prev,
@@ -780,6 +927,7 @@ export default function App() {
 
     if (mission.id.startsWith('street_race:')) {
       soundEngine.playCashRegister();
+      gameStore.recordCashTransaction(mission.title, choice.rewardRp, 'misi');
       gameStore.updatePlayerState((prev) => {
         const nextScore = prev.score + 800;
         return {
@@ -792,6 +940,7 @@ export default function App() {
       return;
     }
 
+    gameStore.recordCashTransaction(mission.title, choice.rewardRp, 'misi');
     const updated = completeMissionReward(
       gameStore.getState().playerState,
       mission.id,
@@ -978,8 +1127,26 @@ export default function App() {
     );
   }, []);
 
+  const handleTeleportCoords = useCallback(
+    (x: number, z: number, label: string) => {
+      soundEngine.playPickup();
+      gameStore.setState((prev) => ({
+        playerState: { ...prev.playerState, currentInterior: 'exterior' },
+        lastOutcomeText: `Teleportasi Taktis berhasil menuju ${label}!`,
+      }));
+      controllerRef.current?.teleportPlayerTo(x, z);
+    },
+    []
+  );
+
+  const handleCapturePhoto = useCallback((): string | undefined => {
+    soundEngine.playPickup();
+    return controllerRef.current?.captureSnapshotDataUrl() || undefined;
+  }, []);
+
   const handleCompleteSideHustle = useCallback((rewardRp: number) => {
     soundEngine.playPickup();
+    gameStore.recordCashTransaction('Kontrak Sampingan Jakarta', rewardRp, 'misi');
     gameStore.updatePlayerState((prev) => {
       const nextScore = prev.score + 120;
       return {
@@ -1169,9 +1336,9 @@ export default function App() {
     });
   }, []);
 
-  const passiveIncome = calculatePassivePropertyIncome(
-    playerState.ownedProperties
-  );
+  const passiveIncome =
+    calculatePassivePropertyIncome(playerState.ownedProperties) +
+    calculateTurfWarsIncome(playerState);
   const activeAmbientProfile = resolveJakartaAmbientProfile(
     district.id,
     weatherMode,
@@ -1190,6 +1357,7 @@ export default function App() {
         wheelSlowMo={wheelMode !== null}
         customsShowcaseOpen={customsGarageOpen}
         tpsAiming={tpsAiming}
+        gameSettings={gameSettings}
         controllerRef={controllerRef}
         onUpdateHud={(payload) => {
           const cur = gameStore.getState();
@@ -1198,6 +1366,8 @@ export default function App() {
             cur.drivingVehicle !== payload.drivingVehicle ||
             cur.vehicleSpeedKmh !== payload.vehicleSpeedKmh ||
             cur.aircraftAltitude !== payload.aircraftAltitude ||
+            cur.isDrifting !== payload.isDrifting ||
+            cur.trafficSignalPhase !== payload.trafficSignalPhase ||
             cur.nearbyVehicle !== payload.nearbyVehicle ||
             cur.nearbyMission?.id !== payload.nearbyMission?.id ||
             cur.nearbyInterior?.id !== payload.nearbyInterior?.id ||
@@ -1208,12 +1378,26 @@ export default function App() {
             gameStore.setState(payload);
           }
         }}
+        onGraphicsTierResolved={(tier) => {
+          if (gameStore.getState().resolvedGraphicsTier !== tier) {
+            gameStore.setState({ resolvedGraphicsTier: tier });
+          }
+        }}
+        onCombatHitFeedback={gameStore.pushCombatHitEvent}
+        onPlayerHitAngle={gameStore.triggerPlayerHitFlash}
         onPlayerDamage={handlePlayerDamage}
         onEnemyDefeated={handleEnemyDefeated}
         onConsumeAmmo={handleConsumeAmmo}
-        onOpenMissionDialog={(mission) =>
-          gameStore.setState({ dialogueMission: mission })
-        }
+        onOpenMissionDialog={(mission) => {
+          gameStore.setState({ dialogueMission: mission });
+          if (gameStore.getState().gameSettings.cinematicCameraEnabled) {
+            controllerRef.current?.startCutsceneFraming(
+              mission.markerX,
+              mission.markerZ,
+              3.0
+            );
+          }
+        }}
         onCompleteActiveObjective={handleCompleteActiveObjective}
         onToggleTpsAim={() =>
           gameStore.setState((prev) => ({ tpsAiming: !prev.tpsAiming }))
@@ -1249,7 +1433,7 @@ export default function App() {
       )}
 
       {/* STATE 2: PLAYING HUD */}
-      {gameState === 'playing' && (
+      {gameState === 'playing' && !photoModeOpen && (
         <GameHud
           playerState={playerState}
           ghostHp={ghostHp}
@@ -1257,6 +1441,9 @@ export default function App() {
           drivingVehicle={drivingVehicle}
           vehicleSpeedKmh={vehicleSpeedKmh}
           aircraftAltitude={aircraftAltitude}
+          isDrifting={isDrifting}
+          combatHitEvents={combatHitEvents}
+          playerHitFlash={playerHitFlash}
           nearbyVehicle={nearbyVehicle}
           nearbyMission={nearbyMission}
           nearbyInterior={nearbyInterior}
@@ -1300,6 +1487,7 @@ export default function App() {
             gameStore.setState({ customsGarageOpen: true })
           }
           onOpenWarung={handleOpenWarung}
+          onOpenPhotoMode={() => gameStore.setState({ photoModeOpen: true })}
           onToggleTpsAim={() =>
             gameStore.setState((prev) => ({ tpsAiming: !prev.tpsAiming }))
           }
@@ -1311,6 +1499,44 @@ export default function App() {
             gameStore.setState({ gameState: 'paused' });
           }}
           onRestart={() => startNewGame(origin, selectedStage)}
+        />
+      )}
+
+      {/* DUAL-THUMB MOBILE TOUCH CONTROLS OVERLAY */}
+      {gameState === 'playing' &&
+        !photoModeOpen &&
+        !dialogueMission &&
+        !phoneOpen &&
+        !heistBoardOpen &&
+        !customsGarageOpen &&
+        !warungModalOpen && (
+          <MobileTouchControls
+            mode={gameSettings.touchControlsMode ?? 'auto'}
+            drivingVehicle={drivingVehicle}
+            nearbyVehicle={nearbyVehicle}
+            tpsAiming={tpsAiming}
+            fokusActive={playerState.fokusActive}
+            onToggleVehicle={() =>
+              controllerRef.current?.toggleEnterExitVehicle()
+            }
+            onToggleTpsAim={() =>
+              gameStore.setState((prev) => ({ tpsAiming: !prev.tpsAiming }))
+            }
+            onToggleFokus={handleToggleFokus}
+            onHonk={() => controllerRef.current?.triggerHorn()}
+          />
+        )}
+
+      {/* CINEMATIC PHOTO MODE STUDIO [N] */}
+      {gameState === 'playing' && photoModeOpen && (
+        <PhotoModeOverlay
+          weatherMode={weatherMode}
+          onChangeWeather={(w) => {
+            gameStore.setState({ weatherMode: w });
+            soundEngine.playPickup();
+          }}
+          onCapturePng={handleCapturePhoto}
+          onClose={() => gameStore.setState({ photoModeOpen: false })}
         />
       )}
 
@@ -1352,6 +1578,7 @@ export default function App() {
           onUpgradeEngine={handleUpgradeVehicle}
           onUpgradeArmorPlating={handleUpgradeArmorPlating}
           onRepairAndClearWanted={handleRepairAndClearWanted}
+          onHonk={() => controllerRef.current?.triggerHorn()}
           onClose={() => gameStore.setState({ customsGarageOpen: false })}
         />
       )}
@@ -1375,12 +1602,31 @@ export default function App() {
         />
       )}
 
+      {/* 2.39:1 CINEMATIC LETTERBOX & SUBTITLES */}
+      {gameState === 'playing' && !photoModeOpen && (
+        <CinematicOverlay
+          cutscene={cutsceneOverlay}
+          enabled={gameSettings.cinematicCameraEnabled}
+          onDismiss={() => {
+            if (cutsceneTimerRef.current !== null) {
+              window.clearTimeout(cutsceneTimerRef.current);
+              cutsceneTimerRef.current = null;
+            }
+            controllerRef.current?.stopCutsceneFraming();
+            gameStore.setState({ cutsceneOverlay: null });
+          }}
+        />
+      )}
+
       {/* INTERACTIVE BRANCHING STORY DIALOGUE + NPC AI */}
       {gameState === 'playing' && dialogueMission && (
         <StoryDialogueModal
           mission={dialogueMission}
           onSelectChoice={handleSelectChoice}
-          onClose={() => gameStore.setState({ dialogueMission: null })}
+          onClose={() => {
+            controllerRef.current?.stopCutsceneFraming();
+            gameStore.setState({ dialogueMission: null });
+          }}
         />
       )}
 
@@ -1449,6 +1695,7 @@ export default function App() {
             });
           }}
           onFastTravel={handleFastTravel}
+          onTeleportCoords={handleTeleportCoords}
           onTriggerMissionDialog={(m) =>
             gameStore.setState({ dialogueMission: m })
           }
@@ -1462,6 +1709,7 @@ export default function App() {
           onOpenCustomsGarage={() =>
             gameStore.setState({ customsGarageOpen: true })
           }
+          onOpenPhotoMode={() => gameStore.setState({ photoModeOpen: true })}
         />
       )}
     </div>

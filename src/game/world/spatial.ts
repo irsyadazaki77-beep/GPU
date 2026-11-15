@@ -144,26 +144,16 @@ export class SpatialHashGrid<T> {
   }
 
   public queryRadius(x: number, z: number, radius: number, out: T[] = []): T[] {
-    const r = Math.max(0, radius);
-    const candidates = this.queryAABB(x - r, z - r, x + r, z + r, []);
     out.length = 0;
+    const r = Math.max(0, radius);
     const rSq = r * r;
-
-    for (let i = 0; i < candidates.length; i++) {
-      // Because candidates came from queryAABB, match against exact entry bounds
-      out.push(candidates[i]);
-    }
-
-    // Refine circle-to-AABB exact distance when entries are queried via radius
-    if (out.length === 0) return out;
-
-    const refined: T[] = [];
-    this.queryStamp += 1;
-    const stamp = this.queryStamp;
     const minCx = this.cellCoord(x - r);
     const maxCx = this.cellCoord(x + r);
     const minCz = this.cellCoord(z - r);
     const maxCz = this.cellCoord(z + r);
+
+    this.queryStamp += 1;
+    const stamp = this.queryStamp;
 
     for (let cx = minCx; cx <= maxCx; cx++) {
       for (let cz = minCz; cz <= maxCz; cz++) {
@@ -185,13 +175,11 @@ export class SpatialHashGrid<T> {
           const dx = x - closestX;
           const dz = z - closestZ;
           if (dx * dx + dz * dz <= rSq) {
-            refined.push(entry.data);
+            out.push(entry.data);
           }
         }
       }
     }
-    out.length = 0;
-    for (let i = 0; i < refined.length; i++) out.push(refined[i]);
     return out;
   }
 
@@ -200,26 +188,52 @@ export class SpatialHashGrid<T> {
     z: number,
     maxRadius: number
   ): { item: T; distance: number } | null {
-    const hits = this.queryRadius(x, z, maxRadius, []);
-    let best: T | null = null;
-    let bestDist = Infinity;
+    const r = Math.max(0, maxRadius);
+    const rSq = r * r;
+    const minCx = this.cellCoord(x - r);
+    const maxCx = this.cellCoord(x + r);
+    const minCz = this.cellCoord(z - r);
+    const maxCz = this.cellCoord(z + r);
 
-    for (let i = 0; i < hits.length; i++) {
-      const candidate = hits[i];
-      // Entries store their id? Fallback to iterating entries that matched
-      for (const entry of this.entries.values()) {
-        if (entry.data === candidate) {
-          const d = Math.hypot(entry.x - x, entry.z - z);
-          if (d < bestDist) {
-            bestDist = d;
-            best = candidate;
+    this.queryStamp += 1;
+    const stamp = this.queryStamp;
+
+    let best: T | null = null;
+    let bestDistSq = Infinity;
+
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cz = minCz; cz <= maxCz; cz++) {
+        const bucket = this.cells.get(this.cellKey(cx, cz));
+        if (!bucket) continue;
+        for (let i = 0; i < bucket.length; i++) {
+          const entry = bucket[i];
+          if (this.visitedStamp.get(entry.id) === stamp) continue;
+          this.visitedStamp.set(entry.id, stamp);
+
+          const closestX = Math.max(
+            entry.x - entry.halfW,
+            Math.min(x, entry.x + entry.halfW)
+          );
+          const closestZ = Math.max(
+            entry.z - entry.halfD,
+            Math.min(z, entry.z + entry.halfD)
+          );
+          const cdx = x - closestX;
+          const cdz = z - closestZ;
+          if (cdx * cdx + cdz * cdz <= rSq) {
+            const dx = entry.x - x;
+            const dz = entry.z - z;
+            const dSq = dx * dx + dz * dz;
+            if (dSq < bestDistSq) {
+              bestDistSq = dSq;
+              best = entry.data;
+            }
           }
-          break;
         }
       }
     }
 
-    return best !== null ? { item: best, distance: bestDist } : null;
+    return best !== null ? { item: best, distance: Math.sqrt(bestDistSq) } : null;
   }
 }
 
@@ -324,3 +338,152 @@ export function resolveCircleAABBCollision(
 
   return { x, z, collided };
 }
+
+const _camScratch: BuildingFootprint[] = [];
+
+/**
+ * Prevents the third-person camera boom from clipping inside city buildings
+ * using exact ray-AABB slab intersection along the horizontal boom segment.
+ */
+export function resolveCameraWallPullIn(
+  targetX: number,
+  targetZ: number,
+  desiredX: number,
+  desiredY: number,
+  desiredZ: number,
+  grid?: SpatialHashGrid<BuildingFootprint>,
+  padding: number = 0.65
+): { x: number; y: number; z: number; pulledIn: boolean } {
+  const dx = desiredX - targetX;
+  const dz = desiredZ - targetZ;
+  const minX = Math.min(targetX, desiredX) - padding;
+  const maxX = Math.max(targetX, desiredX) + padding;
+  const minZ = Math.min(targetZ, desiredZ) - padding;
+  const maxZ = Math.max(targetZ, desiredZ) + padding;
+
+  const activeGrid = grid ?? DEFAULT_BUILDING_GRID;
+  const candidates = activeGrid.queryAABB(minX, minZ, maxX, maxZ, _camScratch);
+
+  let bestT = 1.0;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const b = candidates[i];
+    if (desiredY > b.height + 0.35) continue;
+
+    const bMinX = b.x - b.width * 0.5 - padding;
+    const bMaxX = b.x + b.width * 0.5 + padding;
+    const bMinZ = b.z - b.depth * 0.5 - padding;
+    const bMaxZ = b.z + b.depth * 0.5 + padding;
+
+    // Skip if target itself is inside padded AABB
+    if (
+      targetX >= bMinX &&
+      targetX <= bMaxX &&
+      targetZ >= bMinZ &&
+      targetZ <= bMaxZ
+    ) {
+      continue;
+    }
+
+    let tMin = 0;
+    let tMax = bestT;
+
+    if (Math.abs(dx) < 1e-6) {
+      if (targetX < bMinX || targetX > bMaxX) continue;
+    } else {
+      const invDx = 1 / dx;
+      let tx1 = (bMinX - targetX) * invDx;
+      let tx2 = (bMaxX - targetX) * invDx;
+      if (tx1 > tx2) {
+        const tmp = tx1;
+        tx1 = tx2;
+        tx2 = tmp;
+      }
+      tMin = Math.max(tMin, tx1);
+      tMax = Math.min(tMax, tx2);
+      if (tMin > tMax) continue;
+    }
+
+    if (Math.abs(dz) < 1e-6) {
+      if (targetZ < bMinZ || targetZ > bMaxZ) continue;
+    } else {
+      const invDz = 1 / dz;
+      let tz1 = (bMinZ - targetZ) * invDz;
+      let tz2 = (bMaxZ - targetZ) * invDz;
+      if (tz1 > tz2) {
+        const tmp = tz1;
+        tz1 = tz2;
+        tz2 = tmp;
+      }
+      tMin = Math.max(tMin, tz1);
+      tMax = Math.min(tMax, tz2);
+      if (tMin > tMax) continue;
+    }
+
+    if (tMin > 0.02 && tMin < bestT) {
+      bestT = tMin;
+    }
+  }
+
+  if (bestT < 1.0) {
+    const safeT = Math.max(0.24, bestT - 0.04);
+    return {
+      x: targetX + dx * safeT,
+      y: desiredY + (1 - safeT) * 0.65,
+      z: targetZ + dz * safeT,
+      pulledIn: true,
+    };
+  }
+
+  return { x: desiredX, y: desiredY, z: desiredZ, pulledIn: false };
+}
+
+/**
+ * Advances a pedestrian smoothly along a rectangular sidewalk corridor
+ * without wandering off curbs into traffic lanes or intersecting buildings.
+ */
+export function stepSidewalkPatrol(
+  x: number,
+  z: number,
+  dir: 1 | -1,
+  speed: number,
+  dt: number,
+  minX: number,
+  maxX: number,
+  minZ: number,
+  maxZ: number,
+  axis: 'ns' | 'ew',
+  margin: number = 0.55
+): { x: number; z: number; dir: 1 | -1 } {
+  const safeMinX = Math.min(maxX, minX + margin);
+  const safeMaxX = Math.max(minX, maxX - margin);
+  const safeMinZ = Math.min(maxZ, minZ + margin);
+  const safeMaxZ = Math.max(minZ, maxZ - margin);
+
+  let nx = Math.max(safeMinX, Math.min(safeMaxX, x));
+  let nz = Math.max(safeMinZ, Math.min(safeMaxZ, z));
+  let nextDir = dir;
+
+  if (axis === 'ns') {
+    nz += nextDir * speed * dt;
+    if (nz >= safeMaxZ) {
+      nz = safeMaxZ;
+      nextDir = -1;
+    } else if (nz <= safeMinZ) {
+      nz = safeMinZ;
+      nextDir = 1;
+    }
+  } else {
+    nx += nextDir * speed * dt;
+    if (nx >= safeMaxX) {
+      nx = safeMaxX;
+      nextDir = -1;
+    } else if (nx <= safeMinX) {
+      nx = safeMinX;
+      nextDir = 1;
+    }
+  }
+
+  return { x: nx, z: nz, dir: nextDir };
+}
+

@@ -42,8 +42,25 @@ import {
   consumeWarungSnack,
   stepWarungStaminaBuff,
   getPlayerStaminaSpeedMultiplier,
+  createInitialTrafficSignalState,
+  isStoppedAtTrafficSignal,
+  stepTrafficSignals,
+  upgradeCharacterSkill,
+  buyWeaponAttachment,
+  getEffectiveWeaponSpec,
+  captureDistrictTurf,
+  fortifyDistrictTurf,
+  calculateTurfWarsIncome,
+  bribePoliceWanted,
+  formatJakartaClock,
+  resolveWeatherFromWorldClock,
+  RADIO_STATIONS,
 } from './rules';
-import { SAVE_VERSION, migrateSavedGame } from './save';
+import {
+  SAVE_VERSION,
+  migrateSavedGame,
+  parseImportedSaveJson,
+} from './save';
 import {
   buildFallbackNpcDialogue,
   sanitizeDialogueInput,
@@ -444,7 +461,7 @@ test('calculateHeistBreakdown and STREET_RACES/VEHICLE_SPECS produce valid payou
   assert.equal(VEHICLE_SPECS.transjakarta.maxHp >= 400, true);
 });
 
-test('migrateSavedGame upgrades v1 snapshots to v2, clamps invalid coordinates, and preserves audio channels', () => {
+test('migrateSavedGame upgrades v1/v2 snapshots to v3, clamps invalid coordinates, and preserves settings', () => {
   const basePlayer = createInitialPlayerState('teknisi_glodok');
   const legacyV1 = {
     version: 1,
@@ -458,13 +475,32 @@ test('migrateSavedGame upgrades v1 snapshots to v2, clamps invalid coordinates, 
 
   const migrated = migrateSavedGame(legacyV1);
   assert.ok(migrated);
+  assert.equal(SAVE_VERSION, 3);
   assert.equal(migrated.version, SAVE_VERSION);
   assert.equal(migrated.origin, 'teknisi_glodok');
   assert.equal(migrated.playerState.rupiah, 1234567);
   assert.equal(migrated.playerPos.x, 88);
   assert.equal(migrated.playerPos.z, -88);
   assert.equal(migrated.audioSettings.master, 1);
+  assert.equal(migrated.gameSettings.graphicsTier, 'auto');
+  assert.equal(migrated.gameSettings.voiceActingEnabled, true);
+  assert.equal(migrated.gameSettings.cinematicCameraEnabled, true);
   assert.deepEqual(migrated.completedDynamicQuests, []);
+
+  const v2Custom = {
+    ...legacyV1,
+    version: 2,
+    gameSettings: {
+      graphicsTier: 'ultra',
+      voiceActingEnabled: false,
+      cinematicCameraEnabled: true,
+    },
+  };
+  const migratedV2 = migrateSavedGame(v2Custom);
+  assert.ok(migratedV2);
+  assert.equal(migratedV2.version, 3);
+  assert.equal(migratedV2.gameSettings.graphicsTier, 'ultra');
+  assert.equal(migratedV2.gameSettings.voiceActingEnabled, false);
 
   assert.equal(migrateSavedGame(null), null);
   assert.equal(migrateSavedGame({ version: 99 }), null);
@@ -545,8 +581,86 @@ test('Warung interior mini-game evaluates serve quality, recovers minor HP, and 
   assert.equal(failRes.nextState.rupiah, 5000);
 });
 
+test('Traffic signal state machine cycles phases and halts vehicles on red approaches', () => {
+  let sig = createInitialTrafficSignalState();
+  assert.equal(sig.phase, 'ns_green');
 
+  // North-South vehicle approaching Bundaran Monas (z ~ -22, heading 0) moves on ns_green
+  assert.equal(isStoppedAtTrafficSignal(0, -22, 0, 'ground', sig.phase), false);
+  // East-West vehicle approaching stop line (x ~ -22, heading PI/2) stops on ns_green
+  assert.equal(isStoppedAtTrafficSignal(-22, 0, Math.PI / 2, 'ground', sig.phase), true);
+  // Elevated Tol Layang bypasses street-level red lights
+  assert.equal(isStoppedAtTrafficSignal(-22, 0, Math.PI / 2, 'elevated', sig.phase), false);
 
+  sig = stepTrafficSignals(sig, 8.2);
+  assert.equal(sig.phase, 'ns_amber');
+  sig = stepTrafficSignals(sig, 2.2);
+  assert.equal(sig.phase, 'ew_green');
+  assert.equal(isStoppedAtTrafficSignal(-22, 0, Math.PI / 2, 'ground', sig.phase), false);
+  assert.equal(isStoppedAtTrafficSignal(0, -22, 0, 'ground', sig.phase), true);
+  sig = stepTrafficSignals(sig, 8.2);
+  assert.equal(sig.phase, 'ew_amber');
+  sig = stepTrafficSignals(sig, 2.2);
+  assert.equal(sig.phase, 'ns_green');
+  assert.equal(sig.cycleCount, 1);
+});
 
+test('Character skills, weapon attachments, 13-district turf wars, police bribe, 24h clock, and JSON save import work properly', () => {
+  let state = createInitialPlayerState('teknisi_glodok');
+  state = { ...state, rupiah: 1000000, wantedLevel: 3 };
 
+  // 1. Character skill upgrade
+  const upSkill = upgradeCharacterSkill(state, 'aimPrecision');
+  assert.equal(upSkill.upgraded, true);
+  assert.equal(upSkill.nextState.characterSkills.aimPrecision, 2);
 
+  // 2. Weapon attachment purchase & effective spec
+  const baseRifle = getEffectiveWeaponSpec('rifle', upSkill.nextState);
+  const attachRes = buyWeaponAttachment(
+    upSkill.nextState,
+    'rifle',
+    'suppressor'
+  );
+  assert.equal(attachRes.bought, true);
+  const modRifle = getEffectiveWeaponSpec('rifle', attachRes.nextState);
+  assert.equal(modRifle.silent, true);
+  assert.ok(modRifle.damage > baseRifle.damage);
+
+  // 3. 13-District Turf Wars capture, fortify & passive income
+  const baseTurfIncome = calculateTurfWarsIncome(attachRes.nextState);
+  assert.ok(baseTurfIncome > 0);
+  const capRes = captureDistrictTurf(attachRes.nextState, 'scbd');
+  assert.equal(capRes.captured, true);
+  assert.equal(capRes.nextState.districtTurf.scbd.owner, 'player');
+  const fortRes = fortifyDistrictTurf(capRes.nextState, 'scbd');
+  assert.equal(fortRes.fortified, true);
+  assert.equal(fortRes.nextState.districtTurf.scbd.defenseLevel, 2);
+  assert.ok(calculateTurfWarsIncome(fortRes.nextState) > baseTurfIncome);
+
+  // 4. Police bribe clears wanted level
+  const bribeRes = bribePoliceWanted(fortRes.nextState);
+  assert.equal(bribeRes.bribed, true);
+  assert.equal(bribeRes.nextState.wantedLevel, 0);
+
+  // 5. 24-Hour Jakarta Clock & Weather Resolver + Radio & Drift Circuit
+  assert.equal(formatJakartaClock(1050), '17:30 WIB');
+  assert.equal(resolveWeatherFromWorldClock(1050, false), 'senja');
+  assert.equal(resolveWeatherFromWorldClock(720, false), 'siang');
+  assert.equal(resolveWeatherFromWorldClock(1320, false), 'malam');
+  assert.equal(RADIO_STATIONS.length, 6);
+  assert.equal(STREET_RACES.some((r) => r.id === 'race_drift_sabuk_tol'), true);
+
+  // 6. JSON Save Import
+  const rawJson = JSON.stringify({
+    version: SAVE_VERSION,
+    origin: 'teknisi_glodok',
+    selectedStage: 5,
+    weatherMode: 'malam',
+    playerState: bribeRes.nextState,
+    playerPos: { x: 12, z: -18 },
+    savedAt: Date.now(),
+  });
+  const imported = parseImportedSaveJson(rawJson);
+  assert.ok(imported);
+  assert.equal(imported?.origin, 'teknisi_glodok');
+});

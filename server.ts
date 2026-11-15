@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
-import type { NpcDialogueRequest } from './src/game/types';
+import type { NpcDialogueRequest, NpcVoiceRequest } from './src/game/types';
 import { generateNpcDialogue } from './server/npcDialogue';
+import { generateNpcVoice } from './server/npcVoice';
 
 const PORT = 3000;
 
@@ -21,6 +22,16 @@ function isValidDialogueBody(body: unknown): body is NpcDialogueRequest {
   );
 }
 
+function isValidVoiceBody(body: unknown): body is NpcVoiceRequest {
+  if (!body || typeof body !== 'object') return false;
+  const candidate = body as Partial<NpcVoiceRequest>;
+  return (
+    typeof candidate.text === 'string' &&
+    candidate.text.trim().length > 0 &&
+    typeof candidate.speakerName === 'string'
+  );
+}
+
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '16kb' }));
@@ -36,6 +47,16 @@ async function startServer() {
     }
 
     const result = await generateNpcDialogue(req.body);
+    res.json(result);
+  });
+
+  app.post('/api/npc/voice', async (req, res) => {
+    if (!isValidVoiceBody(req.body)) {
+      res.status(400).json({ error: 'Invalid NPC voice payload' });
+      return;
+    }
+
+    const result = await generateNpcVoice(req.body);
     res.json(result);
   });
 

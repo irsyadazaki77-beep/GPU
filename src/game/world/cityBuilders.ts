@@ -20,22 +20,24 @@ export function buildMonasLandmark(): THREE.Group {
   const group = new THREE.Group();
 
   const marbleMat = new THREE.MeshStandardMaterial({
-    color: 0xf1f5f9,
-    roughness: 0.42,
-    metalness: 0.08,
+    color: 0xe2e8f0,
+    roughness: 0.78,
+    metalness: 0.04,
+    envMapIntensity: 0.08,
   });
   const darkStoneMat = new THREE.MeshStandardMaterial({
     color: 0x3f3f46,
-    roughness: 0.72,
-    metalness: 0.15,
+    roughness: 0.86,
+    metalness: 0.08,
+    envMapIntensity: 0.08,
   });
-  const goldFlameMat = new THREE.MeshPhysicalMaterial({
+  const goldFlameMat = new THREE.MeshStandardMaterial({
     color: 0xfbbf24,
     emissive: 0xd97706,
-    emissiveIntensity: 0.85,
-    metalness: 0.92,
-    roughness: 0.14,
-    clearcoat: 1.0,
+    emissiveIntensity: 0.45,
+    metalness: 0.65,
+    roughness: 0.32,
+    envMapIntensity: 0.2,
   });
 
   const lowerStep = new THREE.Mesh(
@@ -154,14 +156,17 @@ export function buildWarungStall(
   group.rotation.y = rotY;
 
   const tarpMat = new THREE.MeshStandardMaterial({
-    color: 0xd97706,
-    roughness: 0.72,
+    color: 0xb45309,
+    roughness: 0.88,
+    metalness: 0.02,
+    envMapIntensity: 0.06,
   });
   const bannerMat = new THREE.MeshStandardMaterial({
-    color: 0xfef08a,
-    emissive: 0xf59e0b,
-    emissiveIntensity: 0.55,
-    roughness: 0.4,
+    color: 0xfde68a,
+    emissive: 0xd97706,
+    emissiveIntensity: 0.22,
+    roughness: 0.72,
+    envMapIntensity: 0.06,
   });
   const woodMat = new THREE.MeshStandardMaterial({
     color: 0x78350f,
@@ -224,23 +229,23 @@ export function buildJakartaBuilding(
 
   const podiumMat = new THREE.MeshStandardMaterial({
     color: 0x1e2430,
-    roughness: 0.76,
-    metalness: 0.18,
-    envMapIntensity: 0.25,
+    roughness: 0.88,
+    metalness: 0.08,
+    envMapIntensity: 0.08,
   });
   const lobbyGlassMat = new THREE.MeshStandardMaterial({
     color: 0x0f172a,
     emissive: 0xd97706,
-    emissiveIntensity: 0.08,
-    roughness: 0.28,
-    metalness: 0.45,
-    envMapIntensity: 0.35,
+    emissiveIntensity: 0.06,
+    roughness: 0.62,
+    metalness: 0.18,
+    envMapIntensity: 0.1,
   });
   const mullionMat = new THREE.MeshStandardMaterial({
     color: 0x111827,
-    roughness: 0.52,
-    metalness: 0.55,
-    envMapIntensity: 0.3,
+    roughness: 0.78,
+    metalness: 0.22,
+    envMapIntensity: 0.08,
   });
 
   const podiumH = b.style === 'skyscraper' ? 3.8 : 2.8;
@@ -284,18 +289,18 @@ export function buildJakartaBuilding(
     color: 0xffffff,
     map: facadeTex,
     roughnessMap,
-    roughness: b.style === 'skyscraper' ? 0.64 : 0.82,
-    metalness: b.style === 'skyscraper' ? 0.32 : 0.12,
-    envMapIntensity: 0.3,
+    roughness: b.style === 'skyscraper' ? 0.86 : 0.9,
+    metalness: b.style === 'skyscraper' ? 0.08 : 0.04,
+    envMapIntensity: 0.08,
   });
 
   const accentMat = new THREE.MeshStandardMaterial({
     color: b.accentColor,
     emissive: b.accentColor,
-    emissiveIntensity: 0.28,
-    roughness: 0.42,
-    metalness: 0.45,
-    envMapIntensity: 0.3,
+    emissiveIntensity: 0.14,
+    roughness: 0.68,
+    metalness: 0.18,
+    envMapIntensity: 0.08,
   });
 
   if (b.style === 'skyscraper') {
@@ -421,3 +426,221 @@ export function buildJakartaBuilding(
 
   return group;
 }
+
+export function buildJakartaIconicLandmarks(): THREE.Group {
+  const landmarksGroup = new THREE.Group();
+
+  const stoneMat = new THREE.MeshStandardMaterial({
+    color: 0xcbd5e1,
+    roughness: 0.86,
+    metalness: 0.04,
+    envMapIntensity: 0.08,
+  });
+  const darkSlateMat = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
+    roughness: 0.88,
+    metalness: 0.06,
+    envMapIntensity: 0.08,
+  });
+  const bronzeMat = new THREE.MeshStandardMaterial({
+    color: 0xb45309,
+    roughness: 0.58,
+    metalness: 0.42,
+    envMapIntensity: 0.14,
+  });
+  const waterMat = new THREE.MeshStandardMaterial({
+    color: 0x0284c7,
+    emissive: 0x0369a1,
+    emissiveIntensity: 0.18,
+    roughness: 0.65,
+    metalness: 0.1,
+    envMapIntensity: 0.1,
+  });
+
+  // 1. Bundaran HI Fountain & Patung Selamat Datang Plaza (-15.5, 0, -52)
+  const hiGroup = new THREE.Group();
+  hiGroup.position.set(-15.5, 0, -52);
+
+  const basinRim = new THREE.Mesh(
+    new THREE.CylinderGeometry(4.6, 4.9, 0.65, 24),
+    darkSlateMat
+  );
+  basinRim.position.y = 0.32;
+  hiGroup.add(basinRim);
+
+  const waterPool = new THREE.Mesh(
+    new THREE.CylinderGeometry(4.2, 4.2, 0.72, 24),
+    waterMat
+  );
+  waterPool.position.y = 0.34;
+  hiGroup.add(waterPool);
+
+  const innerRing = new THREE.Mesh(
+    new THREE.TorusGeometry(2.8, 0.14, 8, 24),
+    stoneMat
+  );
+  innerRing.rotation.x = Math.PI / 2;
+  innerRing.position.y = 0.75;
+  hiGroup.add(innerRing);
+
+  const pedestal = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.85, 1.25, 5.8, 10),
+    stoneMat
+  );
+  pedestal.position.y = 3.1;
+  pedestal.castShadow = true;
+  hiGroup.add(pedestal);
+
+  // Twin welcoming bronze figures waving aloft
+  for (const sx of [-0.36, 0.36]) {
+    const torso = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.24, 1.35, 4, 8),
+      bronzeMat
+    );
+    torso.position.set(sx, 6.75, 0);
+    hiGroup.add(torso);
+
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.22, 8, 8),
+      bronzeMat
+    );
+    head.position.set(sx, 7.75, 0);
+    hiGroup.add(head);
+
+    const raisedArm = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.09, 1.05, 6),
+      bronzeMat
+    );
+    raisedArm.position.set(sx * 1.65, 7.65, 0.15);
+    raisedArm.rotation.z = sx < 0 ? 0.45 : -0.45;
+    hiGroup.add(raisedArm);
+  }
+  landmarksGroup.add(hiGroup);
+
+  // 2. Masjid Istiqlal Grand Geodesic Dome & Minaret (22, 0, -16)
+  const istiqlalGroup = new THREE.Group();
+  istiqlalGroup.position.set(22, 0, -16);
+
+  const hallBase = new THREE.Mesh(
+    new THREE.BoxGeometry(11.5, 4.2, 11.5),
+    stoneMat
+  );
+  hallBase.position.y = 2.1;
+  hallBase.castShadow = true;
+  hallBase.receiveShadow = true;
+  istiqlalGroup.add(hallBase);
+
+  const domeMat = new THREE.MeshStandardMaterial({
+    color: 0xf1f5f9,
+    roughness: 0.78,
+    metalness: 0.08,
+    envMapIntensity: 0.08,
+  });
+  const grandDome = new THREE.Mesh(
+    new THREE.SphereGeometry(4.8, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.52),
+    domeMat
+  );
+  grandDome.position.y = 4.1;
+  grandDome.castShadow = true;
+  istiqlalGroup.add(grandDome);
+
+  const crescentSpire = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.14, 2.4, 8),
+    bronzeMat
+  );
+  crescentSpire.position.y = 9.6;
+  istiqlalGroup.add(crescentSpire);
+
+  const minaret = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.45, 0.68, 17.5, 10),
+    domeMat
+  );
+  minaret.position.set(5.2, 8.75, 5.2);
+  minaret.castShadow = true;
+  istiqlalGroup.add(minaret);
+
+  const minaretCap = new THREE.Mesh(
+    new THREE.ConeGeometry(0.65, 2.6, 10),
+    bronzeMat
+  );
+  minaretCap.position.set(5.2, 18.6, 5.2);
+  istiqlalGroup.add(minaretCap);
+  landmarksGroup.add(istiqlalGroup);
+
+  // 3. Gelora Bung Karno (GBK) Stadium Temu Gelang Ring (-64, 0, 36)
+  const gbkGroup = new THREE.Group();
+  gbkGroup.position.set(-64, 0, 36);
+
+  const stadiumBowl = new THREE.Mesh(
+    new THREE.CylinderGeometry(11.2, 9.2, 5.4, 24, 1, true),
+    darkSlateMat
+  );
+  stadiumBowl.position.y = 2.7;
+  gbkGroup.add(stadiumBowl);
+
+  const pitchTurf = new THREE.Mesh(
+    new THREE.CircleGeometry(8.8, 24),
+    new THREE.MeshStandardMaterial({
+      color: 0x15803d,
+      roughness: 0.92,
+      metalness: 0.02,
+      envMapIntensity: 0.05,
+    })
+  );
+  pitchTurf.rotation.x = -Math.PI / 2;
+  pitchTurf.position.y = 0.08;
+  gbkGroup.add(pitchTurf);
+
+  const roofRing = new THREE.Mesh(
+    new THREE.TorusGeometry(10.2, 1.35, 10, 28),
+    domeMat
+  );
+  roofRing.rotation.x = Math.PI / 2;
+  roofRing.scale.set(1, 1, 0.42);
+  roofRing.position.y = 5.6;
+  gbkGroup.add(roofRing);
+
+  const gbkAccentRing = new THREE.Mesh(
+    new THREE.TorusGeometry(11.35, 0.18, 8, 28),
+    new THREE.MeshStandardMaterial({
+      color: 0xef4444,
+      emissive: 0xdc2626,
+      emissiveIntensity: 0.25,
+      roughness: 0.65,
+    })
+  );
+  gbkAccentRing.rotation.x = Math.PI / 2;
+  gbkAccentRing.position.y = 5.65;
+  gbkGroup.add(gbkAccentRing);
+  landmarksGroup.add(gbkGroup);
+
+  // 4. Pelabuhan Tanjung Priok Container Stacks (68, 0, -64)
+  const priokGroup = new THREE.Group();
+  priokGroup.position.set(68, 0, -64);
+
+  const containerColors = [0xdc2626, 0x0284c7, 0xd97706, 0x15803d];
+  const containerGeo = new THREE.BoxGeometry(2.6, 2.4, 5.8);
+  containerColors.forEach((hex, idx) => {
+    const cMat = new THREE.MeshStandardMaterial({
+      color: hex,
+      roughness: 0.84,
+      metalness: 0.14,
+      envMapIntensity: 0.08,
+    });
+    const row = Math.floor(idx / 2);
+    const col = idx % 2;
+    const stackBottom = new THREE.Mesh(containerGeo, cMat);
+    stackBottom.position.set(col * 3.1 - 1.5, 1.2, row * 6.4 - 3.2);
+    stackBottom.castShadow = true;
+    priokGroup.add(stackBottom);
+
+    const stackTop = new THREE.Mesh(containerGeo, cMat);
+    stackTop.position.set(col * 3.1 - 1.5, 3.65, row * 6.4 - 3.2);
+    stackTop.castShadow = true;
+    priokGroup.add(stackTop);
+  });
+  landmarksGroup.add(priokGroup);
+
+  return landmarksGroup;
+}
+

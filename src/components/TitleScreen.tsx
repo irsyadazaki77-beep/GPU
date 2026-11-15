@@ -2,9 +2,17 @@ import React, { useState } from 'react';
 import {
   OriginArchetype,
   PROTAGONIST_PROFILES,
+  SaveSlotId,
   formatRupiah,
 } from '../game/rules';
-import { SavedGameSnapshot } from '../game/save';
+import {
+  SavedGameSnapshot,
+  exportSavedGameJson,
+  listSaveSlotSummaries,
+  parseImportedSaveJson,
+  saveGameSnapshot,
+} from '../game/save';
+import { gameStore, useGameStore } from '../state/gameStore';
 
 interface TitleScreenProps {
   selectedOrigin: OriginArchetype;
@@ -101,6 +109,9 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   onStartGame,
 }) => {
   const [showNewGameSetup, setShowNewGameSetup] = useState<boolean>(!savedGame);
+  const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  const activeSaveSlot = useGameStore((s) => s.activeSaveSlot);
+  const slotSummaries = listSaveSlotSummaries();
 
   const activeStage =
     CAMPAIGN_STAGES.find((s) => s.stage === selectedStage) || CAMPAIGN_STAGES[4];
@@ -111,13 +122,47 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
     ? PROTAGONIST_PROFILES[savedGame.playerState.activeProtagonist]
     : null;
 
+  const handleExportSlotJson = () => {
+    const raw = exportSavedGameJson(activeSaveSlot);
+    if (!raw) {
+      setBackupStatus(`Slot ${activeSaveSlot} masih kosong.`);
+      return;
+    }
+    const blob = new Blob([raw], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `san_nabilo_slot_${activeSaveSlot}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setBackupStatus(`Profil Slot ${activeSaveSlot} berhasil diekspor ke JSON.`);
+  };
+
+  const handleImportSlotJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === 'string' ? reader.result : '';
+      const parsed = parseImportedSaveJson(text);
+      if (!parsed) {
+        setBackupStatus('File JSON tidak valid untuk GPU: San Nabilo.');
+        return;
+      }
+      saveGameSnapshot(parsed, activeSaveSlot);
+      gameStore.switchSaveSlot(activeSaveSlot);
+      setBackupStatus(`Profil Slot ${activeSaveSlot} berhasil diimpor!`);
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <main
       aria-label="Layar Utama GPU San Nabilo"
       className="fixed inset-0 z-20 flex items-center px-6 py-6 md:px-14 pointer-events-none overflow-y-auto"
       style={{
         background:
-          'linear-gradient(92deg, rgba(7, 10, 16, 0.94) 0%, rgba(7, 10, 16, 0.72) 32%, rgba(7, 10, 16, 0.14) 56%, rgba(7, 10, 16, 0) 78%)',
+          'linear-gradient(92deg, rgba(7, 10, 16, 0.96) 0%, rgba(7, 10, 16, 0.8) 36%, rgba(7, 10, 16, 0.2) 60%, rgba(7, 10, 16, 0) 80%)',
       }}
     >
       {/* Left-Anchored Cinematic Rockstar Menu Column */}
@@ -147,6 +192,68 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             </div>
           </div>
         </header>
+
+        {/* Multi-Slot Save Profile Switcher (Slot 1 / 2 / 3) + JSON Export/Import */}
+        <section className="flex flex-col gap-2 border-t border-white/10 pt-3">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-[#94a3b8]">
+              Profil Penyimpanan (Multi-Slot)
+            </span>
+            <div className="flex items-center gap-2 font-mono-num text-[11px]">
+              <button
+                type="button"
+                onClick={handleExportSlotJson}
+                className="text-[#38bdf8] hover:text-white cursor-pointer"
+              >
+                Ekspor JSON
+              </button>
+              <span className="text-white/20">·</span>
+              <label className="text-[#22c55e] hover:text-white cursor-pointer">
+                Impor JSON
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={handleImportSlotJson}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-1.5">
+            {slotSummaries.map((slot) => {
+              const active = activeSaveSlot === slot.slotId;
+              const snap = slot.snapshot;
+              return (
+                <button
+                  key={slot.slotId}
+                  type="button"
+                  onClick={() => gameStore.switchSaveSlot(slot.slotId as SaveSlotId)}
+                  className={`p-2 rounded-lg border text-left cursor-pointer transition-colors ${
+                    active
+                      ? 'bg-[#f59e0b]/20 border-[#f59e0b] text-[#f4f1ea]'
+                      : 'bg-white/5 border-white/10 text-[#94a3b8] hover:text-white'
+                  }`}
+                >
+                  <div className="font-display text-xs font-bold uppercase flex items-center justify-between">
+                    <span>Slot {slot.slotId}</span>
+                    {active && <span className="text-[10px] text-[#f59e0b]">Aktif</span>}
+                  </div>
+                  <div className="text-[10px] font-mono-num truncate mt-0.5">
+                    {snap
+                      ? `${snap.playerState.completedMissions.length}/15 · ${formatRupiah(snap.playerState.rupiah)}`
+                      : 'Kosong'}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {backupStatus && (
+            <div className="text-[11px] font-mono-num text-[#38bdf8]">
+              {backupStatus}
+            </div>
+          )}
+        </section>
 
         {/* Auto-Saved Campaign Resume Block */}
         {savedGame && onContinueGame && (
@@ -342,7 +449,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
           </>
         )}
 
-        <p className="text-[11px] text-[#64748b]">
+        <p className="text-[11px] text-[#cbd5e1] hud-stroke-sm">
           Seret mouse di kanvas untuk memutar kamera. Tekan Esc saat bermain untuk membuka peta distrik dan daftar kontrol.
         </p>
       </div>

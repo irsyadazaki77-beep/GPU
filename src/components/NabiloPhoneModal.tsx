@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  CHARACTER_SKILL_SPECS,
   DRONE_UPGRADE_COST,
   ENTERABLE_INTERIORS,
   InteriorZoneId,
@@ -19,14 +20,27 @@ import {
   StoryMission,
   VEHICLE_SPECS,
   VehicleType,
+  WEAPON_ATTACHMENT_SPECS,
   WEATHER_MODES,
   WEAPONS,
   WeaponId,
   WeatherMode,
+  bribePoliceWanted,
+  buyWeaponAttachment,
   calculatePassivePropertyIncome,
+  calculateTurfWarsIncome,
+  formatJakartaClock,
   formatRupiah,
   getDominantFactionTitle,
+  upgradeCharacterSkill,
 } from '../game/rules';
+
+import {
+  STREET_BOUNTIES,
+  gameStore,
+  useGameStore,
+} from '../state/gameStore';
+import { soundEngine } from '../game/sound';
 
 interface NabiloPhoneModalProps {
   playerState: PlayerProgressState;
@@ -66,7 +80,10 @@ type AppScreenId =
   | 'properti'
   | 'satelit'
   | 'gaya'
-  | 'mrt';
+  | 'mrt'
+  | 'dompet'
+  | 'feed'
+  | 'bounty';
 
 const IFRUIT_APPS: {
   id: Exclude<AppScreenId, 'home'>;
@@ -82,6 +99,9 @@ const IFRUIT_APPS: {
   { id: 'satelit', name: 'Trio', color: '#06b6d4' },
   { id: 'gaya', name: 'Radio', color: '#ec4899' },
   { id: 'mrt', name: 'Transit', color: '#eab308' },
+  { id: 'dompet', name: 'NabiloPay', color: '#10b981' },
+  { id: 'feed', name: 'JKT-Feed', color: '#6366f1' },
+  { id: 'bounty', name: 'Bounty', color: '#f43f5e' },
 ];
 
 const AppGlyph: React.FC<{ id: Exclude<AppScreenId, 'home'> }> = ({ id }) => {
@@ -150,6 +170,28 @@ const AppGlyph: React.FC<{ id: Exclude<AppScreenId, 'home'> }> = ({ id }) => {
           <circle cx="12" cy="11" r="2" />
         </svg>
       );
+    case 'dompet':
+      return (
+        <svg viewBox="0 0 24 24" className={cls} fill="none" stroke="currentColor" strokeWidth="2.2">
+          <rect x="3" y="6" width="18" height="13" rx="2" />
+          <path d="M16 12h2" />
+          <path d="M3 10h18" />
+        </svg>
+      );
+    case 'feed':
+      return (
+        <svg viewBox="0 0 24 24" className={cls} fill="none" stroke="currentColor" strokeWidth="2.2">
+          <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
+        </svg>
+      );
+    case 'bounty':
+      return (
+        <svg viewBox="0 0 24 24" className={cls} fill="none" stroke="currentColor" strokeWidth="2.2">
+          <circle cx="12" cy="12" r="9" />
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+        </svg>
+      );
   }
 };
 
@@ -180,11 +222,15 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
   onStartStreetRace,
 }) => {
   const [screen, setScreen] = useState<AppScreenId>('home');
+  const cashLedger = useGameStore((s) => s.cashLedger);
+  const claimedBounties = useGameStore((s) => s.claimedBounties);
+  const customWaypoint = useGameStore((s) => s.customWaypoint);
+  const worldTimeMinutes = useGameStore((s) => s.worldTimeMinutes);
 
   const dominantFaction = getDominantFactionTitle(playerState.reputation);
-  const passiveIncome = calculatePassivePropertyIncome(
-    playerState.ownedProperties
-  );
+  const passiveIncome =
+    calculatePassivePropertyIncome(playerState.ownedProperties) +
+    calculateTurfWarsIncome(playerState);
 
   let portfolioValueRp = 0;
   for (const st of JAKARTA_STOCKS) {
@@ -193,6 +239,15 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
       portfolioValueRp += entry.ownedShares * entry.currentPrice;
     }
   }
+
+  let propertyAssetValueRp = 0;
+  for (const prop of JAKARTA_PROPERTIES) {
+    if (playerState.ownedProperties.includes(prop.id)) {
+      propertyAssetValueRp += prop.price;
+    }
+  }
+  const totalNetWorthRp =
+    playerState.rupiah + portfolioValueRp + propertyAssetValueRp;
 
   return (
     /* Non-blocking right-corner anchor so the live 3D city stays bright & unobstructed */
@@ -206,7 +261,7 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
         {/* Top Phone Bezel & Clean Status Bar */}
         <div className="bg-[#0e131d] border-b border-white/10 px-5 pt-3 pb-2.5 flex flex-col gap-2 shrink-0">
           <div className="flex items-center justify-between text-[10px] font-mono-num text-[#94a3b8]">
-            <span>19:42 WIB</span>
+            <span>{formatJakartaClock(worldTimeMinutes)} WIB</span>
             <div className="w-16 h-3 bg-[#05070b] rounded-full border border-white/10" />
             <span className="text-[#22c55e] font-semibold">
               {formatRupiah(playerState.rupiah)}
@@ -263,17 +318,17 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                 </span>
               </div>
 
-              {/* 3x3 Crisp Icon App Launcher */}
-              <div className="grid grid-cols-3 gap-x-3 gap-y-4 py-1">
+              {/* 4x3 Crisp Icon App Launcher */}
+              <div className="grid grid-cols-3 gap-x-3 gap-y-3.5 py-0.5">
                 {IFRUIT_APPS.map((app) => (
                   <button
                     key={app.id}
                     type="button"
                     onClick={() => setScreen(app.id)}
-                    className="flex flex-col items-center gap-1.5 cursor-pointer group"
+                    className="flex flex-col items-center gap-1 cursor-pointer group"
                   >
                     <div
-                      className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform"
+                      className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform"
                       style={{ backgroundColor: app.color }}
                     >
                       <AppGlyph id={app.id} />
@@ -285,21 +340,21 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                 ))}
               </div>
 
-              {/* Direct Links for Heist Board & Customs 360 */}
-              <div className="mt-auto pt-3 border-t border-white/10 grid grid-cols-2 gap-2">
+              {/* Direct Links for Heist Board, Customs 360 & Photo Mode */}
+              <div className="mt-auto pt-2.5 border-t border-white/10 grid grid-cols-3 gap-1.5">
                 <button
                   type="button"
                   onClick={() => {
                     onOpenHeistBoard();
                     onClose();
                   }}
-                  className="py-2.5 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-left cursor-pointer transition-colors"
+                  className="py-2 px-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left cursor-pointer transition-colors"
                 >
                   <div className="text-[10px] font-mono-num text-[#f59e0b]">
-                    Pintasan [H]
+                    [H] Heist
                   </div>
-                  <div className="text-xs font-semibold text-[#f4f1ea] mt-0.5">
-                    Papan Heist
+                  <div className="text-[11px] font-semibold text-[#f4f1ea] mt-0.5 truncate">
+                    Strategi
                   </div>
                 </button>
                 <button
@@ -308,13 +363,27 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                     onOpenCustomsGarage();
                     onClose();
                   }}
-                  className="py-2.5 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-left cursor-pointer transition-colors"
+                  className="py-2 px-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left cursor-pointer transition-colors"
                 >
                   <div className="text-[10px] font-mono-num text-[#c084fc]">
-                    Pintasan [B]
+                    [B] Garasi
                   </div>
-                  <div className="text-xs font-semibold text-[#f4f1ea] mt-0.5">
-                    Bengkel 360°
+                  <div className="text-[11px] font-semibold text-[#f4f1ea] mt-0.5 truncate">
+                    Kustom 360°
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    gameStore.setState({ photoModeOpen: true, phoneOpen: false });
+                  }}
+                  className="py-2 px-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left cursor-pointer transition-colors"
+                >
+                  <div className="text-[10px] font-mono-num text-[#38bdf8]">
+                    [N] Kamera
+                  </div>
+                  <div className="text-[11px] font-semibold text-[#f4f1ea] mt-0.5 truncate">
+                    Photo Mode
                   </div>
                 </button>
               </div>
@@ -330,6 +399,42 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                   {lastOutcomeText}
                 </div>
               )}
+
+              <div className="text-[11px] font-semibold text-[#38bdf8]">
+                Misi Sampingan Lapangan (Open-World GPS)
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    gameStore.startStreetContract('ojol_delivery');
+                    onClose();
+                  }}
+                  className="p-2.5 rounded-xl bg-[#22c55e]/15 border border-[#22c55e]/35 hover:bg-[#22c55e]/25 text-left cursor-pointer"
+                >
+                  <div className="text-xs font-bold text-[#f4f1ea]">
+                    Kurir Ojol Kilat
+                  </div>
+                  <div className="text-[11px] font-mono-num text-[#22c55e] mt-0.5">
+                    +Rp 175.000 · 75d
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    gameStore.startStreetContract('convoy_intercept');
+                    onClose();
+                  }}
+                  className="p-2.5 rounded-xl bg-[#f59e0b]/15 border border-[#f59e0b]/35 hover:bg-[#f59e0b]/25 text-left cursor-pointer"
+                >
+                  <div className="text-xs font-bold text-[#f4f1ea]">
+                    Sergap Konvoi Baja
+                  </div>
+                  <div className="text-[11px] font-mono-num text-[#f59e0b] mt-0.5">
+                    +Rp 320.000 · 95d
+                  </div>
+                </button>
+              </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <button
@@ -591,9 +696,9 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
             </div>
           )}
 
-          {/* APP 5: AMUNISI GLODOK */}
+          {/* APP 5: AMUNISI GLODOK, ATTACHMENT SENJATA & SKILL KARAKTER */}
           {screen === 'senjata' && (
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3.5">
               <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
@@ -617,12 +722,23 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onBuyArmorOrMedkit('bribe')}
+                  onClick={() => {
+                    const res = bribePoliceWanted(playerState);
+                    if (res.bribed) {
+                      soundEngine.playPickup();
+                      gameStore.setState({
+                        playerState: res.nextState,
+                        lastOutcomeText: `Suap Patwal Berhasil (-${formatRupiah(res.costRp)}) · Buronan Bersih!`,
+                      });
+                    } else {
+                      onBuyArmorOrMedkit('bribe');
+                    }
+                  }}
                   className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-center cursor-pointer"
                 >
-                  <div className="text-[11px] font-bold text-[#f59e0b]">Suap</div>
+                  <div className="text-[11px] font-bold text-[#f59e0b]">Suap Patwal</div>
                   <div className="text-[10px] font-mono-num text-[#cbd5e1]">
-                    Rp 120rb
+                    Bersih ★
                   </div>
                 </button>
               </div>
@@ -635,13 +751,13 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                   return (
                     <div
                       key={wId}
-                      className="py-2.5 flex items-center justify-between gap-2"
+                      className="py-2 flex items-center justify-between gap-2"
                     >
                       <div className="min-w-0">
                         <div className="text-xs font-semibold text-[#f4f1ea] truncate">
                           {spec.name}
                         </div>
-                        <div className="text-[11px] text-[#94a3b8] truncate">
+                        <div className="text-[10px] text-[#94a3b8] truncate">
                           {spec.roleClue}
                         </div>
                       </div>
@@ -663,6 +779,104 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                     </div>
                   );
                 })}
+              </div>
+
+              {/* Weapon Attachments for Active Firearm */}
+              {!WEAPONS[playerState.activeWeapon].isMelee && (
+                <div className="pt-2 border-t border-white/10 flex flex-col gap-2">
+                  <div className="text-[11px] font-semibold text-[#f97316]">
+                    Modifikasi Attachment: {WEAPONS[playerState.activeWeapon].name}
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {WEAPON_ATTACHMENT_SPECS.map((att) => {
+                      const owned = (
+                        playerState.weaponAttachments?.[playerState.activeWeapon] ||
+                        []
+                      ).includes(att.id);
+                      return (
+                        <button
+                          key={att.id}
+                          type="button"
+                          disabled={owned}
+                          onClick={() => {
+                            const res = buyWeaponAttachment(
+                              playerState,
+                              playerState.activeWeapon,
+                              att.id
+                            );
+                            if (res.bought) {
+                              soundEngine.playPickup();
+                              gameStore.setState({
+                                playerState: res.nextState,
+                                lastOutcomeText: `Attachment Terpasang: ${att.name} (${WEAPONS[playerState.activeWeapon].name})`,
+                              });
+                            }
+                          }}
+                          className={`p-2 rounded-lg text-left cursor-pointer transition-colors ${
+                            owned
+                              ? 'bg-[#22c55e]/20 border border-[#22c55e]/40 text-[#22c55e]'
+                              : 'bg-white/5 hover:bg-white/10 text-[#f4f1ea]'
+                          }`}
+                        >
+                          <div className="text-[11px] font-bold truncate">
+                            {att.name}
+                          </div>
+                          <div className="text-[10px] font-mono-num text-[#cbd5e1]">
+                            {owned ? 'Terpasang' : formatRupiah(att.priceRp)}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* 5-Branch Character Skill Progression */}
+              <div className="pt-2 border-t border-white/10 flex flex-col gap-2">
+                <div className="text-[11px] font-semibold text-[#38bdf8]">
+                  Upgrade Skill Karakter (Lv. 1–5)
+                </div>
+                <div className="divide-y divide-white/10">
+                  {CHARACTER_SKILL_SPECS.map((sk) => {
+                    const lv = playerState.characterSkills?.[sk.id] ?? 1;
+                    const cost = sk.baseCostRp * lv;
+                    return (
+                      <div
+                        key={sk.id}
+                        className="py-2 flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-[#f4f1ea] truncate">
+                            {sk.name} ·{' '}
+                            <span className="font-mono-num text-[#38bdf8]">
+                              Lv.{lv}/5
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-[#94a3b8] truncate">
+                            {sk.perkSummary}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={lv >= 5}
+                          onClick={() => {
+                            const res = upgradeCharacterSkill(playerState, sk.id);
+                            if (res.upgraded) {
+                              soundEngine.playMissionFanfare();
+                              gameStore.setState({
+                                playerState: res.nextState,
+                                lastOutcomeText: `Skill Meningkat: ${sk.name} naik ke Lv.${lv + 1}!`,
+                              });
+                            }
+                          }}
+                          className="px-2.5 py-1 rounded-md bg-[#38bdf8] disabled:bg-white/10 text-[#090c12] disabled:text-[#22c55e] font-mono-num text-[10px] font-bold cursor-pointer shrink-0"
+                        >
+                          {lv >= 5 ? 'Maks' : formatRupiah(cost)}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
@@ -900,6 +1114,223 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                     </span>
                   </button>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* APP 10: NABILOPAY DIGITAL WALLET & LEDGER */}
+          {screen === 'dompet' && (
+            <div className="flex flex-col gap-3">
+              <div className="p-3.5 rounded-2xl bg-gradient-to-br from-[#064e3b] to-[#0f172a] border border-[#10b981]/40 flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-[10px] font-mono-num text-[#6ee7b7]">
+                  <span>NABILOPAY PLATINUM</span>
+                  <span>ID · JKT-8829</span>
+                </div>
+                <div className="font-mono-num text-xl font-extrabold text-[#f4f1ea]">
+                  {formatRupiah(totalNetWorthRp)}
+                </div>
+                <div className="text-[11px] text-[#cbd5e1] flex items-center justify-between pt-1 border-t border-white/10 font-mono-num">
+                  <span>Kas: {formatRupiah(playerState.rupiah)}</span>
+                  <span>Saham: {formatRupiah(portfolioValueRp)}</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-2.5 rounded-xl bg-white/5 border border-white/8">
+                  <div className="text-[10px] text-[#94a3b8]">Aset Properti</div>
+                  <div className="font-mono-num text-xs font-bold text-[#c084fc] mt-0.5">
+                    {formatRupiah(propertyAssetValueRp)}
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-xl bg-white/5 border border-white/8">
+                  <div className="text-[10px] text-[#94a3b8]">Dividen Pasif</div>
+                  <div className="font-mono-num text-xs font-bold text-[#22c55e] mt-0.5">
+                    +{formatRupiah(passiveIncome)}/4d
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-xs font-semibold text-[#94a3b8] pt-1">
+                Mutasi Rekening Terakhir
+              </div>
+              <div className="divide-y divide-white/10">
+                {cashLedger.map((tx) => (
+                  <div
+                    key={tx.id}
+                    className="py-2 flex items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium text-[#f4f1ea] truncate">
+                        {tx.label}
+                      </div>
+                      <div className="text-[10px] font-mono-num text-[#94a3b8] uppercase">
+                        {tx.category}
+                      </div>
+                    </div>
+                    <span
+                      className={`font-mono-num text-xs font-bold shrink-0 ${
+                        tx.amountRp >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]'
+                      }`}
+                    >
+                      {tx.amountRp >= 0
+                        ? `+${formatRupiah(tx.amountRp)}`
+                        : `-${formatRupiah(Math.abs(tx.amountRp))}`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* APP 11: JKT-FEED SOCIAL & UNDERGROUND WIRE */}
+          {screen === 'feed' && (
+            <div className="flex flex-col gap-3">
+              <div className="text-[11px] text-[#94a3b8] pb-2 border-b border-white/10">
+                Kabar jalanan real-time warga, bursa BAJSA, dan sindikat Jakarta.
+              </div>
+              {[
+                {
+                  handle: '@InfoLalinJKT',
+                  badge: 'Terkini',
+                  color: '#38bdf8',
+                  body:
+                    weatherMode === 'hujan'
+                      ? 'Hujan deras mengguyur koridor Sudirman–Monas. Jarak pandang pendek dan aspal licin, waspada aquaplaning!'
+                      : weatherMode === 'malam'
+                      ? 'Sirkuit balap liar kembali memanas di Tol Layang Kemayoran malam ini. Patroli sirine mulai dikerahkan.'
+                      : 'Arus komuter TransJakarta dan MRT terpantau padat merayap di sekitar Bundaran HI dan Tanah Abang.',
+                },
+                {
+                  handle: '@BursaBAJSA_ID',
+                  badge: 'Pasar Modal',
+                  color: '#22c55e',
+                  body:
+                    playerState.completedHeists.length > 0
+                      ? `Breaking: Aksi perampokan brankas mengguncang valuasi korporasi! Total ${playerState.completedHeists.length} operasi Heist tercatat.`
+                      : 'Analis SCBD memprediksi volatilitas tinggi pada saham teknologi dan logistik pelabuhan minggu ini.',
+                },
+                {
+                  handle: '@BisikBawahTanah',
+                  badge: 'Sindikat',
+                  color: '#f59e0b',
+                  body:
+                    playerState.wantedLevel > 0
+                      ? `PERINGATAN: Status buronan bintang ${playerState.wantedLevel} aktif! Helikopter taktis menyisir sektor ${PROTAGONIST_PROFILES[playerState.activeProtagonist].homeDistrictName}.`
+                      : `Reputasi ${dominantFaction.title} makin disegani setelah menyelesaikan ${playerState.completedMissions.length} kontrak utama.`,
+                },
+                {
+                  handle: '@KulinerSabang',
+                  badge: 'Gaya Hidup',
+                  color: '#c084fc',
+                  body:
+                    playerState.staminaBuffTimer > 0
+                      ? 'Kopi Tubruk & Sate Madura Warung Sabang memang tiada lawan! Stamina tempur meningkat drastis.'
+                      : 'Mampir ke Warung Kopi Nusantara [J] untuk meracik kopi panas dan memulihkan stamina sebelum beraksi.',
+                },
+              ].map((post, idx) => (
+                <div
+                  key={idx}
+                  className="p-3 rounded-xl bg-white/[0.04] border border-white/8 flex flex-col gap-1.5"
+                >
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span
+                      className="font-mono-num font-bold"
+                      style={{ color: post.color }}
+                    >
+                      {post.handle}
+                    </span>
+                    <span className="text-[10px] font-mono-num text-[#94a3b8]">
+                      {post.badge}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#e2e8f0] leading-relaxed">
+                    {post.body}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* APP 12: RADAR BOUNTY & GPS WAYPOINT TRACKER */}
+          {screen === 'bounty' && (
+            <div className="flex flex-col gap-3">
+              {customWaypoint && (
+                <div className="p-2.5 rounded-xl bg-[#c084fc]/15 border border-[#c084fc]/40 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-mono-num text-[#c084fc]">
+                      GPS WAYPOINT AKTIF
+                    </div>
+                    <div className="text-xs font-bold text-[#f4f1ea] truncate">
+                      {customWaypoint.label}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => gameStore.setCustomWaypoint(null)}
+                    className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-[10px] font-mono-num text-[#f4f1ea] cursor-pointer shrink-0"
+                  >
+                    Hapus
+                  </button>
+                </div>
+              )}
+
+              <div className="divide-y divide-white/10">
+                {STREET_BOUNTIES.map((b) => {
+                  const claimed = claimedBounties.includes(b.id);
+                  return (
+                    <div
+                      key={b.id}
+                      className="py-3 flex flex-col gap-2"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-[10px] font-mono-num text-[#94a3b8]">
+                            {b.districtName} · Kesulitan {b.difficulty}
+                          </div>
+                          <div className="text-xs font-bold text-[#f4f1ea] truncate">
+                            {b.targetName}
+                          </div>
+                          <div className="text-[11px] text-[#cbd5e1] truncate">
+                            {b.title}
+                          </div>
+                        </div>
+                        <span className="font-mono-num text-xs font-bold text-[#22c55e] shrink-0">
+                          {formatRupiah(b.rewardRp)}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            soundEngine.playPickup();
+                            gameStore.setCustomWaypoint({
+                              x: b.x,
+                              z: b.z,
+                              label: `Bounty: ${b.targetName}`,
+                              category: 'bounty',
+                            });
+                            onClose();
+                          }}
+                          className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#c084fc]/20 hover:bg-[#c084fc]/30 border border-[#c084fc]/40 text-[#e9d5ff] text-[11px] font-semibold cursor-pointer text-center"
+                        >
+                          Pin GPS Waypoint
+                        </button>
+                        <button
+                          type="button"
+                          disabled={claimed}
+                          onClick={() => {
+                            soundEngine.playCashRegister();
+                            gameStore.claimStreetBounty(b.id);
+                          }}
+                          className="py-1.5 px-3 rounded-lg bg-[#f43f5e] disabled:bg-white/10 text-white disabled:text-[#64748b] text-[11px] font-bold cursor-pointer shrink-0"
+                        >
+                          {claimed ? 'Tuntas' : 'Sergap'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

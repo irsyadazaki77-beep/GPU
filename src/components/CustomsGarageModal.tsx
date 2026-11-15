@@ -8,6 +8,9 @@ import {
   formatRupiah,
 } from '../game/rules';
 
+import type { GarageCameraPreset } from '../game/types';
+import { gameStore, useGameStore } from '../state/gameStore';
+
 interface CustomsGarageModalProps {
   playerState: PlayerProgressState;
   onSelectPaint: (paintId: string, price: number) => void;
@@ -15,8 +18,17 @@ interface CustomsGarageModalProps {
   onUpgradeEngine: () => void;
   onUpgradeArmorPlating: () => void;
   onRepairAndClearWanted: () => void;
+  onHonk?: () => void;
   onClose: () => void;
 }
+
+const CAMERA_PRESETS: { id: GarageCameraPreset; label: string; sub: string }[] = [
+  { id: 'free_orbit', label: 'Orbit 360°', sub: 'Putar Otomatis & Seret' },
+  { id: 'front_low', label: 'Fasia Depan', sub: 'Sudut Rendah Grille' },
+  { id: 'side_profile', label: 'Profil Samping', sub: 'Velg & Bodi Samping' },
+  { id: 'rear_exhaust', label: 'Knalpot & Sayap', sub: 'Diffuser Belakang' },
+  { id: 'top_down', label: 'Atap Sinematik', sub: 'Tampak Atas Sasis' },
+];
 
 export const CustomsGarageModal: React.FC<CustomsGarageModalProps> = ({
   playerState,
@@ -25,9 +37,11 @@ export const CustomsGarageModal: React.FC<CustomsGarageModalProps> = ({
   onUpgradeEngine,
   onUpgradeArmorPlating,
   onRepairAndClearWanted,
+  onHonk,
   onClose,
 }) => {
   const customs: VehicleCustomConfig = playerState.vehicleCustoms;
+  const cameraPreset = useGameStore((s) => s.garageCameraPreset);
 
   const engineBonus = playerState.vehicleUpgradeLevel * 12;
   const armorBonus = customs.armorPlatingLevel * 18;
@@ -41,10 +55,53 @@ export const CustomsGarageModal: React.FC<CustomsGarageModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-label="Bengkel Kustom Nusantara 360"
-      className="fixed inset-0 z-30 flex items-center justify-end p-4 md:p-6 pointer-events-none"
+      className="fixed inset-0 z-30 flex flex-col md:flex-row items-end md:items-center justify-between p-4 md:p-6 pointer-events-none gap-4"
     >
+      {/* Left / Bottom-Left Interactive Showroom Camera Angle Bar */}
+      <div className="aaa-glass rounded-2xl p-3.5 shadow-2xl text-[#f4f1ea] flex flex-col gap-2.5 pointer-events-auto max-w-md self-start md:self-end animate-aaa-up">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="text-[10px] font-mono-num uppercase tracking-wider text-[#38bdf8]">
+              Showroom Kamera Interaktif
+            </div>
+            <div className="text-xs font-semibold text-[#cbd5e1]">
+              Seret layar untuk memutar mobil atau pilih sudut inspeksi:
+            </div>
+          </div>
+          {onHonk && (
+            <button
+              type="button"
+              onClick={onHonk}
+              className="px-2.5 py-1.5 rounded-lg bg-[#f59e0b]/20 hover:bg-[#f59e0b]/30 border border-[#f59e0b]/40 text-[#f59e0b] text-xs font-mono-num font-bold cursor-pointer whitespace-nowrap"
+            >
+              Uji Klakson [K]
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {CAMERA_PRESETS.map((preset) => {
+            const active = cameraPreset === preset.id;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => gameStore.setGarageCameraPreset(preset.id)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                  active
+                    ? 'bg-[#38bdf8] text-[#090c12] font-bold'
+                    : 'bg-white/5 text-[#cbd5e1] hover:bg-white/12 hover:text-white'
+                }`}
+                title={preset.sub}
+              >
+                {preset.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Sleek Right-Docked Drawer so the 360° vehicle showcase stays unobstructed */}
-      <div className="w-full max-w-sm aaa-glass rounded-2xl p-5 shadow-2xl text-[#f4f1ea] flex flex-col gap-4 max-h-[92vh] overflow-y-auto pointer-events-auto animate-aaa-up">
+      <div className="w-full max-w-sm aaa-glass rounded-2xl p-5 shadow-2xl text-[#f4f1ea] flex flex-col gap-4 max-h-[88vh] overflow-y-auto pointer-events-auto animate-aaa-up">
         <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-3">
           <div>
             <div className="text-[11px] font-medium text-[#38bdf8]">

@@ -47,43 +47,43 @@ export function buildCharacterRig(
 
   const skinMat = new THREE.MeshStandardMaterial({
     color: 0xc68b59,
-    roughness: 0.72,
-    metalness: 0.04,
-    envMapIntensity: 0.2,
+    roughness: 0.86,
+    metalness: 0.02,
+    envMapIntensity: 0.06,
   });
   const jacketMat = new THREE.MeshStandardMaterial({
     color: jacketColor,
-    roughness: 0.64,
-    metalness: 0.12,
-    envMapIntensity: 0.25,
+    roughness: 0.84,
+    metalness: 0.04,
+    envMapIntensity: 0.06,
   });
   const pantsMat = new THREE.MeshStandardMaterial({
     color: pantsColor,
-    roughness: 0.84,
-    metalness: 0.05,
-    envMapIntensity: 0.18,
+    roughness: 0.9,
+    metalness: 0.02,
+    envMapIntensity: 0.06,
   });
   const shoeMat = new THREE.MeshStandardMaterial({
     color: 0x090d16,
-    roughness: 0.7,
-    envMapIntensity: 0.2,
+    roughness: 0.84,
+    envMapIntensity: 0.06,
   });
   const soleMat = new THREE.MeshStandardMaterial({
-    color: 0xcbd5e1,
-    roughness: 0.8,
-    envMapIntensity: 0.15,
+    color: 0x94a3b8,
+    roughness: 0.9,
+    envMapIntensity: 0.06,
   });
   const accentMat = new THREE.MeshStandardMaterial({
     color: accentColor,
-    roughness: 0.52,
-    metalness: 0.25,
-    envMapIntensity: 0.25,
+    roughness: 0.78,
+    metalness: 0.08,
+    envMapIntensity: 0.08,
   });
   const darkGearMat = new THREE.MeshStandardMaterial({
     color: 0x111827,
-    roughness: 0.45,
-    metalness: 0.45,
-    envMapIntensity: 0.25,
+    roughness: 0.76,
+    metalness: 0.14,
+    envMapIntensity: 0.08,
   });
 
   group.userData.jacketMat = jacketMat;

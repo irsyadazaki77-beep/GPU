@@ -199,80 +199,80 @@ export const WEATHER_ENVIRONMENT_TARGETS: Record<
   senja: {
     id: 'senja',
     sunHex: 0xffb067,
-    sunIntensity: 1.35,
+    sunIntensity: 1.18,
     hemiSkyHex: 0x93c5fd,
     hemiGroundHex: 0x1e2430,
-    hemiIntensity: 0.62,
+    hemiIntensity: 0.54,
     skyTopHex: 0x0c1428,
     skyHorizonHex: 0xb45309,
     skyBottomHex: 0x0f172a,
     sunColorHex: 0xfbbf24,
-    sunGlowStrength: 0.45,
+    sunGlowStrength: 0.26,
     sunDir: [0.55, 0.22, 0.8],
     fogHorizonHex: 0x1e2638,
     fogDensity: 0.0028,
-    monasPlazaLightIntensity: 1.25,
-    sudirmanPlazaLightIntensity: 1.05,
+    monasPlazaLightIntensity: 0.65,
+    sudirmanPlazaLightIntensity: 0.55,
     wetnessFactor: 0,
     nightFactor: 0.65,
   },
   malam: {
     id: 'malam',
     sunHex: 0x60a5fa,
-    sunIntensity: 0.72,
+    sunIntensity: 0.65,
     hemiSkyHex: 0x38bdf8,
     hemiGroundHex: 0x090d16,
-    hemiIntensity: 0.48,
+    hemiIntensity: 0.44,
     skyTopHex: 0x050814,
     skyHorizonHex: 0x111c33,
     skyBottomHex: 0x070b14,
     sunColorHex: 0x93c5fd,
-    sunGlowStrength: 0.35,
+    sunGlowStrength: 0.22,
     sunDir: [-0.45, 0.48, -0.75],
     fogHorizonHex: 0x0f192d,
     fogDensity: 0.0032,
-    monasPlazaLightIntensity: 1.65,
-    sudirmanPlazaLightIntensity: 1.45,
+    monasPlazaLightIntensity: 0.95,
+    sudirmanPlazaLightIntensity: 0.85,
     wetnessFactor: 0,
     nightFactor: 1.0,
   },
   siang: {
     id: 'siang',
     sunHex: 0xfff7ed,
-    sunIntensity: 1.48,
+    sunIntensity: 1.32,
     hemiSkyHex: 0x93c5fd,
     hemiGroundHex: 0x1e293b,
-    hemiIntensity: 0.68,
+    hemiIntensity: 0.6,
     skyTopHex: 0x1e40af,
     skyHorizonHex: 0x60a5fa,
     skyBottomHex: 0x1e293b,
     sunColorHex: 0xfffbeb,
-    sunGlowStrength: 0.45,
+    sunGlowStrength: 0.28,
     sunDir: [0.5, 0.72, 0.48],
     fogHorizonHex: 0x475569,
     fogDensity: 0.0022,
-    monasPlazaLightIntensity: 0.25,
-    sudirmanPlazaLightIntensity: 0.2,
+    monasPlazaLightIntensity: 0.18,
+    sudirmanPlazaLightIntensity: 0.15,
     wetnessFactor: 0,
     nightFactor: 0.0,
   },
   hujan: {
     id: 'hujan',
     sunHex: 0x94a3b8,
-    sunIntensity: 0.85,
+    sunIntensity: 0.78,
     hemiSkyHex: 0x64748b,
     hemiGroundHex: 0x0b0f19,
-    hemiIntensity: 0.54,
+    hemiIntensity: 0.48,
     skyTopHex: 0x0c1322,
     skyHorizonHex: 0x1e293b,
     skyBottomHex: 0x0f172a,
     sunColorHex: 0x94a3b8,
-    sunGlowStrength: 0.12,
+    sunGlowStrength: 0.1,
     sunDir: [0.35, 0.55, 0.65],
     fogHorizonHex: 0x1e293b,
     fogDensity: 0.0042,
-    monasPlazaLightIntensity: 1.45,
-    sudirmanPlazaLightIntensity: 1.25,
+    monasPlazaLightIntensity: 0.85,
+    sudirmanPlazaLightIntensity: 0.75,
     wetnessFactor: 1.0,
     nightFactor: 0.65,
   },
@@ -411,3 +411,34 @@ export function stepWeatherTransition(
   stepWeatherTransitionInPlace(next, targetMode, dt, transitionRate);
   return next;
 }
+
+/**
+ * Formats a minute-of-day value (0..1439) into Jakarta 24-hour clock string (e.g., "17:45 WIB").
+ */
+export function formatJakartaClock(worldTimeMinutes: number): string {
+  const normalized = ((Math.floor(worldTimeMinutes) % 1440) + 1440) % 1440;
+  const hh = Math.floor(normalized / 60);
+  const mm = normalized % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')} WIB`;
+}
+
+/**
+ * Resolves the natural Jakarta weather/sky phase for a given minute-of-day (0..1439),
+ * unless monsoon rain is active.
+ */
+export function resolveWeatherFromWorldClock(
+  worldTimeMinutes: number,
+  rainActive: boolean = false
+): WeatherMode {
+  if (rainActive) return 'hujan';
+  const normalized = ((Math.floor(worldTimeMinutes) % 1440) + 1440) % 1440;
+  const hour = normalized / 60;
+  if (hour >= 6.5 && hour < 15.75) {
+    return 'siang';
+  }
+  if ((hour >= 5.0 && hour < 6.5) || (hour >= 15.75 && hour < 18.75)) {
+    return 'senja';
+  }
+  return 'malam';
+}
+

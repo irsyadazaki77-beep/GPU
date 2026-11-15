@@ -1,22 +1,32 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
+  CombatHitFeedbackEvent,
   DistrictZone,
   EnterableInteriorSpec,
+  GameSettings,
   GameState,
   PlayerProgressState,
   ProtagonistId,
   StoryChoiceOption,
   StoryMission,
+  TrafficSignalPhase,
+  VEHICLE_SPECS,
   VehicleType,
   WeatherMode,
   clampDt,
   resolveDistrictAtPosition,
 } from '../game/rules';
 import { soundEngine } from '../game/sound';
-import { engineTelemetryRef } from '../state/gameStore';
+import { engineTelemetryRef, gameStore } from '../state/gameStore';
 import { CityRenderer } from './CityRenderer';
+import { CrowdSystem } from './CrowdSystem';
+import { DestructiblePropsSystem } from './DestructiblePropsSystem';
 import { PlayerController } from './PlayerController';
+import {
+  PostProcessingPipeline,
+  ResolvedQualityTier,
+} from './PostProcessingPipeline';
 import { TrafficSystem } from './TrafficSystem';
 import { WeatherLightingSystem } from './WeatherLightingSystem';
 
@@ -36,7 +46,10 @@ export interface WorldControllerHandle {
     targetX: number,
     targetZ: number
   ) => void;
+  startCutsceneFraming: (focusX: number, focusZ: number, duration?: number) => void;
+  stopCutsceneFraming: () => void;
   getPlayerPosition: () => { x: number; z: number };
+  captureSnapshotDataUrl: () => string;
 }
 
 export interface WorldHudPayload {
@@ -44,10 +57,12 @@ export interface WorldHudPayload {
   drivingVehicle: VehicleType | null;
   vehicleSpeedKmh: number;
   aircraftAltitude: number;
+  isDrifting: boolean;
   nearbyVehicle: VehicleType | null;
   nearbyMission: StoryMission | null;
   nearbyInterior: EnterableInteriorSpec | null;
   objectiveProgress: number;
+  trafficSignalPhase: TrafficSignalPhase;
   skySwitchPhase: {
     active: boolean;
     targetId: ProtagonistId;
@@ -64,6 +79,7 @@ export interface WorldEngineProps {
   tpsAiming: boolean;
   wheelSlowMo: boolean;
   customsShowcaseOpen: boolean;
+  gameSettings: GameSettings;
   onUpdateHud: (payload: WorldHudPayload) => void;
   onPlayerDamage: (dmg: number) => void;
   onEnemyDefeated: (rewardRp: number, scoreDelta: number) => void;
@@ -73,6 +89,9 @@ export interface WorldEngineProps {
   onToggleTpsAim: () => void;
   onEnterOrExitInterior: (target?: EnterableInteriorSpec | null) => void;
   onWantedEvadeUpdate: (isEvading: boolean, dt: number) => void;
+  onGraphicsTierResolved?: (tier: ResolvedQualityTier) => void;
+  onCombatHitFeedback?: (evt: CombatHitFeedbackEvent) => void;
+  onPlayerHitAngle?: (angleRad: number) => void;
 }
 
 export class WorldEngine {
@@ -84,6 +103,9 @@ export class WorldEngine {
   private readonly weatherSystem: WeatherLightingSystem;
   private readonly cityRenderer: CityRenderer;
   private readonly trafficSystem: TrafficSystem;
+  private readonly destructibleProps: DestructiblePropsSystem;
+  private readonly crowdSystem: CrowdSystem;
+  private readonly postProcessing: PostProcessingPipeline;
   private readonly playerController: PlayerController;
   private readonly resizeObserver: ResizeObserver;
 
@@ -93,6 +115,7 @@ export class WorldEngine {
   private disposed = false;
   private lastTime = performance.now();
   private hudSyncAccumulator = 0;
+  private readonly _camRight = new THREE.Vector3();
 
   constructor(container: HTMLElement, initialProps: WorldEngineProps) {
     this.container = container;
@@ -109,22 +132,22 @@ export class WorldEngine {
       return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
     })();
 
+    const initW = container.clientWidth || window.innerWidth;
+    const initH = container.clientHeight || window.innerHeight;
+
     this.renderer = new THREE.WebGLRenderer({
       antialias: !this.isSoftwareGl,
       powerPreference: 'high-performance',
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.96;
+    this.renderer.toneMappingExposure = 0.85;
     this.renderer.setPixelRatio(
       this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2)
     );
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.setSize(
-      container.clientWidth || window.innerWidth,
-      container.clientHeight || window.innerHeight
-    );
+    this.renderer.setSize(initW, initH);
     this.renderer.domElement.setAttribute(
       'data-testid',
       'jakarta-webgl-canvas'
@@ -137,13 +160,13 @@ export class WorldEngine {
     const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
     const roomEnv = new RoomEnvironment();
     this.scene.environment = pmremGenerator.fromScene(roomEnv, 0.04).texture;
+    this.scene.environmentIntensity = 0.12;
     roomEnv.dispose();
     pmremGenerator.dispose();
 
     this.camera = new THREE.PerspectiveCamera(
       60,
-      (container.clientWidth || window.innerWidth) /
-        (container.clientHeight || window.innerHeight),
+      initW / initH,
       0.2,
       360
     );
@@ -158,6 +181,22 @@ export class WorldEngine {
       this.scene,
       this.cityRenderer.buildingGrid
     );
+    this.destructibleProps = new DestructiblePropsSystem(this.scene);
+    this.crowdSystem = new CrowdSystem(
+      this.scene,
+      this.cityRenderer.getSidewalkRects(),
+      this.cityRenderer.buildingGrid
+    );
+    this.postProcessing = new PostProcessingPipeline(
+      this.renderer,
+      this.scene,
+      this.camera,
+      initW,
+      initH,
+      this.isSoftwareGl
+    );
+    initialProps.onGraphicsTierResolved?.(this.postProcessing.getResolvedTier());
+
     this.playerController = new PlayerController(
       this.scene,
       this.renderer.domElement,
@@ -178,6 +217,21 @@ export class WorldEngine {
         onCompleteActiveObjective: () => this.props.onCompleteActiveObjective(),
         onToggleTpsAim: () => this.props.onToggleTpsAim(),
         onEnterOrExitInterior: (t) => this.props.onEnterOrExitInterior(t),
+        onCombatHitFeedback: (evt) => this.props.onCombatHitFeedback?.(evt),
+        onPlayerHitAngle: (ang) => this.props.onPlayerHitAngle?.(ang),
+        onWeaponNoise: (wx, wz, radius, isBlast) => {
+          this.crowdSystem.triggerPanicNear(wx, wz, radius);
+          if (isBlast) {
+            this._camRight.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
+            this.destructibleProps.applyBlastImpulse(
+              wx,
+              wz,
+              radius * 0.45,
+              this._camRight.x,
+              this._camRight.z
+            );
+          }
+        },
       }
     );
 
@@ -188,7 +242,17 @@ export class WorldEngine {
     if (initialProps.gameState === 'title') {
       this.playerController.stepTitleOrbitCamera(0, this.camera);
     }
-    this.renderer.render(this.scene, this.camera);
+    this.postProcessing.render(
+      {
+        dt: 0.016,
+        nightFactor: initialProps.weatherMode === 'malam' ? 1 : 0.35,
+        speedRatio: 0,
+        fokusActive: false,
+        damagePulse: 0,
+        requestedTier: initialProps.gameSettings.graphicsTier,
+      },
+      this.props.onGraphicsTierResolved
+    );
 
     this.resizeObserver = new ResizeObserver(this.handleResize);
     this.resizeObserver.observe(container);
@@ -230,10 +294,29 @@ export class WorldEngine {
         this.playerController.restoreSavedPosition(x, z),
       triggerSatelliteSwitch: (id, x, z) =>
         this.playerController.triggerSatelliteSwitch(id, x, z),
+      startCutsceneFraming: (focusX, focusZ, duration) =>
+        this.playerController.startCutsceneFraming(focusX, focusZ, duration),
+      stopCutsceneFraming: () => this.playerController.stopCutsceneFraming(),
       getPlayerPosition: () => ({
         x: this.playerController.playerPhys.x,
         z: this.playerController.playerPhys.z,
       }),
+      captureSnapshotDataUrl: () => {
+        const s = gameStore.getState();
+        this.postProcessing.render(
+          {
+            dt: 0.016,
+            nightFactor: this.props.weatherMode === 'malam' ? 1 : 0.35,
+            speedRatio: 0,
+            fokusActive: this.props.playerState.fokusActive,
+            damagePulse: 0,
+            requestedTier: this.props.gameSettings.graphicsTier,
+            photoFilter: s.photoModeOpen ? s.photoConfig.filter : 'standar',
+          },
+          this.props.onGraphicsTierResolved
+        );
+        return this.renderer.domElement.toDataURL('image/png');
+      },
     };
   }
 
@@ -243,8 +326,18 @@ export class WorldEngine {
     const h = this.container.clientHeight || window.innerHeight;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(w, h);
-    this.renderer.render(this.scene, this.camera);
+    this.postProcessing.setSize(w, h);
+    this.postProcessing.render(
+      {
+        dt: 0.016,
+        nightFactor: this.props.weatherMode === 'malam' ? 1 : 0.35,
+        speedRatio: 0,
+        fokusActive: this.props.playerState.fokusActive,
+        damagePulse: this.playerController.getDamagePulse(),
+        requestedTier: this.props.gameSettings.graphicsTier,
+      },
+      this.props.onGraphicsTierResolved
+    );
   };
 
   private afterDraw(cb: () => void): void {
@@ -279,14 +372,18 @@ export class WorldEngine {
     const currentGameState = this.props.gameState;
     const phys = this.playerController.playerPhys;
 
-    const { nightFactor, wetnessFactor } = this.weatherSystem.update(
-      this.props.weatherMode,
-      phys.x,
-      phys.z,
-      this.camera.position,
-      dt
-    );
-    this.cityRenderer.setWeatherTransition(nightFactor, wetnessFactor);
+    const { nightFactor, wetnessFactor, lightningTriggered } =
+      this.weatherSystem.update(
+        this.props.weatherMode,
+        phys.x,
+        phys.z,
+        this.camera.position,
+        dt
+      );
+    if (lightningTriggered && currentGameState === 'playing') {
+      soundEngine.playThunderBoom();
+    }
+    this.cityRenderer.setWeatherTransition(nightFactor, wetnessFactor, dt);
 
     this.trafficSystem.updateVisualsAndAircraft(
       dt,
@@ -306,6 +403,8 @@ export class WorldEngine {
       currentGameState === 'playing'
     );
 
+    let speedRatio = 0;
+
     if (currentGameState === 'title') {
       this.playerController.stepTitleOrbitCamera(dt, this.camera);
     } else if (currentGameState === 'playing') {
@@ -317,6 +416,37 @@ export class WorldEngine {
         this.props.activeChoice,
         nextStoryMission,
         nightFactor
+      );
+
+      this.cityRenderer.setTrafficSignalPhase(stepRes.signalPhase);
+
+      this._camRight.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
+      const activeVeh = stepRes.activeVehicle;
+      const vehSpec = activeVeh ? VEHICLE_SPECS[activeVeh.type] : null;
+      speedRatio =
+        activeVeh && vehSpec
+          ? Math.min(1.2, Math.abs(activeVeh.speed) / Math.max(1, vehSpec.maxSpeed))
+          : 0;
+
+      this.destructibleProps.step(
+        dt,
+        phys.x,
+        phys.z,
+        activeVeh ? activeVeh.speed : 0,
+        vehSpec ? vehSpec.radius : 0.7,
+        Boolean(activeVeh),
+        this._camRight.x,
+        this._camRight.z
+      );
+
+      this.crowdSystem.step(
+        dt,
+        this.postProcessing.getRecommendedCrowdRatio(),
+        wetnessFactor,
+        stepRes.signalPhase,
+        pState.wantedLevel,
+        phys.x,
+        phys.z
       );
 
       // Publish 60fps mutable telemetry snapshot (0 React re-renders!)
@@ -360,10 +490,12 @@ export class WorldEngine {
           aircraftAltitude: stepRes.activeVehicle
             ? stepRes.activeVehicle.y
             : phys.y,
+          isDrifting: stepRes.isDrifting,
           nearbyVehicle: nearbyVehType,
           nearbyMission: stepRes.nearbyMission,
           nearbyInterior: stepRes.nearbyInterior,
           objectiveProgress: this.playerController.objectiveProgress,
+          trafficSignalPhase: stepRes.signalPhase,
           skySwitchPhase: skySwitch.active
             ? {
                 active: true,
@@ -379,7 +511,21 @@ export class WorldEngine {
       soundEngine.updateEngineAudio(0, false, false, false, false);
     }
 
-    this.renderer.render(this.scene, this.camera);
+    const storeSnap = gameStore.getState();
+    this.postProcessing.render(
+      {
+        dt,
+        nightFactor,
+        speedRatio,
+        fokusActive: pState.fokusActive,
+        damagePulse: this.playerController.getDamagePulse(),
+        requestedTier: this.props.gameSettings.graphicsTier,
+        photoFilter: storeSnap.photoModeOpen
+          ? storeSnap.photoConfig.filter
+          : 'standar',
+      },
+      this.props.onGraphicsTierResolved
+    );
 
     if (this.isSoftwareGl) {
       this.afterDraw(this.tick);
@@ -399,9 +545,12 @@ export class WorldEngine {
     window.removeEventListener('resize', this.handleResize);
 
     this.playerController.dispose();
+    this.destructibleProps.dispose();
+    this.crowdSystem.dispose();
     this.trafficSystem.dispose();
     this.cityRenderer.dispose();
     this.weatherSystem.dispose();
+    this.postProcessing.dispose();
     this.scene.environment?.dispose();
     this.renderer.dispose();
 

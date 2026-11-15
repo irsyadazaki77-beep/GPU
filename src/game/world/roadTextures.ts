@@ -20,11 +20,11 @@ export function createCrosswalkStripeTexture(
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  grad.addColorStop(0, '#94a3b8');
-  grad.addColorStop(0.15, '#cbd5e1');
-  grad.addColorStop(0.5, '#e2e8f0');
-  grad.addColorStop(0.85, '#cbd5e1');
-  grad.addColorStop(1, '#94a3b8');
+  grad.addColorStop(0, '#64748b');
+  grad.addColorStop(0.15, '#7c8aa0');
+  grad.addColorStop(0.5, '#94a3b8');
+  grad.addColorStop(0.85, '#7c8aa0');
+  grad.addColorStop(1, '#64748b');
   ctx.fillStyle = grad;
   ctx.fillRect(6, 4, canvas.width - 12, canvas.height - 8);
 
@@ -111,7 +111,7 @@ export function createLaneArrowTexture(
   const ctx = canvas.getContext('2d')!;
   ctx.clearRect(0, 0, 256, 512);
 
-  ctx.fillStyle = 'rgba(241, 245, 249, 0.88)';
+  ctx.fillStyle = 'rgba(148, 163, 184, 0.72)';
   if (variant === 'straight') {
     ctx.fillRect(108, 160, 40, 310);
     ctx.beginPath();

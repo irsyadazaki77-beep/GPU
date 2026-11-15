@@ -8,6 +8,8 @@ export function createWheelAssembly(
   rimMat: THREE.Material
 ): THREE.Group {
   const wGroup = new THREE.Group();
+  wGroup.userData.isWheel = true;
+  wGroup.userData.wheelRadius = radius;
 
   const tireGeo = new THREE.CylinderGeometry(radius, radius, width, 16);
   tireGeo.rotateZ(Math.PI / 2);
@@ -24,6 +26,10 @@ export function createWheelAssembly(
   rimGeo.rotateZ(Math.PI / 2);
   const rim = new THREE.Mesh(rimGeo, rimMat);
   wGroup.add(rim);
+
+  const spokeGeo = new THREE.BoxGeometry(width + 0.035, radius * 1.1, radius * 0.18);
+  const spoke = new THREE.Mesh(spokeGeo, tireMat);
+  wGroup.add(spoke);
 
   const hubGeo = new THREE.CylinderGeometry(
     radius * 0.22,
@@ -280,6 +286,35 @@ export function populateHeavyOrAirVehicle(
         group.add(w);
       }
     }
+
+    const sirenRedMat = new THREE.MeshStandardMaterial({
+      color: 0xef4444,
+      emissive: 0xdc2626,
+      emissiveIntensity: 0.65,
+      roughness: 0.35,
+    });
+    const sirenBlueMat = new THREE.MeshStandardMaterial({
+      color: 0x3b82f6,
+      emissive: 0x2563eb,
+      emissiveIntensity: 0.65,
+      roughness: 0.35,
+    });
+    const redBeacon = new THREE.Mesh(
+      new THREE.BoxGeometry(0.36, 0.14, 0.28),
+      sirenRedMat
+    );
+    redBeacon.position.set(-0.55, 1.98, 1.15);
+    group.add(redBeacon);
+
+    const blueBeacon = new THREE.Mesh(
+      new THREE.BoxGeometry(0.36, 0.14, 0.28),
+      sirenBlueMat
+    );
+    blueBeacon.position.set(0.55, 1.98, 1.15);
+    group.add(blueBeacon);
+
+    group.userData.sirenRedMat = sirenRedMat;
+    group.userData.sirenBlueMat = sirenBlueMat;
   } else {
     const fuseGeo = extrudeSideProfile(
       [

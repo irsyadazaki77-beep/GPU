@@ -34,6 +34,12 @@ class SoundEngine {
   private currentAmbientProfile: AmbientSoundscapeProfile | null = null;
   private userUnlocked: boolean = false;
 
+  private driftOsc: OscillatorNode | null = null;
+  private driftFilter: BiquadFilterNode | null = null;
+  private driftGain: GainNode | null = null;
+  private driftRunning: boolean = false;
+  private inVehicleCabin: boolean = false;
+
   public getChannelVolumes(): AudioChannelVolumes {
     return { ...this.channelVolumes };
   }
@@ -226,7 +232,10 @@ class SoundEngine {
         0.45
       );
       this.ambientBedGain.gain.setTargetAtTime(
-        Math.max(0.0001, profile.bedGain * ambMult),
+        Math.max(
+          0.0001,
+          profile.bedGain * ambMult * (this.inVehicleCabin ? 0.52 : 1.0)
+        ),
         now,
         0.55
       );
@@ -632,7 +641,12 @@ class SoundEngine {
   }
 
   public playRadioBeat(
-    station: 'prambors' | 'koplo' | 'synth_scbd',
+    station:
+      | 'prambors'
+      | 'koplo'
+      | 'synth_scbd'
+      | 'indie_senopati'
+      | 'berita_kriminal',
     step: number
   ) {
     if (this.muted || this.getChannelGain('radio') <= 0.001) return;
@@ -662,6 +676,26 @@ class SoundEngine {
       this.playTone(arpNotes[idx], 0.15, 'triangle', 0.026, 1.02, 'radio');
       if (step % 4 === 0) {
         this.playTone(68, 0.14, 'sine', 0.038, 0.55, 'radio');
+      }
+    } else if (station === 'indie_senopati') {
+      const chordNotes = [293.66, 369.99, 440.0, 554.37, 493.88, 440.0, 369.99, 329.63];
+      const warmBass = [146.83, 146.83, 123.47, 123.47, 164.81, 164.81, 110.0, 110.0];
+      const idx = step % chordNotes.length;
+      this.playTone(warmBass[idx], 0.21, 'sine', 0.034, 0.99, 'radio');
+      this.playTone(chordNotes[idx], 0.18, 'triangle', 0.026, 1.0, 'radio');
+      if (step % 4 === 2) {
+        this.playTone(chordNotes[idx] * 1.5, 0.09, 'sine', 0.015, 0.95, 'radio');
+      }
+    } else if (station === 'berita_kriminal') {
+      // Tactical police dispatch & news ticker pulse
+      const morseFreqs = [784.0, 784.0, 987.77, 659.25, 784.0, 587.33, 659.25, 880.0];
+      const idx = step % morseFreqs.length;
+      this.playTone(110.0, 0.14, 'triangle', 0.025, 0.96, 'radio');
+      if (step % 2 === 0) {
+        this.playTone(morseFreqs[idx], 0.07, 'sine', 0.02, 1.0, 'radio');
+      }
+      if (step % 8 === 0) {
+        this.playTone(1318.5, 0.06, 'sine', 0.018, 1.02, 'radio');
       }
     }
   }
@@ -713,6 +747,166 @@ class SoundEngine {
     this.playTone(440, 0.15, 'triangle', 0.16, 1.0, 'sfx');
     setTimeout(() => this.playTone(554, 0.15, 'triangle', 0.16, 1.0, 'sfx'), 120);
     setTimeout(() => this.playTone(659, 0.3, 'triangle', 0.18, 1.05, 'sfx'), 240);
+  }
+
+  public setVehicleCabinMuffle(inCabin: boolean): void {
+    if (this.inVehicleCabin === inCabin) return;
+    this.inVehicleCabin = inCabin;
+    if (this.ctx && this.ambientBedFilter && this.ambientBedGain && this.currentAmbientProfile && this.ambientRunning) {
+      const now = this.ctx.currentTime;
+      const ambMult = this.getChannelGain('ambience');
+      const baseHz = this.currentAmbientProfile.bedFilterHz;
+      this.ambientBedFilter.frequency.setTargetAtTime(
+        inCabin ? Math.min(380, baseHz * 0.45) : baseHz,
+        now,
+        0.22
+      );
+      this.ambientBedGain.gain.setTargetAtTime(
+        Math.max(0.0001, this.currentAmbientProfile.bedGain * ambMult * (inCabin ? 0.52 : 1.0)),
+        now,
+        0.22
+      );
+    }
+  }
+
+  public playSpatialTone(
+    freq: number,
+    duration: number,
+    type: OscillatorType,
+    volume: number,
+    pitchSlide: number,
+    pan: number,
+    distance: number,
+    maxDistance: number = 55,
+    channel: AudioChannel = 'sfx'
+  ): void {
+    const chMult = this.getChannelGain(channel);
+    if (chMult <= 0.001) return;
+    const atten = Math.max(0, 1 - distance / Math.max(1, maxDistance));
+    if (atten <= 0.03) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, now);
+      if (pitchSlide !== 1.0) {
+        osc.frequency.exponentialRampToValueAtTime(
+          Math.max(30, freq * pitchSlide),
+          now + duration
+        );
+      }
+
+      const scaledVol = Math.max(0.001, volume * atten * chMult);
+      gain.gain.setValueAtTime(scaledVol, now);
+      gain.gain.exponentialRampToValueAtTime(0.0008, now + duration);
+
+      if (panner) {
+        panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), now);
+        osc.connect(gain);
+        gain.connect(panner);
+        panner.connect(ctx.destination);
+      } else {
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+      }
+
+      osc.start(now);
+      osc.stop(now + duration);
+    } catch {
+      // Ignore Web Audio errors on locked contexts
+    }
+  }
+
+  public updateDriftAudio(intensity: number, active: boolean): void {
+    const sfxMult = this.getChannelGain('sfx');
+    if (!active || intensity <= 0.08 || this.muted || sfxMult <= 0.001) {
+      if (this.driftRunning && this.ctx && this.driftGain) {
+        const now = this.ctx.currentTime;
+        this.driftGain.gain.setTargetAtTime(0.0001, now, 0.04);
+      }
+      return;
+    }
+
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      if (!this.driftRunning || !this.driftOsc || !this.driftFilter || !this.driftGain) {
+        const osc = ctx.createOscillator();
+        const filter = ctx.createBiquadFilter();
+        const gain = ctx.createGain();
+
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(720, now);
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(1150, now);
+        filter.Q.setValueAtTime(5.2, now);
+        gain.gain.setValueAtTime(0.0001, now);
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+
+        this.driftOsc = osc;
+        this.driftFilter = filter;
+        this.driftGain = gain;
+        this.driftRunning = true;
+      }
+
+      const clamped = Math.min(1, Math.max(0, intensity));
+      this.driftOsc.frequency.setTargetAtTime(680 + clamped * 290, now, 0.05);
+      this.driftFilter.frequency.setTargetAtTime(980 + clamped * 540, now, 0.05);
+      this.driftGain.gain.setTargetAtTime(0.024 * clamped * sfxMult, now, 0.05);
+    } catch {
+      // Ignore audio errors
+    }
+  }
+
+  public stopDriftAudio(): void {
+    if (!this.driftRunning || !this.ctx) return;
+    try {
+      const now = this.ctx.currentTime;
+      this.driftGain?.gain.setTargetAtTime(0.0001, now, 0.02);
+      const osc = this.driftOsc;
+      const filter = this.driftFilter;
+      const gain = this.driftGain;
+      this.driftOsc = null;
+      this.driftFilter = null;
+      this.driftGain = null;
+      this.driftRunning = false;
+      osc?.stop(now + 0.08);
+      window.setTimeout(() => {
+        try {
+          osc?.disconnect();
+          filter?.disconnect();
+          gain?.disconnect();
+        } catch {
+          // Ignore already disconnected
+        }
+      }, 120);
+    } catch {
+      this.driftRunning = false;
+    }
+  }
+
+  public playPropCrash(pan: number = 0): void {
+    this.playSpatialTone(185, 0.14, 'triangle', 0.15, 0.42, pan, 4, 40, 'sfx');
+    this.playSpatialTone(420, 0.09, 'square', 0.08, 0.65, pan, 4, 40, 'sfx');
+  }
+
+  public playThunderBoom(): void {
+    this.playTone(54, 0.85, 'sawtooth', 0.11, 0.42, 'ambience');
+    window.setTimeout(() => {
+      this.playTone(42, 0.95, 'triangle', 0.095, 0.55, 'ambience');
+    }, 180);
   }
 
   public playDefeatSting() {

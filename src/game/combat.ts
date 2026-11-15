@@ -1,13 +1,128 @@
 import { PROTAGONIST_PROFILES } from './archetypes';
 import { createInitialStockPortfolio } from './economy';
+import { JAKARTA_DISTRICTS } from './heists';
 import type {
+  CharacterSkillId,
+  CharacterSkillSpec,
+  DistrictTurfEntry,
   EnemyArchetypeSpec,
   EnemyBehaviorPolicy,
   OriginArchetype,
   PlayerProgressState,
+  WeaponAttachmentId,
+  WeaponAttachmentSpec,
   WeaponId,
   WeaponSpec,
 } from './types';
+
+export const CHARACTER_SKILL_SPECS: CharacterSkillSpec[] = [
+  {
+    id: 'stamina',
+    name: 'Ketahanan Fisik & Sprint',
+    subtitle: 'Kecepatan Lari & Daya Tahan Otot Jalanan',
+    perkSummary: '+4% Kecepatan Lari & +10% Durasi Buff Warung per Level',
+    baseCostRp: 120000,
+    maxLevel: 5,
+  },
+  {
+    id: 'aimPrecision',
+    name: 'Kalibrasi Bidik & Balistik',
+    subtitle: 'Presisi Senjata Api & Peluang Tembakan Kritis',
+    perkSummary: '+6% Daya Hancur Senjata & +4% Peluang Crit per Level',
+    baseCostRp: 150000,
+    maxLevel: 5,
+  },
+  {
+    id: 'driftControl',
+    name: 'Kendali Drift & Sabuk Tol',
+    subtitle: 'Traksi Ban Malam & Multiplier Skor Drift',
+    perkSummary: '+15% Skor Drift & Kendali Tikungan Tajam per Level',
+    baseCostRp: 135000,
+    maxLevel: 5,
+  },
+  {
+    id: 'negotiation',
+    name: 'Diplomasi & Upeti Teritori',
+    subtitle: 'Koneksi Konglomerat, Properti & Diskon Suap Aparat',
+    perkSummary: '+8% Dividen Properti/Distrik & -10% Biaya Suap Polisi per Level',
+    baseCostRp: 160000,
+    maxLevel: 5,
+  },
+  {
+    id: 'fokusMastery',
+    name: 'Penguasaan Fokus Tempur [Q]',
+    subtitle: 'Efisiensi Energi Slow-Motion & Pemulihan Taktis',
+    perkSummary: '-10% Kuras Energi Fokus & +12% Pemulihan Fokus per Level',
+    baseCostRp: 175000,
+    maxLevel: 5,
+  },
+];
+
+export const WEAPON_ATTACHMENT_SPECS: WeaponAttachmentSpec[] = [
+  {
+    id: 'suppressor',
+    name: 'Peredam Suara Taktis (Suppressor)',
+    subtitle: 'Meredam letusan tembakan agar tidak cepat memancing patroli polisi',
+    priceRp: 145000,
+    damageBonusPct: 0.05,
+    rangeBonusPct: 0.08,
+    ammoBonusPct: 0,
+    silent: true,
+  },
+  {
+    id: 'extendedMag',
+    name: 'Magasin Kapasitas Ekstra',
+    subtitle: 'Menambah kapasitas amunisi maksimum sebesar +50%',
+    priceRp: 165000,
+    damageBonusPct: 0,
+    rangeBonusPct: 0,
+    ammoBonusPct: 0.5,
+    silent: false,
+  },
+  {
+    id: 'precisionBarrel',
+    name: 'Laras Baja Presisi Panjang',
+    subtitle: 'Meningkatkan jarak jangkau +25% dan daya hancur +12%',
+    priceRp: 195000,
+    damageBonusPct: 0.12,
+    rangeBonusPct: 0.25,
+    ammoBonusPct: 0,
+    silent: false,
+  },
+  {
+    id: 'gildedSkin',
+    name: 'Ukiran Emas Nusantara Jawara',
+    subtitle: 'Finishing emas batangan eksklusif dengan +15% daya hancur',
+    priceRp: 240000,
+    damageBonusPct: 0.15,
+    rangeBonusPct: 0.1,
+    ammoBonusPct: 0.25,
+    silent: false,
+  },
+];
+
+export function createInitialDistrictTurf(): Record<string, DistrictTurfEntry> {
+  const playerStart = new Set(['monas', 'tanah_abang', 'blok_m']);
+  const syndicateStart = new Set([
+    'scbd',
+    'tanjung_priok',
+    'kemayoran',
+    'pik2_mangrove',
+    'halim_station',
+  ]);
+  const map: Record<string, DistrictTurfEntry> = {};
+  for (const d of JAKARTA_DISTRICTS) {
+    const isPlayer = playerStart.has(d.id);
+    const isSyndicate = syndicateStart.has(d.id);
+    map[d.id] = {
+      districtId: d.id,
+      owner: isPlayer ? 'player' : isSyndicate ? 'syndicate' : 'neutral',
+      defenseLevel: isPlayer ? 1 : isSyndicate ? 2 : 0,
+      dividendRp: isPlayer ? 28000 : isSyndicate ? 42000 : 32000,
+    };
+  }
+  return map;
+}
 
 export const WEAPONS: Record<WeaponId, WeaponSpec> = {
   fist: {
@@ -239,6 +354,21 @@ export function createInitialPlayerState(origin: OriginArchetype): PlayerProgres
     currentInterior: 'exterior',
     staminaBuffTimer: 0,
     lastSnackEaten: null,
+    characterSkills: {
+      stamina: 1,
+      aimPrecision: 1,
+      driftControl: 1,
+      negotiation: 1,
+      fokusMastery: 1,
+    },
+    weaponAttachments: {
+      pistol: [],
+      rifle: [],
+      mercon: [],
+      pasopati: [],
+      gatotkaca: [],
+    },
+    districtTurf: createInitialDistrictTurf(),
   };
 
   if (origin === 'anak_jalanan') {
@@ -268,6 +398,206 @@ export function createInitialPlayerState(origin: OriginArchetype): PlayerProgres
   }
 
   return base;
+}
+
+export function upgradeCharacterSkill(
+  state: PlayerProgressState,
+  skillId: CharacterSkillId
+): { nextState: PlayerProgressState; upgraded: boolean; costRp: number } {
+  const spec = CHARACTER_SKILL_SPECS.find((s) => s.id === skillId);
+  if (!spec) return { nextState: state, upgraded: false, costRp: 0 };
+  const currentLevel = state.characterSkills?.[skillId] ?? 1;
+  if (currentLevel >= spec.maxLevel) {
+    return { nextState: state, upgraded: false, costRp: 0 };
+  }
+  const costRp = Math.round(spec.baseCostRp * (1 + (currentLevel - 1) * 0.45));
+  if (state.rupiah < costRp) {
+    return { nextState: state, upgraded: false, costRp };
+  }
+  const nextSkills = {
+    ...state.characterSkills,
+    [skillId]: currentLevel + 1,
+  };
+  const nextScore = state.score + 220;
+  return {
+    nextState: {
+      ...state,
+      rupiah: state.rupiah - costRp,
+      characterSkills: nextSkills,
+      score: nextScore,
+      bestScore: Math.max(state.bestScore, nextScore),
+    },
+    upgraded: true,
+    costRp,
+  };
+}
+
+export function buyWeaponAttachment(
+  state: PlayerProgressState,
+  weaponId: WeaponId,
+  attachmentId: WeaponAttachmentId
+): { nextState: PlayerProgressState; bought: boolean } {
+  const spec = WEAPON_ATTACHMENT_SPECS.find((a) => a.id === attachmentId);
+  const wSpec = WEAPONS[weaponId];
+  if (!spec || !wSpec || wSpec.isMelee) {
+    return { nextState: state, bought: false };
+  }
+  const existing = state.weaponAttachments?.[weaponId] || [];
+  if (existing.includes(attachmentId) || state.rupiah < spec.priceRp) {
+    return { nextState: state, bought: false };
+  }
+  const nextAttachments: Partial<Record<WeaponId, WeaponAttachmentId[]>> = {
+    ...state.weaponAttachments,
+    [weaponId]: [...existing, attachmentId],
+  };
+  const nextMaxAmmo = Math.round(
+    wSpec.maxAmmo *
+      (1 +
+        nextAttachments[weaponId]!.reduce((acc, id) => {
+          const item = WEAPON_ATTACHMENT_SPECS.find((a) => a.id === id);
+          return acc + (item?.ammoBonusPct || 0);
+        }, 0))
+  );
+  const nextAmmo = {
+    ...state.ammo,
+    [weaponId]: Math.max(state.ammo[weaponId] || 0, nextMaxAmmo),
+  };
+  const nextScore = state.score + 200;
+  return {
+    nextState: {
+      ...state,
+      rupiah: state.rupiah - spec.priceRp,
+      weaponAttachments: nextAttachments,
+      ammo: nextAmmo,
+      score: nextScore,
+      bestScore: Math.max(state.bestScore, nextScore),
+    },
+    bought: true,
+  };
+}
+
+export function getEffectiveWeaponSpec(
+  weaponId: WeaponId,
+  state?: PlayerProgressState
+): WeaponSpec & { silent: boolean; critBonus: number } {
+  const base = WEAPONS[weaponId] || WEAPONS.pistol;
+  if (!state) return { ...base, silent: false, critBonus: 0 };
+  const attachments = state.weaponAttachments?.[weaponId] || [];
+  const aimLv = state.characterSkills?.aimPrecision ?? 1;
+  let damageBonus = (aimLv - 1) * 0.06;
+  const critBonus = (aimLv - 1) * 0.04;
+  let rangeBonus = 0;
+  let ammoBonus = 0;
+  let silent = false;
+  for (const attId of attachments) {
+    const att = WEAPON_ATTACHMENT_SPECS.find((a) => a.id === attId);
+    if (!att) continue;
+    damageBonus += att.damageBonusPct;
+    rangeBonus += att.rangeBonusPct;
+    ammoBonus += att.ammoBonusPct;
+    if (att.silent) silent = true;
+  }
+  return {
+    ...base,
+    damage: Math.round(base.damage * (1 + damageBonus)),
+    range: Math.round(base.range * (1 + rangeBonus) * 10) / 10,
+    maxAmmo: base.isMelee ? 0 : Math.round(base.maxAmmo * (1 + ammoBonus)),
+    silent,
+    critBonus,
+  };
+}
+
+export function captureDistrictTurf(
+  state: PlayerProgressState,
+  districtId: string
+): { nextState: PlayerProgressState; captured: boolean; rewardRp: number } {
+  const currentTurf = state.districtTurf || createInitialDistrictTurf();
+  const entry = currentTurf[districtId];
+  if (!entry) return { nextState: state, captured: false, rewardRp: 0 };
+  const rewardRp = entry.owner === 'syndicate' ? 320000 : 185000;
+  const nextEntry: DistrictTurfEntry = {
+    ...entry,
+    owner: 'player',
+    defenseLevel: 1,
+    dividendRp: Math.max(35000, entry.dividendRp),
+  };
+  const nextScore = state.score + 420;
+  return {
+    nextState: {
+      ...state,
+      rupiah: state.rupiah + rewardRp,
+      districtTurf: {
+        ...currentTurf,
+        [districtId]: nextEntry,
+      },
+      reputation: {
+        ...state.reputation,
+        jalanan: Math.min(100, state.reputation.jalanan + 8),
+        rakyat: Math.min(100, state.reputation.rakyat + 4),
+      },
+      score: nextScore,
+      bestScore: Math.max(state.bestScore, nextScore),
+    },
+    captured: true,
+    rewardRp,
+  };
+}
+
+export function fortifyDistrictTurf(
+  state: PlayerProgressState,
+  districtId: string
+): { nextState: PlayerProgressState; fortified: boolean; costRp: number } {
+  const currentTurf = state.districtTurf || createInitialDistrictTurf();
+  const entry = currentTurf[districtId];
+  if (!entry || entry.owner !== 'player' || entry.defenseLevel >= 3) {
+    return { nextState: state, fortified: false, costRp: 0 };
+  }
+  const costRp = 120000 * (entry.defenseLevel + 1);
+  if (state.rupiah < costRp) {
+    return { nextState: state, fortified: false, costRp };
+  }
+  const nextEntry: DistrictTurfEntry = {
+    ...entry,
+    defenseLevel: entry.defenseLevel + 1,
+    dividendRp: entry.dividendRp + 14000,
+  };
+  return {
+    nextState: {
+      ...state,
+      rupiah: state.rupiah - costRp,
+      districtTurf: {
+        ...currentTurf,
+        [districtId]: nextEntry,
+      },
+    },
+    fortified: true,
+    costRp,
+  };
+}
+
+export function bribePoliceWanted(
+  state: PlayerProgressState
+): { nextState: PlayerProgressState; bribed: boolean; costRp: number } {
+  if (state.wantedLevel <= 0) {
+    return { nextState: state, bribed: false, costRp: 0 };
+  }
+  const negLevel = state.characterSkills?.negotiation ?? 1;
+  const discount = Math.min(0.45, (negLevel - 1) * 0.1);
+  const costRp = Math.round(state.wantedLevel * 85000 * (1 - discount));
+  if (state.rupiah < costRp) {
+    return { nextState: state, bribed: false, costRp };
+  }
+  return {
+    nextState: {
+      ...state,
+      rupiah: state.rupiah - costRp,
+      wantedLevel: 0,
+      wantedEvading: false,
+      wantedEvadeTimer: 0,
+    },
+    bribed: true,
+    costRp,
+  };
 }
 
 export function upgradeDroneTech(
@@ -331,8 +661,11 @@ export function stepFokusAbility(
   state: PlayerProgressState,
   dt: number
 ): PlayerProgressState {
+  const masteryLevel = state.characterSkills?.fokusMastery ?? 1;
+  const drainMult = Math.max(0.55, 1 - (masteryLevel - 1) * 0.1);
+  const regenMult = 1 + (masteryLevel - 1) * 0.12;
   if (state.fokusActive) {
-    const nextEnergy = Math.max(0, state.fokusEnergy - dt * 16);
+    const nextEnergy = Math.max(0, state.fokusEnergy - dt * 16 * drainMult);
     if (nextEnergy <= 0) {
       return {
         ...state,
@@ -348,7 +681,7 @@ export function stepFokusAbility(
   if (state.fokusEnergy >= 100) return state;
   return {
     ...state,
-    fokusEnergy: Math.min(100, state.fokusEnergy + dt * 9.5),
+    fokusEnergy: Math.min(100, state.fokusEnergy + dt * 9.5 * regenMult),
   };
 }
 

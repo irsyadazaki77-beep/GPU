@@ -21,23 +21,23 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
 
   const bodyMat = new THREE.MeshPhysicalMaterial({
     color: spec.colorHex,
-    roughness: 0.34,
-    metalness: 0.36,
-    clearcoat: 0.65,
-    clearcoatRoughness: 0.18,
-    envMapIntensity: 0.38,
+    roughness: 0.46,
+    metalness: 0.24,
+    clearcoat: 0.32,
+    clearcoatRoughness: 0.34,
+    envMapIntensity: 0.16,
   });
   const trimMat = new THREE.MeshStandardMaterial({
     color: spec.accentHex,
-    roughness: 0.55,
-    metalness: 0.3,
-    envMapIntensity: 0.3,
+    roughness: 0.68,
+    metalness: 0.2,
+    envMapIntensity: 0.14,
   });
   const darkGrilleMat = new THREE.MeshStandardMaterial({
     color: 0x090d16,
-    roughness: 0.65,
-    metalness: 0.35,
-    envMapIntensity: 0.2,
+    roughness: 0.78,
+    metalness: 0.2,
+    envMapIntensity: 0.1,
   });
   const underglowGeo = new THREE.RingGeometry(
     spec.radius * 0.55,
@@ -62,10 +62,10 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
 
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: 0x070d19,
-    roughness: 0.16,
-    metalness: 0.48,
-    clearcoat: 0.85,
-    envMapIntensity: 0.42,
+    roughness: 0.32,
+    metalness: 0.28,
+    clearcoat: 0.38,
+    envMapIntensity: 0.18,
   });
   const tireMat = new THREE.MeshStandardMaterial({
     color: 0x14161b,
@@ -91,6 +91,17 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
     emissiveIntensity: 0.75,
     roughness: 0.25,
   });
+  group.userData.taillightMat = taillightMat;
+
+  const collectWheels = (root: THREE.Group) => {
+    const wheels: THREE.Object3D[] = [];
+    root.traverse((child) => {
+      if (child.userData?.isWheel) {
+        wheels.push(child);
+      }
+    });
+    root.userData.wheels = wheels;
+  };
 
   const mats: VehicleMaterialSet = {
     bodyMat,
@@ -110,6 +121,7 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
     type === 'vtol_jet'
   ) {
     populateHeavyOrAirVehicle(type, group, mats);
+    collectWheels(group);
     return group;
   }
 
@@ -437,19 +449,34 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
       sirenBase.position.set(0, 1.54, -0.18);
       group.add(sirenBase);
 
+      const sirenRedMat = new THREE.MeshStandardMaterial({
+        color: 0xef4444,
+        emissive: 0xdc2626,
+        emissiveIntensity: 0.75,
+        roughness: 0.3,
+      });
       const redLight = new THREE.Mesh(
         new THREE.BoxGeometry(0.46, 0.14, 0.32),
-        taillightMat
+        sirenRedMat
       );
       redLight.position.set(-0.36, 1.56, -0.18);
       group.add(redLight);
 
+      const sirenBlueMat = new THREE.MeshStandardMaterial({
+        color: 0x3b82f6,
+        emissive: 0x2563eb,
+        emissiveIntensity: 0.75,
+        roughness: 0.3,
+      });
       const blueLight = new THREE.Mesh(
         new THREE.BoxGeometry(0.46, 0.14, 0.32),
-        new THREE.MeshBasicMaterial({ color: 0x3b82f6 })
+        sirenBlueMat
       );
       blueLight.position.set(0.36, 1.56, -0.18);
       group.add(blueLight);
+
+      group.userData.sirenRedMat = sirenRedMat;
+      group.userData.sirenBlueMat = sirenBlueMat;
     } else {
       const spoiler = new THREE.Mesh(
         new THREE.BoxGeometry(1.74, 0.1, 0.32),
@@ -484,6 +511,7 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
     }
   }
 
+  collectWheels(group);
   return group;
 }
 

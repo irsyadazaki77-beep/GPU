@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   NpcDialogueRequest,
   NpcDialogueResponse,
@@ -6,6 +6,7 @@ import {
   StoryMission,
   formatRupiah,
 } from '../game/rules';
+import { speakDialogueLine, stopVoicePlayback } from '../game/voiceClient';
 import { gameStore, useGameStore } from '../state/gameStore';
 
 interface StoryDialogueModalProps {
@@ -38,6 +39,11 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
   const wantedLevel = useGameStore((s) => s.playerState.wantedLevel);
   const reputation = useGameStore((s) => s.playerState.reputation);
   const completedDynamicQuests = useGameStore((s) => s.completedDynamicQuests);
+  const voiceActingEnabled = useGameStore(
+    (s) => s.gameSettings.voiceActingEnabled
+  );
+  const masterVol = useGameStore((s) => s.audioVolumes.master);
+  const muted = useGameStore((s) => s.muted);
 
   const [promptInput, setPromptInput] = useState('');
   const [loadingAi, setLoadingAi] = useState(false);
@@ -45,6 +51,25 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
   const [dialogueRes, setDialogueRes] = useState<NpcDialogueResponse | null>(
     null
   );
+  const [voiceActive, setVoiceActive] = useState(false);
+
+  useEffect(() => {
+    if (voiceActingEnabled && !muted) {
+      setVoiceActive(true);
+      void speakDialogueLine(
+        {
+          text: mission.briefing,
+          speakerName: mission.giverName,
+          tone: 'Tegas & Sinematik',
+        },
+        true,
+        masterVol
+      );
+    }
+    return () => {
+      stopVoicePlayback();
+    };
+  }, [mission.id, mission.briefing, mission.giverName, voiceActingEnabled, muted, masterVol]);
 
   const requestNpcDialogue = async (question: string) => {
     const trimmed = question.trim();
@@ -75,6 +100,18 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
       const data = (await res.json()) as NpcDialogueResponse;
       setDialogueRes(data);
       setPromptInput('');
+      if (voiceActingEnabled && !muted) {
+        setVoiceActive(true);
+        void speakDialogueLine(
+          {
+            text: data.reply,
+            speakerName: mission.giverName,
+            tone: data.tone,
+          },
+          true,
+          masterVol
+        );
+      }
     } catch {
       setAiError(
         'Kanal komunikasi Jakarta terputus sementara. Coba kirim ulang pertanyaanmu.'
@@ -124,14 +161,43 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
             </h2>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Tutup Dialog Misi"
-            className="px-3 py-1.5 rounded-lg bg-white/8 hover:bg-white/15 text-xs font-medium text-[#cbd5e1] hover:text-white cursor-pointer whitespace-nowrap shrink-0"
-          >
-            Tunda [Esc]
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (voiceActive) {
+                  stopVoicePlayback();
+                  setVoiceActive(false);
+                } else {
+                  setVoiceActive(true);
+                  const line = dialogueRes ? dialogueRes.reply : mission.briefing;
+                  void speakDialogueLine(
+                    {
+                      text: line,
+                      speakerName: mission.giverName,
+                      tone: dialogueRes?.tone || 'Tegas & Sinematik',
+                    },
+                    !muted,
+                    masterVol
+                  );
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg bg-[#38bdf8]/15 hover:bg-[#38bdf8]/25 text-xs font-medium text-[#7dd3fc] cursor-pointer whitespace-nowrap"
+            >
+              {voiceActive ? 'Hentikan Suara' : 'Putar Suara Brief'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                stopVoicePlayback();
+                onClose();
+              }}
+              aria-label="Tutup Dialog Misi"
+              className="px-3 py-1.5 rounded-lg bg-white/8 hover:bg-white/15 text-xs font-medium text-[#cbd5e1] hover:text-white cursor-pointer whitespace-nowrap"
+            >
+              Tunda [Esc]
+            </button>
+          </div>
         </div>
 
         <p className="mt-4 text-sm md:text-base leading-relaxed text-[#cbd5e1] max-w-[65ch]">

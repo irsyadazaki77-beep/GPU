@@ -58,6 +58,100 @@ export function createAsphaltRoadTexture(
   return tex;
 }
 
+export function createAsphaltNormalTexture(
+  maxAnisotropy: number
+): THREE.CanvasTexture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const imgData = ctx.createImageData(size, size);
+  const data = imgData.data;
+
+  // Compute subtle aggregate heightfield first
+  const heights = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const n1 = hash2D(x * 0.73, y * 0.73);
+      const n2 = hash2D(Math.floor(x / 3) * 1.9, Math.floor(y / 3) * 1.9);
+      // Tire wear ruts reduce micro-bump height along wheel tracks
+      const u = x / size;
+      const inTrack =
+        (u > 0.14 && u < 0.23) ||
+        (u > 0.29 && u < 0.38) ||
+        (u > 0.62 && u < 0.71) ||
+        (u > 0.77 && u < 0.86);
+      heights[y * size + x] = (n1 * 0.65 + n2 * 0.35) * (inTrack ? 0.45 : 1.0);
+    }
+  }
+
+  const strength = 2.1;
+  for (let y = 0; y < size; y++) {
+    const ym = (y - 1 + size) % size;
+    const yp = (y + 1) % size;
+    for (let x = 0; x < size; x++) {
+      const xm = (x - 1 + size) % size;
+      const xp = (x + 1) % size;
+      const dx = (heights[y * size + xp] - heights[y * size + xm]) * strength;
+      const dy = (heights[yp * size + x] - heights[ym * size + x]) * strength;
+      const nx = -dx;
+      const ny = -dy;
+      const nz = 1.0;
+      const invLen = 1 / Math.hypot(nx, ny, nz);
+      const idx = (y * size + x) * 4;
+      data[idx] = Math.round((nx * invLen * 0.5 + 0.5) * 255);
+      data[idx + 1] = Math.round((ny * invLen * 0.5 + 0.5) * 255);
+      data[idx + 2] = Math.round((nz * invLen * 0.5 + 0.5) * 255);
+      data[idx + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = maxAnisotropy;
+  return tex;
+}
+
+export function createAsphaltRoughnessTexture(
+  maxAnisotropy: number
+): THREE.CanvasTexture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = 'rgb(245, 245, 245)';
+  ctx.fillRect(0, 0, size, size);
+
+  // Matte-satin wheel tracks (no mirror glare when dry)
+  ctx.fillStyle = 'rgb(220, 220, 220)';
+  ctx.fillRect(36, 0, 23, size);
+  ctx.fillRect(74, 0, 23, size);
+  ctx.fillRect(160, 0, 23, size);
+  ctx.fillRect(198, 0, 23, size);
+
+  // Micro aggregate speckles
+  for (let i = 0; i < 2400; i++) {
+    const x = (i * 97 + (i % 11) * 19) % size;
+    const y = (i * 151 + (i % 19) * 23) % size;
+    const shade = 210 + (i % 44);
+    ctx.fillStyle = `rgb(${shade}, ${shade}, ${shade})`;
+    ctx.fillRect(x, y, 2, 2);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = maxAnisotropy;
+  return tex;
+}
+
 export function createSidewalkTexture(
   maxAnisotropy: number
 ): THREE.CanvasTexture {
@@ -217,14 +311,14 @@ export function createBuildingFacadeTextures(
         cCtx.fillRect(wx, wy, ww, wh);
 
         if (isWarmLit) {
-          cCtx.fillStyle = 'rgba(253, 224, 71, 0.55)';
+          cCtx.fillStyle = 'rgba(253, 224, 71, 0.36)';
           cCtx.fillRect(wx + 3, wy + 3, ww - 6, 3);
         } else if (isCoolLit) {
-          cCtx.fillStyle = 'rgba(125, 211, 252, 0.35)';
+          cCtx.fillStyle = 'rgba(125, 211, 252, 0.26)';
           cCtx.fillRect(wx + 3, wy + 3, ww - 6, 2);
         }
 
-        rCtx.fillStyle = 'rgb(108, 108, 108)';
+        rCtx.fillStyle = 'rgb(210, 210, 210)';
         rCtx.fillRect(wx, wy, ww, wh);
 
         cCtx.fillStyle = '#' + darkMullion.getHexString();
@@ -235,13 +329,13 @@ export function createBuildingFacadeTextures(
         cCtx.beginPath();
         cCtx.arc(wx + ww * 0.5, wy + wh * 0.28, (ww - 6) * 0.5, Math.PI, 0);
         cCtx.fill();
-        rCtx.fillStyle = 'rgb(120, 120, 120)';
+        rCtx.fillStyle = 'rgb(205, 205, 205)';
         rCtx.fillRect(wx + 3, wy + 3, ww - 6, wh - 6);
       } else if (style === 'port_crane') {
         cCtx.fillStyle =
           r % 2 === 0 ? '#' + accentColor.getHexString() : '#111827';
         cCtx.fillRect(wx, wy, ww, wh);
-        rCtx.fillStyle = 'rgb(165, 165, 165)';
+        rCtx.fillStyle = 'rgb(210, 210, 210)';
         rCtx.fillRect(wx, wy, ww, wh);
       } else {
         cCtx.fillStyle = isWarmLit
@@ -251,14 +345,14 @@ export function createBuildingFacadeTextures(
           : '#0b1120';
         cCtx.fillRect(wx, wy, ww, wh);
         if (isWarmLit) {
-          cCtx.fillStyle = '#f59e0b';
+          cCtx.fillStyle = '#d97706';
           cCtx.fillRect(wx + 4, wy + 4, ww - 8, 4);
         }
         if (r === rows - 1) {
           cCtx.fillStyle = '#' + accentColor.getHexString();
           cCtx.fillRect(wx, wy, ww, wh * 0.28);
         }
-        rCtx.fillStyle = 'rgb(125, 125, 125)';
+        rCtx.fillStyle = 'rgb(205, 205, 205)';
         rCtx.fillRect(wx, wy, ww, wh);
       }
     }

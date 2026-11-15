@@ -218,7 +218,24 @@ export function stepWarungStaminaBuff(
 export function getPlayerStaminaSpeedMultiplier(
   state: PlayerProgressState
 ): number {
-  return (state.staminaBuffTimer || 0) > 0 ? 1.28 : 1.0;
+  const skillLevel = state.characterSkills?.stamina ?? 1;
+  const skillBonus = Math.max(0, skillLevel - 1) * 0.04;
+  const warungBuff = (state.staminaBuffTimer || 0) > 0 ? 0.28 : 0;
+  return 1.0 + warungBuff + skillBonus;
+}
+
+export function calculateTurfWarsIncome(state: PlayerProgressState): number {
+  const turf = state.districtTurf || {};
+  let total = 0;
+  for (const key of Object.keys(turf)) {
+    const item = turf[key];
+    if (item && item.owner === 'player') {
+      total += item.dividendRp + item.defenseLevel * 6000;
+    }
+  }
+  const negLevel = state.characterSkills?.negotiation ?? 1;
+  const mult = 1 + Math.max(0, negLevel - 1) * 0.08;
+  return Math.round(total * mult);
 }
 
 export const JAKARTA_PROPERTIES: PropertySpec[] = [

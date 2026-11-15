@@ -8,14 +8,24 @@ import {
   STREET_RACES,
   generateRoadsideSpawnLayout,
 } from '../game/rules';
-import { engineTelemetryRef, gameStore } from '../state/gameStore';
+import {
+  STREET_BOUNTIES,
+  engineTelemetryRef,
+  gameStore,
+  useGameStore,
+} from '../state/gameStore';
 
 const RADAR_WIDTH = 196;
 const RADAR_HEIGHT = 122;
 const RADAR_FRAME_MS = 50; // ~20fps crisp radar sweep without main-thread pressure
 
-export const MiniMapRadar: React.FC = () => {
+interface MiniMapRadarProps {
+  onClickRadar?: () => void;
+}
+
+export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const customWaypoint = useGameStore((s) => s.customWaypoint);
 
   const staticLayout = useMemo(() => generateRoadsideSpawnLayout(), []);
 
@@ -211,6 +221,49 @@ export const MiniMapRadar: React.FC = () => {
         ctx.fill();
       }
 
+      // 9b. Street Bounty Blips
+      for (const b of STREET_BOUNTIES) {
+        if (store.claimedBounties.includes(b.id)) continue;
+        const bx = cx + (b.x - px) * zoom;
+        const bz = cy + (b.z - pz) * zoom;
+        ctx.fillStyle = '#f43f5e';
+        ctx.beginPath();
+        ctx.arc(bx, bz, 3.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 9c. Custom GPS Waypoint Pin & Dashed Purple Route
+      const wp = store.customWaypoint;
+      if (wp) {
+        const wx = cx + (wp.x - px) * zoom;
+        const wz = cy + (wp.z - pz) * zoom;
+        ctx.strokeStyle = 'rgba(192, 132, 252, 0.92)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 3]);
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(wx, wz);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Clamp edge indicator if waypoint is outside radar viewport
+        const clampedX = Math.max(8, Math.min(w - 8, wx));
+        const clampedZ = Math.max(8, Math.min(h - 8, wz));
+        ctx.fillStyle = '#c084fc';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(clampedX, clampedZ, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#090c12';
+        ctx.font = 'bold 7px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('W', clampedX, clampedZ + 0.5);
+      }
+
       // 10. Inactive Protagonists
       for (const pId of ['nabilo', 'raka', 'kirana'] as ProtagonistId[]) {
         if (pId === playerState.activeProtagonist) continue;
@@ -301,7 +354,21 @@ export const MiniMapRadar: React.FC = () => {
   }, [staticLayout]);
 
   return (
-    <div className="relative w-[136px] h-[85px] sm:w-[196px] sm:h-[122px] bg-[#070b12]">
+    <div
+      onClick={onClickRadar}
+      role={onClickRadar ? 'button' : undefined}
+      tabIndex={onClickRadar ? 0 : undefined}
+      onKeyDown={(e) => {
+        if (onClickRadar && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onClickRadar();
+        }
+      }}
+      title="Klik untuk membuka Peta Taktis Jakarta & Pin GPS [Esc]"
+      className={`relative w-[136px] h-[85px] sm:w-[196px] sm:h-[122px] bg-[#070b12] ${
+        onClickRadar ? 'cursor-pointer group' : ''
+      }`}
+    >
       <canvas
         ref={canvasRef}
         width={RADAR_WIDTH}
@@ -313,6 +380,11 @@ export const MiniMapRadar: React.FC = () => {
       <span className="absolute top-1.5 right-1.5 px-1 rounded bg-[#070a10]/90 text-[9px] font-mono-num font-bold text-[#cbd5e1] pointer-events-none">
         U
       </span>
+      {customWaypoint && (
+        <span className="absolute bottom-1 left-1.5 px-1.5 py-0.5 rounded bg-[#070a10]/92 border border-[#c084fc]/50 text-[9px] font-mono-num font-bold text-[#c084fc] pointer-events-none truncate max-w-[140px]">
+          GPS: {customWaypoint.label}
+        </span>
+      )}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{

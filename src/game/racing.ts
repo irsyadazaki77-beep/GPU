@@ -1,10 +1,13 @@
 import type {
+  BuildingFootprint,
   RoadsideSpawnLayout,
   SidewalkBounds,
   StreetRaceSpec,
   TollSignSpawn,
   TrafficAISteppable,
   TrafficRouteId,
+  TrafficSignalPhase,
+  TrafficSignalState,
   TrafficSignKind,
   TrafficSignSpawn,
   TrafficSpawnSpec,
@@ -17,7 +20,10 @@ import type {
 } from './types';
 import { ENTERABLE_INTERIORS } from './heists';
 import { CITY_BUILDINGS, MAIN_BOULEVARD_SIDEWALK_SLABS } from './world/bounds';
-import { resolveCircleAABBCollision } from './world/spatial';
+import {
+  SpatialHashGrid,
+  resolveCircleAABBCollision,
+} from './world/spatial';
 
 export const VEHICLE_SPECS: Record<VehicleType, VehicleSpec> = {
   bajaj: {
@@ -241,6 +247,21 @@ export const STREET_RACES: StreetRaceSpec[] = [
       [0, -64],
       [32, -32],
       [32, 24],
+      [0, 24],
+    ],
+  },
+  {
+    id: 'race_drift_sabuk_tol',
+    name: 'Turnamen Drift Malam Sabuk Tol & Semanggi',
+    subtitle: 'Uji Sudut Drift Tajam Mengelilingi Cincin Monas, SCBD & Kemayoran (6 Checkpoint)',
+    entryFeeRp: 75000,
+    rewardRp: 950000,
+    checkpoints: [
+      [-32, -32],
+      [32, -32],
+      [32, 32],
+      [-32, 32],
+      [-32, -26],
       [0, 24],
     ],
   },
@@ -636,12 +657,89 @@ export function generateInitialTrafficSpawns(): TrafficSpawnSpec[] {
   });
 }
 
+export function createInitialTrafficSignalState(): TrafficSignalState {
+  return {
+    phase: 'ns_green',
+    timer: 7.5,
+    cycleCount: 0,
+  };
+}
+
+export function stepTrafficSignals(
+  state: TrafficSignalState,
+  dt: number
+): TrafficSignalState {
+  if (dt <= 0) return state;
+  let timer = state.timer - dt;
+  let phase = state.phase;
+  let cycleCount = state.cycleCount;
+
+  if (timer <= 0) {
+    if (phase === 'ns_green') {
+      phase = 'ns_amber';
+      timer = 2.0;
+    } else if (phase === 'ns_amber') {
+      phase = 'ew_green';
+      timer = 7.5;
+    } else if (phase === 'ew_green') {
+      phase = 'ew_amber';
+      timer = 2.0;
+    } else {
+      phase = 'ns_green';
+      timer = 7.5;
+      cycleCount += 1;
+    }
+  }
+  return { phase, timer, cycleCount };
+}
+
+export function isStoppedAtTrafficSignal(
+  x: number,
+  z: number,
+  heading: number,
+  layer: 'ground' | 'elevated',
+  signalPhase?: TrafficSignalPhase
+): boolean {
+  if (!signalPhase || layer !== 'ground') return false;
+  const sinH = Math.sin(heading);
+  const cosH = Math.cos(heading);
+  const movingNS = Math.abs(cosH) > Math.abs(sinH);
+
+  if (movingNS) {
+    if (signalPhase === 'ns_green') return false;
+    // Check approaches to z = ±32 and z = ±19 intersections along Sudirman & Ring
+    const stopLinesZ = cosH > 0 ? [-39.5, -19.5, 24.5] : [39.5, 19.5, -24.5];
+    for (const sl of stopLinesZ) {
+      const distAhead = (sl - z) * Math.sign(cosH);
+      if (distAhead > 0.5 && distAhead < 6.2 && Math.abs(x) < 38) {
+        return true;
+      }
+    }
+  } else {
+    if (signalPhase === 'ew_green') return false;
+    // Check approaches to x = ±32 and x = 0 intersections along Merdeka & Ring
+    const stopLinesX = sinH > 0 ? [-39.5, -19.5, 24.5] : [39.5, 19.5, -24.5];
+    for (const sl of stopLinesX) {
+      const distAhead = (sl - x) * Math.sign(sinH);
+      if (distAhead > 0.5 && distAhead < 6.2 && Math.abs(z) < 38) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function stepTrafficVehicleInPlace(
   vehicle: TrafficAISteppable,
   route: TrafficWaypoint[],
   aheadObstacleDist: number,
   dt: number,
-  options?: { playerWantedLevel?: number; hornTriggered?: boolean }
+  options?: {
+    playerWantedLevel?: number;
+    hornTriggered?: boolean;
+    signalPhase?: TrafficSignalPhase;
+    buildingGrid?: SpatialHashGrid<BuildingFootprint>;
+  }
 ): void {
   if (route.length === 0 || dt <= 0) return;
 
@@ -728,6 +826,21 @@ export function stepTrafficVehicleInPlace(
     targetSpeed = 0;
   }
 
+  // Respect Jakarta 4-way traffic lights unless yielding to wanted sirens or urgent horn
+  if (
+    options?.signalPhase &&
+    (options?.playerWantedLevel ?? 0) < 2 &&
+    isStoppedAtTrafficSignal(
+      vehicle.x,
+      vehicle.z,
+      vehicle.heading,
+      vehicle.layer,
+      options.signalPhase
+    )
+  ) {
+    targetSpeed = 0;
+  }
+
   // Ojol can filter closer than four-wheeled vehicles
   const hardStopDist = vehicle.vehicleType === 'ojek' ? 3.2 : 5.4;
   if (aheadObstacleDist < hardStopDist) {
@@ -751,7 +864,13 @@ export function stepTrafficVehicleInPlace(
   const nz = vehicle.z + Math.cos(vehicle.heading) * vehicle.speed * dt;
 
   if (vehicle.layer === 'ground') {
-    const col = resolveCircleAABBCollision(nx, nz, 1.9);
+    const col = resolveCircleAABBCollision(
+      nx,
+      nz,
+      1.9,
+      undefined,
+      options?.buildingGrid
+    );
     vehicle.x = col.x;
     vehicle.z = col.z;
   } else {
@@ -765,7 +884,12 @@ export function stepTrafficVehicleAI(
   route: TrafficWaypoint[],
   aheadObstacleDist: number,
   dt: number,
-  options?: { playerWantedLevel?: number; hornTriggered?: boolean }
+  options?: {
+    playerWantedLevel?: number;
+    hornTriggered?: boolean;
+    signalPhase?: TrafficSignalPhase;
+    buildingGrid?: SpatialHashGrid<BuildingFootprint>;
+  }
 ): TrafficAISteppable {
   const next: TrafficAISteppable = { ...state };
   stepTrafficVehicleInPlace(next, route, aheadObstacleDist, dt, options);

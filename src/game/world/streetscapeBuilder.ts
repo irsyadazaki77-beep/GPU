@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ENTERABLE_INTERIORS } from '../heists';
-import type { WeatherMode } from '../types';
+import type { TrafficSignalPhase, WeatherMode } from '../types';
 import { isNearBuilding, isOnRoadway } from './spatial';
 import {
   SidewalkRect,
@@ -12,7 +12,12 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   group: THREE.Group;
   sidewalkRects: SidewalkRect[];
   setWeatherVisuals: (weather: WeatherMode) => void;
-  setWeatherTransition: (nightFactor: number, wetnessFactor: number) => void;
+  setWeatherTransition: (
+    nightFactor: number,
+    wetnessFactor: number,
+    elapsedTime?: number
+  ) => void;
+  setTrafficSignalPhase: (phase: TrafficSignalPhase) => void;
 } {
   const group = new THREE.Group();
   const sidewalkRects: SidewalkRect[] = [];
@@ -22,15 +27,15 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   const sidewalkMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     map: sidewalkTex,
-    roughness: 0.88,
-    metalness: 0.04,
-    envMapIntensity: 0.22,
+    roughness: 0.94,
+    metalness: 0.02,
+    envMapIntensity: 0.06,
   });
   const curbYellowMat = new THREE.MeshStandardMaterial({
     color: 0xb45309,
-    roughness: 0.78,
-    metalness: 0.05,
-    envMapIntensity: 0.2,
+    roughness: 0.88,
+    metalness: 0.02,
+    envMapIntensity: 0.06,
   });
 
   const addSidewalkSlab = (
@@ -182,6 +187,15 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     depthWrite: false,
   });
 
+  const lightConeMat = new THREE.MeshBasicMaterial({
+    color: 0xfde68a,
+    transparent: true,
+    opacity: 0.06,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+
   const pCount = polePositions.length;
   const pjuMastGeo = new THREE.CylinderGeometry(0.08, 0.14, 6.8, 8);
   pjuMastGeo.translate(0, 3.4, 0);
@@ -200,6 +214,10 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   poolGeo.translate(1.8, 0.056, 0);
   const poolInst = new THREE.InstancedMesh(poolGeo, lightPoolMat, pCount);
 
+  const coneGeo = new THREE.ConeGeometry(2.6, 6.4, 12, 1, true);
+  coneGeo.translate(1.65, 3.3, 0);
+  const coneInst = new THREE.InstancedMesh(coneGeo, lightConeMat, pCount);
+
   polePositions.forEach((pp, i) => {
     dummy.position.set(pp.x, 0, pp.z);
     dummy.rotation.set(0, pp.rotY, 0);
@@ -209,25 +227,27 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     pjuArmInst.setMatrixAt(i, dummy.matrix);
     pjuLampInst.setMatrixAt(i, dummy.matrix);
     poolInst.setMatrixAt(i, dummy.matrix);
+    coneInst.setMatrixAt(i, dummy.matrix);
   });
   pjuMastInst.instanceMatrix.needsUpdate = true;
   pjuArmInst.instanceMatrix.needsUpdate = true;
   pjuLampInst.instanceMatrix.needsUpdate = true;
   poolInst.instanceMatrix.needsUpdate = true;
-  group.add(pjuMastInst, pjuArmInst, pjuLampInst, poolInst);
+  coneInst.instanceMatrix.needsUpdate = true;
+  group.add(pjuMastInst, pjuArmInst, pjuLampInst, poolInst, coneInst);
 
   const signalCorners: {
     x: number;
     z: number;
     rotY: number;
-    green: boolean;
+    axis: 'ns' | 'ew';
   }[] = [
-    { x: -7.8, z: -38.5, rotY: 0, green: true },
-    { x: 7.8, z: -19.5, rotY: Math.PI, green: true },
-    { x: -7.8, z: 19.5, rotY: 0, green: false },
-    { x: 7.8, z: 38.5, rotY: Math.PI, green: false },
-    { x: -38.5, z: -7.8, rotY: -Math.PI / 2, green: false },
-    { x: 38.5, z: 7.8, rotY: Math.PI / 2, green: true },
+    { x: -7.8, z: -38.5, rotY: 0, axis: 'ns' },
+    { x: 7.8, z: -19.5, rotY: Math.PI, axis: 'ns' },
+    { x: -7.8, z: 19.5, rotY: 0, axis: 'ns' },
+    { x: 7.8, z: 38.5, rotY: Math.PI, axis: 'ns' },
+    { x: -38.5, z: -7.8, rotY: -Math.PI / 2, axis: 'ew' },
+    { x: 38.5, z: 7.8, rotY: Math.PI / 2, axis: 'ew' },
   ];
   const housingMat = new THREE.MeshStandardMaterial({
     color: 0x0f172a,
@@ -235,8 +255,16 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     metalness: 0.5,
     envMapIntensity: 0.25,
   });
-  const greenLensMat = new THREE.MeshBasicMaterial({ color: 0x22c55e });
-  const redLensMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+
+  const nsRedMat = new THREE.MeshBasicMaterial({ color: 0x3f1518 });
+  const nsAmberMat = new THREE.MeshBasicMaterial({ color: 0x3b2a0b });
+  const nsGreenMat = new THREE.MeshBasicMaterial({ color: 0x22c55e });
+
+  const ewRedMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+  const ewAmberMat = new THREE.MeshBasicMaterial({ color: 0x3b2a0b });
+  const ewGreenMat = new THREE.MeshBasicMaterial({ color: 0x123820 });
+
+  const lensGeo = new THREE.CircleGeometry(0.11, 10);
 
   for (const sig of signalCorners) {
     if (isNearBuilding(sig.x, sig.z, 1.0)) continue;
@@ -259,18 +287,33 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     sGrp.add(arm);
 
     const box = new THREE.Mesh(
-      new THREE.BoxGeometry(1.1, 0.42, 0.34),
+      new THREE.BoxGeometry(1.18, 0.42, 0.34),
       housingMat
     );
     box.position.set(2.2, 4.95, 0);
     sGrp.add(box);
 
-    const activeLens = new THREE.Mesh(
-      new THREE.CircleGeometry(0.11, 10),
-      sig.green ? greenLensMat : redLensMat
-    );
-    activeLens.position.set(sig.green ? 2.5 : 1.9, 4.95, 0.18);
-    sGrp.add(activeLens);
+    const redMat = sig.axis === 'ns' ? nsRedMat : ewRedMat;
+    const amberMat = sig.axis === 'ns' ? nsAmberMat : ewAmberMat;
+    const greenMat = sig.axis === 'ns' ? nsGreenMat : ewGreenMat;
+
+    for (const faceZ of [0.18, -0.18]) {
+      const rotY = faceZ < 0 ? Math.PI : 0;
+      const rLens = new THREE.Mesh(lensGeo, redMat);
+      rLens.position.set(1.86, 4.95, faceZ);
+      rLens.rotation.y = rotY;
+      sGrp.add(rLens);
+
+      const aLens = new THREE.Mesh(lensGeo, amberMat);
+      aLens.position.set(2.2, 4.95, faceZ);
+      aLens.rotation.y = rotY;
+      sGrp.add(aLens);
+
+      const gLens = new THREE.Mesh(lensGeo, greenMat);
+      gLens.position.set(2.54, 4.95, faceZ);
+      gLens.rotation.y = rotY;
+      sGrp.add(gLens);
+    }
 
     group.add(sGrp);
   }
@@ -334,14 +377,6 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     group.add(gGrp);
   }
 
-  const glassShelterMat = new THREE.MeshStandardMaterial({
-    color: 0x7dd3fc,
-    transparent: true,
-    opacity: 0.38,
-    roughness: 0.18,
-    metalness: 0.65,
-    envMapIntensity: 0.35,
-  });
   const shelterTrimMat = new THREE.MeshStandardMaterial({
     color: 0x0284c7,
     emissive: 0x0ea5e9,
@@ -349,45 +384,6 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     roughness: 0.35,
     envMapIntensity: 0.25,
   });
-  for (const hPos of [
-    { x: -9.0, z: -42, rotY: 0 },
-    { x: 9.0, z: 42, rotY: Math.PI },
-  ]) {
-    const hGrp = new THREE.Group();
-    hGrp.position.set(hPos.x, 0.14, hPos.z);
-    hGrp.rotation.y = hPos.rotY;
-
-    const platform = new THREE.Mesh(
-      new THREE.BoxGeometry(2.6, 0.26, 9.5),
-      pjuMetalMat
-    );
-    platform.position.y = 0.13;
-    hGrp.add(platform);
-
-    const roof = new THREE.Mesh(
-      new THREE.BoxGeometry(2.9, 0.18, 9.8),
-      pjuMetalMat
-    );
-    roof.position.y = 3.15;
-    roof.castShadow = true;
-    hGrp.add(roof);
-
-    const ledStrip = new THREE.Mesh(
-      new THREE.BoxGeometry(2.94, 0.12, 9.84),
-      shelterTrimMat
-    );
-    ledStrip.position.y = 3.04;
-    hGrp.add(ledStrip);
-
-    const backGlass = new THREE.Mesh(
-      new THREE.BoxGeometry(0.08, 2.4, 8.6),
-      glassShelterMat
-    );
-    backGlass.position.set(-1.1, 1.5, 0);
-    hGrp.add(backGlass);
-
-    group.add(hGrp);
-  }
 
   const treeCoords: { x: number; z: number; scale: number; isPalm: boolean }[] =
     [];
@@ -465,9 +461,9 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
 
   const foliageMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    roughness: 0.88,
-    metalness: 0.02,
-    envMapIntensity: 0.18,
+    roughness: 0.96,
+    metalness: 0.0,
+    envMapIntensity: 0.04,
   });
   const crownCenterInst = new THREE.InstancedMesh(
     crownCenterGeo,
@@ -530,22 +526,125 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     crownSideBInst
   );
 
+  // Elevated MRT Jakarta "Ratangga" Viaduct & Moving 3-Car Train along Sudirman Corridor
+  const mrtConcreteMat = new THREE.MeshStandardMaterial({
+    color: 0x334155,
+    roughness: 0.9,
+    metalness: 0.05,
+    envMapIntensity: 0.06,
+  });
+  const mrtBodyMat = new THREE.MeshStandardMaterial({
+    color: 0xe2e8f0,
+    roughness: 0.72,
+    metalness: 0.18,
+    envMapIntensity: 0.1,
+  });
+  const mrtStripeMat = new THREE.MeshStandardMaterial({
+    color: 0x0284c7,
+    emissive: 0x0369a1,
+    emissiveIntensity: 0.18,
+    roughness: 0.65,
+    envMapIntensity: 0.08,
+  });
+  const mrtWinMat = new THREE.MeshStandardMaterial({
+    color: 0xbae6fd,
+    emissive: 0x38bdf8,
+    emissiveIntensity: 0.25,
+    roughness: 0.5,
+    envMapIntensity: 0.08,
+  });
+
+  const mrtTrackX = -13.6;
+  const mrtDeckY = 8.6;
+  const mrtViaductBeam = new THREE.Mesh(
+    new THREE.BoxGeometry(2.6, 0.55, 168),
+    mrtConcreteMat
+  );
+  mrtViaductBeam.position.set(mrtTrackX, mrtDeckY, 0);
+  group.add(mrtViaductBeam);
+
+  for (const zPillar of [-74, -52, -36, 36, 54, 74]) {
+    if (isNearBuilding(mrtTrackX, zPillar, 1.6)) continue;
+    const mPillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.45, 0.55, mrtDeckY, 8),
+      mrtConcreteMat
+    );
+    mPillar.position.set(mrtTrackX, mrtDeckY * 0.5, zPillar);
+    group.add(mPillar);
+  }
+
+  const mrtTrainGroup = new THREE.Group();
+  mrtTrainGroup.position.set(mrtTrackX, mrtDeckY + 0.35, -60);
+  for (const carOffsetZ of [-6.8, 0, 6.8]) {
+    const carShell = new THREE.Mesh(
+      new THREE.BoxGeometry(2.15, 2.25, 6.2),
+      mrtBodyMat
+    );
+    carShell.position.set(0, 1.15, carOffsetZ);
+    carShell.castShadow = true;
+    mrtTrainGroup.add(carShell);
+
+    const blueBand = new THREE.Mesh(
+      new THREE.BoxGeometry(2.2, 0.38, 6.24),
+      mrtStripeMat
+    );
+    blueBand.position.set(0, 0.85, carOffsetZ);
+    mrtTrainGroup.add(blueBand);
+
+    const windowBand = new THREE.Mesh(
+      new THREE.BoxGeometry(2.22, 0.56, 5.4),
+      mrtWinMat
+    );
+    windowBand.position.set(0, 1.45, carOffsetZ);
+    mrtTrainGroup.add(windowBand);
+  }
+  group.add(mrtTrainGroup);
+
   const setWeatherTransition = (
     nightFactor: number,
-    _wetnessFactor: number
+    _wetnessFactor: number,
+    elapsedTime: number = 0
   ) => {
     const n = Math.max(0, Math.min(1, nightFactor));
     pjuBulbMat.emissiveIntensity = 0.1 + n * 1.25;
     lightPoolMat.opacity = n * 0.12;
+    lightConeMat.opacity = n * 0.075;
+    coneInst.visible = n > 0.05;
     shelterTrimMat.emissiveIntensity = 0.15 + Math.min(1, n * 1.5) * 0.3;
+    mrtWinMat.emissiveIntensity = 0.14 + n * 0.48;
+
+    // Smooth shuttle motion for MRT Ratangga train along Sudirman viaduct (-72..72) with station dwell
+    const cycle = (elapsedTime * 0.18) % (Math.PI * 2);
+    const zPos = Math.sin(cycle) * 68;
+    mrtTrainGroup.position.z = zPos;
+  };
+
+  const setTrafficSignalPhase = (phase: TrafficSignalPhase) => {
+    nsRedMat.color.setHex(
+      phase === 'ew_green' || phase === 'ew_amber' ? 0xef4444 : 0x3b1216
+    );
+    nsAmberMat.color.setHex(phase === 'ns_amber' ? 0xfacc15 : 0x3b2a0b);
+    nsGreenMat.color.setHex(phase === 'ns_green' ? 0x22c55e : 0x10331d);
+
+    ewRedMat.color.setHex(
+      phase === 'ns_green' || phase === 'ns_amber' ? 0xef4444 : 0x3b1216
+    );
+    ewAmberMat.color.setHex(phase === 'ew_amber' ? 0xfacc15 : 0x3b2a0b);
+    ewGreenMat.color.setHex(phase === 'ew_green' ? 0x22c55e : 0x10331d);
   };
 
   const setWeatherVisuals = (weather: WeatherMode) => {
     const nf = weather === 'malam' ? 1 : weather === 'siang' ? 0 : 0.65;
-    setWeatherTransition(nf, weather === 'hujan' ? 1 : 0);
+    setWeatherTransition(nf, weather === 'hujan' ? 1 : 0, 0);
   };
 
-  return { group, sidewalkRects, setWeatherVisuals, setWeatherTransition };
+  return {
+    group,
+    sidewalkRects,
+    setWeatherVisuals,
+    setWeatherTransition,
+    setTrafficSignalPhase,
+  };
 }
 
 export function buildElevatedHighwayMesh(
@@ -555,15 +654,17 @@ export function buildElevatedHighwayMesh(
 
   const concreteMat = new THREE.MeshStandardMaterial({
     color: 0x334155,
-    roughness: 0.78,
-    metalness: 0.15,
+    roughness: 0.9,
+    metalness: 0.05,
+    envMapIntensity: 0.06,
   });
   const barrierRailMat = new THREE.MeshStandardMaterial({
-    color: 0xf59e0b,
-    emissive: 0xd97706,
-    emissiveIntensity: 0.45,
-    roughness: 0.35,
-    metalness: 0.6,
+    color: 0xd97706,
+    emissive: 0xb45309,
+    emissiveIntensity: 0.1,
+    roughness: 0.76,
+    metalness: 0.2,
+    envMapIntensity: 0.08,
   });
 
   const deckGeo = new THREE.BoxGeometry(84, 0.5, 9.0);
@@ -660,6 +761,16 @@ export function buildElevatedHighwayMesh(
   return group;
 }
 
+export const INTERIOR_ROOM_CENTERS: Record<
+  'heist_penthouse' | 'customs_garage' | 'bank_vault' | 'warung',
+  number
+> = {
+  heist_penthouse: 0,
+  customs_garage: 40,
+  bank_vault: -40,
+  warung: 80,
+};
+
 export function buildInteriorPortalsAndStage(): {
   portalsGroup: THREE.Group;
   interiorStageGroup: THREE.Group;
@@ -701,81 +812,204 @@ export function buildInteriorPortalsAndStage(): {
   const interiorStageGroup = new THREE.Group();
   interiorStageGroup.position.set(0, 68, 0);
 
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x0f172a,
-    roughness: 0.22,
-    metalness: 0.65,
-  });
-  const floor = new THREE.Mesh(new THREE.BoxGeometry(28, 0.6, 28), floorMat);
-  floor.position.set(0, -0.3, 0);
-  interiorStageGroup.add(floor);
+  const buildRoomShell = (
+    centerX: number,
+    floorHex: number,
+    wallHex: number,
+    accentHex: number
+  ) => {
+    const roomGrp = new THREE.Group();
+    roomGrp.position.set(centerX, 0, 0);
 
-  const wallMat = new THREE.MeshStandardMaterial({
-    color: 0x1e293b,
-    roughness: 0.55,
-    metalness: 0.3,
-  });
-  const backWall = new THREE.Mesh(new THREE.BoxGeometry(28, 9, 0.6), wallMat);
-  backWall.position.set(0, 4.5, -13.7);
-  interiorStageGroup.add(backWall);
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: floorHex,
+      roughness: 0.82,
+      metalness: 0.12,
+      envMapIntensity: 0.08,
+    });
+    const wallMat = new THREE.MeshStandardMaterial({
+      color: wallHex,
+      roughness: 0.86,
+      metalness: 0.08,
+      envMapIntensity: 0.08,
+    });
+    const accentTrimMat = new THREE.MeshStandardMaterial({
+      color: accentHex,
+      emissive: accentHex,
+      emissiveIntensity: 0.35,
+      roughness: 0.5,
+      envMapIntensity: 0.08,
+    });
 
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(26, 0.6, 26), floorMat);
+    floor.position.set(0, -0.3, 0);
+    roomGrp.add(floor);
+
+    const backWall = new THREE.Mesh(
+      new THREE.BoxGeometry(26, 8.5, 0.6),
+      wallMat
+    );
+    backWall.position.set(0, 4.25, -12.7);
+    roomGrp.add(backWall);
+
+    for (const sx of [-12.7, 12.7]) {
+      const sideWall = new THREE.Mesh(
+        new THREE.BoxGeometry(0.6, 8.5, 26),
+        wallMat
+      );
+      sideWall.position.set(sx, 4.25, 0);
+      roomGrp.add(sideWall);
+    }
+
+    const trimStrip = new THREE.Mesh(
+      new THREE.BoxGeometry(24, 0.22, 0.16),
+      accentTrimMat
+    );
+    trimStrip.position.set(0, 6.8, -12.35);
+    roomGrp.add(trimStrip);
+
+    interiorStageGroup.add(roomGrp);
+    return roomGrp;
+  };
+
+  // Room 1: Penthouse Komando Heist SCBD (x = 0)
+  const penthouseRoom = buildRoomShell(0, 0x0f172a, 0x1e293b, 0xa855f7);
   const tableMat = new THREE.MeshStandardMaterial({
     color: 0x38bdf8,
     emissive: 0x0284c7,
-    emissiveIntensity: 0.65,
-    roughness: 0.2,
-    metalness: 0.8,
+    emissiveIntensity: 0.42,
+    roughness: 0.55,
+    metalness: 0.25,
+    envMapIntensity: 0.08,
   });
   const holoTable = new THREE.Mesh(
-    new THREE.BoxGeometry(4.6, 0.95, 2.6),
+    new THREE.BoxGeometry(5.2, 0.95, 2.8),
     tableMat
   );
-  holoTable.position.set(-5.5, 0.48, -4.5);
-  interiorStageGroup.add(holoTable);
+  holoTable.position.set(0, 0.48, -3.5);
+  penthouseRoom.add(holoTable);
+
+  const serverMat = new THREE.MeshStandardMaterial({
+    color: 0x090d16,
+    roughness: 0.78,
+    metalness: 0.2,
+  });
+  for (const rx of [-7.5, -5.2, 5.2, 7.5]) {
+    const rack = new THREE.Mesh(
+      new THREE.BoxGeometry(1.6, 4.2, 1.2),
+      serverMat
+    );
+    rack.position.set(rx, 2.1, -9.8);
+    penthouseRoom.add(rack);
+  }
+
+  // Room 2: Bengkel Kustom Nusantara (x = 40)
+  const garageRoom = buildRoomShell(40, 0x18181b, 0x27272a, 0xf59e0b);
+  const liftMat = new THREE.MeshStandardMaterial({
+    color: 0xd97706,
+    roughness: 0.68,
+    metalness: 0.3,
+  });
+  for (const lx of [-3.2, 3.2]) {
+    const post = new THREE.Mesh(
+      new THREE.BoxGeometry(0.48, 4.6, 0.48),
+      liftMat
+    );
+    post.position.set(lx, 2.3, -3.5);
+    garageRoom.add(post);
+
+    const ramp = new THREE.Mesh(
+      new THREE.BoxGeometry(1.1, 0.18, 6.2),
+      liftMat
+    );
+    ramp.position.set(lx * 0.55, 0.12, -3.5);
+    garageRoom.add(ramp);
+  }
+  const toolBoxMat = new THREE.MeshStandardMaterial({
+    color: 0xdc2626,
+    roughness: 0.72,
+    metalness: 0.2,
+  });
+  for (const tx of [-8.2, 8.2]) {
+    const toolChest = new THREE.Mesh(
+      new THREE.BoxGeometry(2.8, 1.6, 1.2),
+      toolBoxMat
+    );
+    toolChest.position.set(tx, 0.8, -10.5);
+    garageRoom.add(toolChest);
+  }
+
+  // Room 3: Lobi & Brankas Emas Bank Sentral (x = -40)
+  const vaultRoom = buildRoomShell(-40, 0x0f172a, 0x1e293b, 0x22c55e);
+  const vaultSteelMat = new THREE.MeshStandardMaterial({
+    color: 0x64748b,
+    roughness: 0.52,
+    metalness: 0.65,
+    envMapIntensity: 0.12,
+  });
+  const vaultDoor = new THREE.Mesh(
+    new THREE.CylinderGeometry(3.4, 3.4, 0.65, 24),
+    vaultSteelMat
+  );
+  vaultDoor.rotation.x = Math.PI / 2;
+  vaultDoor.position.set(0, 3.8, -11.8);
+  vaultRoom.add(vaultDoor);
 
   const goldMat = new THREE.MeshStandardMaterial({
     color: 0xfacc15,
     emissive: 0xd97706,
-    emissiveIntensity: 0.45,
-    roughness: 0.18,
-    metalness: 0.92,
+    emissiveIntensity: 0.32,
+    roughness: 0.45,
+    metalness: 0.68,
+    envMapIntensity: 0.14,
   });
-  for (let gx = 0; gx < 3; gx++) {
-    for (let gz = 0; gz < 2; gz++) {
+  for (let gx = -2; gx <= 2; gx++) {
+    for (let gz = 0; gz < 3; gz++) {
       const bar = new THREE.Mesh(
-        new THREE.BoxGeometry(1.1, 0.65, 0.65),
+        new THREE.BoxGeometry(1.2, 0.68, 0.72),
         goldMat
       );
-      bar.position.set(5.2 + gx * 1.35, 0.33, -4.5 + gz * 0.95);
-      interiorStageGroup.add(bar);
+      bar.position.set(gx * 1.8, 0.34, -5.8 + gz * 1.3);
+      vaultRoom.add(bar);
     }
   }
 
-  // Warung Nusantara wooden counter & warm display etalase inside interior stage
+  // Room 4: Warung Kopi & Jajanan Nusantara (x = 80)
+  const warungRoom = buildRoomShell(80, 0x1c1917, 0x292524, 0x10b981);
   const warungWoodMat = new THREE.MeshStandardMaterial({
     color: 0x78350f,
-    roughness: 0.82,
-    metalness: 0.08,
+    roughness: 0.86,
+    metalness: 0.06,
   });
   const warungLanternMat = new THREE.MeshStandardMaterial({
     color: 0x10b981,
     emissive: 0x059669,
-    emissiveIntensity: 0.75,
-    roughness: 0.3,
+    emissiveIntensity: 0.48,
+    roughness: 0.55,
   });
   const warungCounter = new THREE.Mesh(
-    new THREE.BoxGeometry(5.2, 1.05, 1.6),
+    new THREE.BoxGeometry(6.8, 1.1, 1.8),
     warungWoodMat
   );
-  warungCounter.position.set(0, 0.52, -7.2);
-  interiorStageGroup.add(warungCounter);
+  warungCounter.position.set(0, 0.55, -6.2);
+  warungRoom.add(warungCounter);
 
   const warungSign = new THREE.Mesh(
-    new THREE.BoxGeometry(4.4, 0.55, 0.18),
+    new THREE.BoxGeometry(5.2, 0.65, 0.22),
     warungLanternMat
   );
-  warungSign.position.set(0, 3.2, -7.2);
-  interiorStageGroup.add(warungSign);
+  warungSign.position.set(0, 3.6, -6.2);
+  warungRoom.add(warungSign);
+
+  for (const sx of [-2.4, -0.8, 0.8, 2.4]) {
+    const stool = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.36, 0.32, 0.68, 10),
+      warungWoodMat
+    );
+    stool.position.set(sx, 0.34, -4.2);
+    warungRoom.add(stool);
+  }
 
   return { portalsGroup, interiorStageGroup };
 }
+

@@ -60,6 +60,18 @@ export const RADIO_STATIONS: RadioStationSpec[] = [
     freq: '106.4 FM',
     genre: 'Cyberpunk Sudirman Synth',
   },
+  {
+    id: 'indie_senopati',
+    name: 'Senopati Indie Groove',
+    freq: '104.8 FM',
+    genre: 'City Pop & Indie Melawai',
+  },
+  {
+    id: 'berita_kriminal',
+    name: 'Radio Berita Kriminal JKT',
+    freq: '88.0 FM',
+    genre: 'Frekuensi Patroli & Info Lalin',
+  },
 ];
 
 export const PROTAGONIST_PROFILES: Record<ProtagonistId, ProtagonistProfileSpec> = {

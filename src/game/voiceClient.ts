@@ -1,0 +1,109 @@
+import type { NpcVoiceRequest, NpcVoiceResponse } from './types';
+
+let activeAudioEl: HTMLAudioElement | null = null;
+const clientAudioCache = new Map<string, string>();
+let activeRequestToken = 0;
+
+export function stopVoicePlayback(): void {
+  activeRequestToken += 1;
+  if (activeAudioEl) {
+    try {
+      activeAudioEl.pause();
+      activeAudioEl.currentTime = 0;
+    } catch {
+      // ignore
+    }
+    activeAudioEl = null;
+  }
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function speakWithBrowserFallback(text: string, volume: number): void {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  try {
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'id-ID';
+    utter.rate = 1.02;
+    utter.pitch = 0.98;
+    utter.volume = Math.max(0.05, Math.min(1, volume));
+    const voices = window.speechSynthesis.getVoices();
+    const idVoice = voices.find((v) => v.lang.toLowerCase().startsWith('id'));
+    if (idVoice) utter.voice = idVoice;
+    window.speechSynthesis.speak(utter);
+  } catch {
+    // ignore speech synthesis restrictions
+  }
+}
+
+export async function speakDialogueLine(
+  req: NpcVoiceRequest,
+  enabled: boolean,
+  volume: number = 0.85
+): Promise<'gemini_tts' | 'fallback' | 'disabled'> {
+  if (!enabled || volume <= 0.01) return 'disabled';
+  const trimmed = req.text.trim();
+  if (!trimmed) return 'disabled';
+
+  stopVoicePlayback();
+  const token = activeRequestToken;
+  const cacheKey = `${req.speakerName}|${req.tone || ''}|${trimmed}`;
+  const clampedVol = Math.max(0.05, Math.min(1, volume));
+
+  const playDataUrl = (dataUrl: string) => {
+    if (token !== activeRequestToken || typeof Audio === 'undefined') return;
+    const audio = new Audio(dataUrl);
+    audio.volume = clampedVol;
+    activeAudioEl = audio;
+    audio.play().catch(() => {
+      speakWithBrowserFallback(trimmed, clampedVol);
+    });
+  };
+
+  const cachedUrl = clientAudioCache.get(cacheKey);
+  if (cachedUrl) {
+    playDataUrl(cachedUrl);
+    return 'gemini_tts';
+  }
+
+  try {
+    const res = await fetch('/api/npc/voice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+    if (token !== activeRequestToken) return 'disabled';
+    if (!res.ok) {
+      speakWithBrowserFallback(trimmed, clampedVol);
+      return 'fallback';
+    }
+    const data = (await res.json()) as NpcVoiceResponse;
+    if (token !== activeRequestToken) return 'disabled';
+
+    if (data.source === 'gemini_tts' && data.audioBase64) {
+      const mime = data.mimeType || 'audio/wav';
+      const dataUrl = `data:${mime};base64,${data.audioBase64}`;
+      if (clientAudioCache.size >= 30) {
+        const firstKey = clientAudioCache.keys().next().value;
+        if (firstKey) clientAudioCache.delete(firstKey);
+      }
+      clientAudioCache.set(cacheKey, dataUrl);
+      playDataUrl(dataUrl);
+      return 'gemini_tts';
+    }
+
+    speakWithBrowserFallback(trimmed, clampedVol);
+    return 'fallback';
+  } catch {
+    if (token === activeRequestToken) {
+      speakWithBrowserFallback(trimmed, clampedVol);
+    }
+    return 'fallback';
+  }
+}

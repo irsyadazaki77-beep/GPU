@@ -18,4 +18,6 @@ export {
   SpatialHashGrid,
   createBuildingSpatialGrid,
   resolveCircleAABBCollision,
+  resolveCameraWallPullIn,
+  stepSidewalkPatrol,
 } from './world/spatial';

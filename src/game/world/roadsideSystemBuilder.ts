@@ -47,36 +47,41 @@ export function buildAuthenticRoadsideSystem(
   const galvanizedSteelMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0x64748b,
-      metalness: 0.76,
-      roughness: 0.34,
+      metalness: 0.45,
+      roughness: 0.62,
+      envMapIntensity: 0.1,
     })
   );
   const darkSteelMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0x1e293b,
-      metalness: 0.68,
-      roughness: 0.42,
+      metalness: 0.38,
+      roughness: 0.68,
+      envMapIntensity: 0.1,
     })
   );
   const concretePlinthMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0x475569,
-      metalness: 0.06,
-      roughness: 0.88,
+      metalness: 0.04,
+      roughness: 0.92,
+      envMapIntensity: 0.06,
     })
   );
   const yellowTactileMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0xfacc15,
-      metalness: 0.08,
-      roughness: 0.64,
+      color: 0xd97706,
+      metalness: 0.04,
+      roughness: 0.84,
+      envMapIntensity: 0.06,
     })
   );
   const aluminumBackMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0x94a3b8,
-      metalness: 0.72,
-      roughness: 0.38,
+      metalness: 0.4,
+      roughness: 0.65,
+      envMapIntensity: 0.1,
     })
   );
   const halteGlassMat = trackMat(
@@ -141,9 +146,10 @@ export function buildAuthenticRoadsideSystem(
         map: tex,
         emissiveMap: tex,
         emissive: new THREE.Color(0xffffff),
-        emissiveIntensity: 0.14,
-        roughness: 0.28,
-        metalness: 0.18,
+        emissiveIntensity: 0.08,
+        roughness: 0.62,
+        metalness: 0.06,
+        envMapIntensity: 0.06,
         transparent: kind === 'peringatan_penyeberangan',
         alphaTest: kind === 'peringatan_penyeberangan' ? 0.5 : 0,
       })
@@ -471,8 +477,8 @@ export function buildAuthenticRoadsideSystem(
     const n = Math.max(0, Math.min(1, nightFactor));
     const w = Math.max(0, Math.min(1, wetnessFactor));
 
-    const reflIntensity = 0.06 + n * 0.18;
-    const litIntensity = 0.08 + n * 0.28;
+    const reflIntensity = 0.04 + n * 0.1;
+    const litIntensity = 0.06 + n * 0.16;
 
     for (const mat of reflectiveBoardMats) {
       mat.emissiveIntensity = reflIntensity;

@@ -1,20 +1,30 @@
 import React, { useEffect, useRef, useState } from 'react';
-import {
+import type {
+  CombatHitFeedbackEvent,
   DistrictZone,
   EnterableInteriorSpec,
-  PROTAGONIST_PROFILES,
   PlayerProgressState,
   ProtagonistId,
   StoryChoiceOption,
   StoryMission,
-  VEHICLE_SPECS,
   VehicleType,
-  WEATHER_MODES,
-  WEAPONS,
   WeaponId,
   WeatherMode,
+} from '../game/types';
+import {
+  PROTAGONIST_PROFILES,
+  RADIO_STATIONS,
+  VEHICLE_SPECS,
+  WEATHER_MODES,
+  formatJakartaClock,
   formatRupiah,
+  getEffectiveWeaponSpec,
 } from '../game/rules';
+import {
+  engineTelemetryRef,
+  gameStore,
+  useGameStore,
+} from '../state/gameStore';
 import { MiniMapRadar } from './MiniMapRadar';
 
 interface GameHudProps {
@@ -24,6 +34,9 @@ interface GameHudProps {
   drivingVehicle: VehicleType | null;
   vehicleSpeedKmh: number;
   aircraftAltitude: number;
+  isDrifting?: boolean;
+  combatHitEvents?: CombatHitFeedbackEvent[];
+  playerHitFlash?: { active: boolean; angleRad: number; stamp?: number };
   nearbyVehicle: VehicleType | null;
   nearbyMission: StoryMission | null;
   nearbyInterior: EnterableInteriorSpec | null;
@@ -54,6 +67,7 @@ interface GameHudProps {
   onOpenHeistBoard: () => void;
   onOpenCustomsGarage: () => void;
   onOpenWarung: () => void;
+  onOpenPhotoMode?: () => void;
   onEnterOrExitInterior: () => void;
   onOpenMissionDialog: (m: StoryMission) => void;
   onCycleWeather: () => void;
@@ -120,6 +134,9 @@ export const GameHud: React.FC<GameHudProps> = ({
   drivingVehicle,
   vehicleSpeedKmh,
   aircraftAltitude,
+  isDrifting = false,
+  combatHitEvents = [],
+  playerHitFlash,
   nearbyVehicle,
   nearbyMission,
   nearbyInterior,
@@ -142,11 +159,26 @@ export const GameHud: React.FC<GameHudProps> = ({
   onOpenCharacterWheel,
   onOpenCustomsGarage,
   onOpenWarung,
+  onOpenPhotoMode,
   onEnterOrExitInterior,
   onOpenMissionDialog,
   onPause,
 }) => {
-  const currentWeaponSpec = WEAPONS[playerState.activeWeapon];
+  const customWaypoint = useGameStore((s) => s.customWaypoint);
+  const zenHudMode = useGameStore((s) => s.zenHudMode);
+  const gamepadActive = useGameStore((s) => s.gamepadActive);
+  const worldTimeMinutes = useGameStore((s) => s.worldTimeMinutes);
+  const driftScore = useGameStore((s) => s.driftScore);
+  const driftMultiplier = useGameStore((s) => s.driftMultiplier);
+  const activeContract = useGameStore((s) => s.activeContract);
+
+  const currentWeaponSpec = getEffectiveWeaponSpec(
+    playerState.activeWeapon,
+    playerState
+  );
+  const activeRadioSpec =
+    RADIO_STATIONS.find((r) => r.id === playerState.radioStation) ||
+    RADIO_STATIONS[0];
   const activeProtagonistProf =
     PROTAGONIST_PROFILES[playerState.activeProtagonist];
   const lowHp = playerState.hp <= 30;
@@ -190,6 +222,35 @@ export const GameHud: React.FC<GameHudProps> = ({
       return () => clearTimeout(t);
     }
   }, [district.id]);
+
+  // Transient Radio FM Station Banner on radio station change
+  const prevRadioRef = useRef<string>(playerState.radioStation);
+  const [radioToast, setRadioToast] = useState<{
+    name: string;
+    freq: string;
+    genre: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (playerState.radioStation !== prevRadioRef.current) {
+      prevRadioRef.current = playerState.radioStation;
+      const st = RADIO_STATIONS.find((r) => r.id === playerState.radioStation);
+      if (st) {
+        setRadioToast({ name: st.name, freq: st.freq, genre: st.genre });
+        const t = window.setTimeout(() => setRadioToast(null), 3000);
+        return () => clearTimeout(t);
+      }
+    }
+  }, [playerState.radioStation]);
+
+  const waypointDistanceM = customWaypoint
+    ? Math.round(
+        Math.hypot(
+          customWaypoint.x - engineTelemetryRef.playerX,
+          customWaypoint.z - engineTelemetryRef.playerZ
+        )
+      )
+    : null;
 
   const weatherSpec =
     WEATHER_MODES.find((w) => w.id === weatherMode) || WEATHER_MODES[0];
@@ -258,6 +319,57 @@ export const GameHud: React.FC<GameHudProps> = ({
               'radial-gradient(circle, rgba(0,0,0,0) 55%, rgba(220,38,38,0.42) 100%)',
           }}
         />
+      )}
+
+      {/* Directional Damage Arc Vignette */}
+      {playerHitFlash?.active && (
+        <div
+          className="fixed inset-0 pointer-events-none flex items-center justify-center z-10"
+          aria-hidden="true"
+        >
+          <div
+            className="w-[82vmin] h-[82vmin] rounded-full transition-transform duration-150"
+            style={{
+              transform: `rotate(${Math.round(
+                (playerHitFlash.angleRad * 180) / Math.PI
+              )}deg)`,
+              background:
+                'conic-gradient(from -28deg at 50% 50%, rgba(239,68,68,0.52) 0deg, rgba(239,68,68,0.42) 56deg, rgba(0,0,0,0) 76deg, rgba(0,0,0,0) 360deg)',
+              WebkitMaskImage:
+                'radial-gradient(circle, transparent 58%, black 76%, transparent 96%)',
+              maskImage:
+                'radial-gradient(circle, transparent 58%, black 76%, transparent 96%)',
+            }}
+          />
+        </div>
+      )}
+
+      {/* Floating Combat Hit & KO Callouts */}
+      {combatHitEvents.length > 0 && (
+        <div
+          className="fixed inset-0 pointer-events-none z-20"
+          aria-hidden="true"
+        >
+          {combatHitEvents.map((evt) => (
+            <div
+              key={evt.id}
+              className={`absolute -translate-x-1/2 -translate-y-1/2 font-display font-extrabold italic uppercase tracking-wider hud-stroke animate-aaa-up ${
+                evt.isKo
+                  ? 'text-2xl text-[#f59e0b]'
+                  : evt.isCrit
+                  ? 'text-lg text-[#38bdf8]'
+                  : 'text-base text-[#f4f1ea]'
+              }`}
+              style={{
+                left: `${evt.screenX}%`,
+                top: `${evt.screenY}%`,
+              }}
+            >
+              {evt.isKo ? `K.O! -${evt.damage}` : `-${evt.damage}`}
+              {evt.isCrit && !evt.isKo && ' KRITIS'}
+            </div>
+          ))}
+        </div>
       )}
 
       {/* Special Ability [Q] Tactical Chromatic Vignette */}
@@ -335,7 +447,36 @@ export const GameHud: React.FC<GameHudProps> = ({
         </div>
       )}
 
+      {/* RADIO FM TUNER BANNER */}
+      {radioToast && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-aaa-up">
+          <div className="aaa-glass-subtle px-4 py-2 rounded-xl border border-[#f59e0b]/40 flex items-center gap-3 shadow-xl">
+            <span className="w-2 h-2 rounded-full bg-[#f59e0b] animate-pulse" />
+            <div>
+              <div className="font-display text-sm font-bold uppercase tracking-wider text-[#f4f1ea]">
+                {radioToast.name} ·{' '}
+                <span className="text-[#f59e0b] font-mono-num">
+                  {radioToast.freq}
+                </span>
+              </div>
+              <div className="text-[10px] text-[#94a3b8]">{radioToast.genre}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ==================== TOP ROW ==================== */}
+      {zenHudMode ? (
+        <div className="flex items-start justify-end">
+          <button
+            type="button"
+            onClick={() => gameStore.setState({ zenHudMode: false })}
+            className="pointer-events-auto px-3 py-1.5 rounded-lg aaa-glass-subtle hover:bg-white/15 text-xs font-mono-num text-[#cbd5e1] hover:text-white cursor-pointer"
+          >
+            [U] Tampilkan HUD
+          </button>
+        </div>
+      ) : (
       <div className="flex items-start justify-between gap-2 sm:gap-4">
         {/* TOP-LEFT: Frameless Active Objective OR Transient District Reveal */}
         <div className="flex flex-col gap-2 flex-1 max-w-sm min-w-0">
@@ -372,6 +513,12 @@ export const GameHud: React.FC<GameHudProps> = ({
                 <span className="font-display text-sm sm:text-base md:text-lg font-bold uppercase tracking-wide text-[#f4f1ea] truncate">
                   {district.name}
                 </span>
+                <span aria-hidden="true" className="text-[#f59e0b] shrink-0">
+                  ·
+                </span>
+                <span className="font-mono-num text-[11px] font-bold text-[#fef08a] whitespace-nowrap shrink-0">
+                  {formatJakartaClock(worldTimeMinutes)} WIB
+                </span>
                 <span aria-hidden="true" className="hidden sm:inline text-[#f59e0b] shrink-0">
                   ·
                 </span>
@@ -405,6 +552,46 @@ export const GameHud: React.FC<GameHudProps> = ({
             </div>
           )}
 
+          {/* Active Open-World Street Contract (Kurir Ojol Kilat / Konvoi Lapis Baja / Rebut Teritori) */}
+          {activeContract && (
+            <div className="aaa-glass-subtle rounded-lg border-l-2 border-l-[#22c55e] px-3 py-2 flex flex-col gap-1 pointer-events-auto animate-aaa-up max-w-xs">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="font-bold text-[#22c55e] truncate">
+                  {activeContract.title}
+                </span>
+                <span className="font-mono-num font-extrabold text-[#fef08a] shrink-0">
+                  {activeContract.timeRemainingSec}d
+                </span>
+              </div>
+              <div className="text-[11px] text-[#cbd5e1] truncate">
+                {activeContract.subtitle} · +{formatRupiah(activeContract.rewardRp)}
+              </div>
+            </div>
+          )}
+
+          {/* Custom GPS Waypoint Tracker Pill */}
+          {customWaypoint && waypointDistanceM !== null && (
+            <div className="aaa-glass-subtle rounded-lg border-l-2 border-l-[#c084fc] px-3 py-1.5 flex items-center justify-between gap-2 pointer-events-auto animate-aaa-up max-w-xs">
+              <div className="min-w-0 flex items-center gap-2 text-xs">
+                <span className="w-2 h-2 rounded-full bg-[#c084fc] shrink-0" />
+                <span className="font-semibold text-[#f4f1ea] truncate">
+                  {customWaypoint.label}
+                </span>
+                <span className="font-mono-num text-[#c084fc] font-bold shrink-0">
+                  {waypointDistanceM}m
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => gameStore.setCustomWaypoint(null)}
+                title="Hapus Waypoint GPS"
+                className="text-xs font-mono-num text-[#94a3b8] hover:text-white px-1 cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
           {/* Transient District Toast when moving across Jakarta */}
           {districtToast && activeMission && (
             <div className="animate-aaa-up aaa-glass-subtle rounded-lg px-3 py-1.5 border-l-2 border-l-[#38bdf8]">
@@ -418,7 +605,7 @@ export const GameHud: React.FC<GameHudProps> = ({
           )}
         </div>
 
-        {/* TOP-RIGHT: GTA V Wanted Stars + Cash + Weapon + 2 Discreet Corner Icons */}
+        {/* TOP-RIGHT: GTA V Wanted Stars + Cash + Weapon + Discreet Corner Icons */}
         <div className="flex flex-col items-end gap-1.5 pointer-events-auto shrink-0">
           <div className="aaa-glass-subtle rounded-lg px-3.5 py-2 flex flex-col items-end gap-1 shadow-xl border-r-2 border-r-[#22c55e]/70">
             {/* Row 1: Wanted Stars + Cash */}
@@ -506,8 +693,44 @@ export const GameHud: React.FC<GameHudProps> = ({
             </button>
           </div>
 
-          {/* Row 3: Two Discreet Corner Utility Icons (Phone & Pause Menu) */}
+          {/* Row 3: Discreet Corner Utility Icons (Photo Mode, Zen HUD, Phone & Pause Menu) */}
           <div className="flex items-center gap-1.5 mt-0.5">
+            {gamepadActive && (
+              <span
+                title="Kontroler Gamepad Terhubung"
+                className="px-2 py-1 rounded-md aaa-glass-subtle text-[10px] font-mono-num text-[#22c55e] hidden sm:inline-flex items-center gap-1"
+              >
+                PAD
+              </span>
+            )}
+            {onOpenPhotoMode && (
+              <button
+                type="button"
+                onClick={onOpenPhotoMode}
+                title="Studio Kamera Sinematik / Photo Mode [N]"
+                className="px-2 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-xs font-medium text-[#e2e8f0] transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="w-3.5 h-3.5 text-[#c084fc]"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+                  <circle cx="12" cy="13" r="4" />
+                </svg>
+                <span className="hidden sm:inline font-mono-num text-[11px]">N</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => gameStore.setState({ zenHudMode: true })}
+              title="Mode Layar Bersih / Zen HUD [U]"
+              className="hidden sm:flex px-2 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-[11px] font-mono-num text-[#94a3b8] hover:text-white transition-colors cursor-pointer whitespace-nowrap"
+            >
+              [U]
+            </button>
             <button
               type="button"
               onClick={onTogglePhone}
@@ -529,7 +752,7 @@ export const GameHud: React.FC<GameHudProps> = ({
             <button
               type="button"
               onClick={onPause}
-              title="Menu Jeda & Peta [Esc / P]"
+              title="Menu Jeda & Peta Interaktif [Esc / P]"
               className="px-2.5 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-xs font-medium text-[#e2e8f0] transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5"
             >
               <svg
@@ -548,6 +771,7 @@ export const GameHud: React.FC<GameHudProps> = ({
           </div>
         </div>
       </div>
+      )}
 
       {/* ==================== BOTTOM ROW ==================== */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 sm:gap-4">
@@ -577,7 +801,7 @@ export const GameHud: React.FC<GameHudProps> = ({
           <div className="pointer-events-auto shrink-0">
             <div className="relative bg-[#070a10] border-2 border-[#0d111a] shadow-[0_10px_28px_rgba(0,0,0,0.85)] overflow-hidden rounded-sm">
               {/* Live Standalone Minimap (20fps isolated from React reconciler) */}
-              <MiniMapRadar />
+              <MiniMapRadar onClickRadar={onPause} />
 
               {/* GTA V Signature Integrated Tri-Bar (50% HP | 25% Armor | 25% Special) */}
               <div className="w-full h-2 bg-[#05070b] flex items-center gap-[2px] pt-[2px]">
@@ -692,15 +916,31 @@ export const GameHud: React.FC<GameHudProps> = ({
               </div>
 
               <div className="flex flex-col items-end text-right">
-                <span className="font-display text-sm sm:text-base font-bold uppercase text-[#f4f1ea] leading-none whitespace-nowrap">
-                  {vehicleSpec.name}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {(isDrifting || driftScore > 0) && (
+                    <span className="px-1.5 py-0.5 rounded bg-[#f59e0b] text-[#090c12] font-mono-num text-[10px] font-extrabold tracking-wider">
+                      DRIFT {driftScore > 0 ? `${driftScore} · x${driftMultiplier}` : ''}
+                    </span>
+                  )}
+                  <span className="font-display text-sm sm:text-base font-bold uppercase text-[#f4f1ea] leading-none whitespace-nowrap">
+                    {vehicleSpec.name}
+                  </span>
+                </div>
                 <span className="text-[10px] font-mono-num text-[#94a3b8] mt-1 whitespace-nowrap">
                   {vehicleSpec.isAircraft
                     ? `Alt ${Math.round(aircraftAltitude)} m`
-                    : `Turbo Lv.${playerState.vehicleUpgradeLevel}`}
+                    : `${activeRadioSpec.id === 'off' ? 'Radio Off' : activeRadioSpec.freq} · Turbo Lv.${playerState.vehicleUpgradeLevel}`}
                 </span>
                 <div className="flex items-center gap-1.5 sm:gap-2 mt-1.5 text-[10px] sm:text-[11px] font-mono-num">
+                  <button
+                    type="button"
+                    onClick={() => gameStore.cycleRadioStation()}
+                    title="Ganti Stasiun Radio FM Jakarta [R]"
+                    className="text-[#38bdf8] hover:text-[#7dd3fc] cursor-pointer transition-colors"
+                  >
+                    [R]<span className="hidden sm:inline"> Radio</span>
+                  </button>
+                  <span className="text-white/20">·</span>
                   {onHonk && (
                     <>
                       <button

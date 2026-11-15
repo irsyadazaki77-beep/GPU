@@ -6,12 +6,16 @@ import {
   TRAFFIC_ROUTES,
   TrafficAISteppable,
   TrafficRouteId,
+  TrafficSignalPhase,
+  TrafficSignalState,
   VEHICLE_SPECS,
   VehicleCustomConfig,
   VehicleType,
+  createInitialTrafficSignalState,
   generateInitialTrafficSpawns,
   getGroundElevationAt,
   resolveCircleAABBCollision,
+  stepTrafficSignals,
   stepTrafficVehicleInPlace,
 } from '../game/rules';
 import { soundEngine } from '../game/sound';
@@ -29,6 +33,10 @@ export interface VehicleEntity extends TrafficAISteppable {
   y: number;
   isTraffic: boolean;
   routeId: TrafficRouteId;
+  driftAngle: number;
+  isDrifting: boolean;
+  pitchAngle: number;
+  rollAngle: number;
 }
 
 export class TrafficSystem {
@@ -36,9 +44,16 @@ export class TrafficSystem {
   public readonly vehicleHeadlight: THREE.SpotLight;
   public readonly sirenLight: THREE.PointLight;
   public readonly policeHeliMesh: THREE.Group;
+  public readonly chopperSpotLight: THREE.SpotLight;
+  public signalState: TrafficSignalState;
 
   private readonly scene: THREE.Scene;
   private readonly buildingGrid: SpatialHashGrid<BuildingFootprint>;
+  private readonly roadblockGroup: THREE.Group;
+  private roadblockActive = false;
+  private roadblockX = 0;
+  private roadblockZ = -42;
+  private roadblockCooldown = 0;
   private pendingHornPulse = false;
 
   constructor(
@@ -47,6 +62,7 @@ export class TrafficSystem {
   ) {
     this.scene = scene;
     this.buildingGrid = buildingGrid;
+    this.signalState = createInitialTrafficSignalState();
 
     this.vehicleHeadlight = new THREE.SpotLight(
       0xfef3c7,
@@ -62,22 +78,22 @@ export class TrafficSystem {
     this.sirenLight = new THREE.PointLight(0xef4444, 0, 24, 1.7);
     scene.add(this.sirenLight);
 
-    // Parked protagonist fleet across Monas & Tol Layang
+    // Parked protagonist fleet across curb bays & plaza staging pads (clear of crosswalks & sidewalks)
     const parkedVehicles: {
       type: VehicleType;
       x: number;
       z: number;
       heading: number;
     }[] = [
-      { type: 'vtol_jet', x: -4.2, z: 24.5, heading: Math.PI },
-      { type: 'bajaj', x: -8.5, z: 22, heading: Math.PI },
-      { type: 'ojek', x: 5.5, z: 23, heading: Math.PI },
-      { type: 'heli', x: 9.5, z: 19.5, heading: Math.PI },
-      { type: 'barracuda', x: -10.5, z: 19.5, heading: Math.PI },
-      { type: 'supercar', x: 9.5, z: 26.5, heading: Math.PI },
+      { type: 'vtol_jet', x: -15.8, z: -15.4, heading: Math.PI * 0.25 },
+      { type: 'bajaj', x: -5.4, z: 30.2, heading: Math.PI },
+      { type: 'ojek', x: 5.4, z: 30.2, heading: Math.PI },
+      { type: 'heli', x: 15.2, z: -15.2, heading: -Math.PI * 0.25 },
+      { type: 'barracuda', x: -14.8, z: 14.2, heading: -Math.PI * 0.75 },
+      { type: 'supercar', x: 5.4, z: 45.0, heading: Math.PI },
       { type: 'supercar', x: 28, z: -26, heading: -Math.PI / 2 },
-      { type: 'angkot', x: -9.5, z: 27.5, heading: Math.PI },
-      { type: 'sedan', x: 8.5, z: -16, heading: 0 },
+      { type: 'angkot', x: -5.4, z: 45.5, heading: Math.PI },
+      { type: 'sedan', x: 5.4, z: -15.0, heading: 0 },
     ];
 
     parkedVehicles.forEach((vCfg, idx) => {
@@ -102,11 +118,28 @@ export class TrafficSystem {
         stopTimer: 0,
         preferredSpeed: 10,
         layer: groundY > 1 ? 'elevated' : 'ground',
+        driftAngle: 0,
+        isDrifting: false,
+        pitchAngle: 0,
+        rollAngle: 0,
       });
     });
 
-    // Dynamic Jakarta AI Traffic (TransJakarta, Angkot, Ojol, Bajaj, Metromini, Polisi, Sedan)
-    const trafficSpawns = generateInitialTrafficSpawns();
+    // Dynamic Jakarta AI Traffic (TransJakarta, Angkot, Ojol, Bajaj, Metromini, Polisi, Sedan + Barracuda Patwal)
+    const trafficSpawns = [
+      ...generateInitialTrafficSpawns(),
+      {
+        id: 'traffic_barracuda_patwal',
+        type: 'barracuda' as VehicleType,
+        routeId: 'ring_clockwise' as TrafficRouteId,
+        waypointIndex: 2,
+        x: -26,
+        z: 26,
+        heading: Math.PI * 0.5,
+        preferredSpeed: 13.5,
+        layer: 'ground' as const,
+      },
+    ];
     trafficSpawns.forEach((ts) => {
       const vMesh = buildIndonesianVehicleMesh(ts.type);
       const spawnY =
@@ -134,13 +167,55 @@ export class TrafficSystem {
         ngetemCooldown: 5,
         weaveOffset: 0,
         hornReactionTimer: 0,
+        driftAngle: 0,
+        isDrifting: false,
+        pitchAngle: 0,
+        rollAngle: 0,
       });
     });
 
+    // Police Chopper + Real Searchlight SpotLight
     this.policeHeliMesh = buildPolicePursuitHeliWithSpotlight();
     this.policeHeliMesh.position.set(0, 24, -30);
     this.policeHeliMesh.visible = false;
     scene.add(this.policeHeliMesh);
+
+    this.chopperSpotLight = new THREE.SpotLight(
+      0xfef08a,
+      0,
+      46,
+      Math.PI / 5.5,
+      0.5,
+      1.3
+    );
+    scene.add(this.chopperSpotLight, this.chopperSpotLight.target);
+
+    // Tactical Police Roadblock Barricade Group (Wanted >= 3)
+    this.roadblockGroup = new THREE.Group();
+    const blockMat = new THREE.MeshStandardMaterial({
+      color: 0xdc2626,
+      roughness: 0.72,
+      metalness: 0.12,
+      envMapIntensity: 0.1,
+    });
+    const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+    for (const bx of [-3.2, 0, 3.2]) {
+      const barrier = new THREE.Mesh(
+        new THREE.BoxGeometry(2.6, 0.9, 0.55),
+        blockMat
+      );
+      barrier.position.set(bx, 0.45, 0);
+      this.roadblockGroup.add(barrier);
+
+      const stripe = new THREE.Mesh(
+        new THREE.BoxGeometry(2.4, 0.2, 0.58),
+        stripeMat
+      );
+      stripe.position.set(bx, 0.65, 0);
+      this.roadblockGroup.add(stripe);
+    }
+    this.roadblockGroup.visible = false;
+    scene.add(this.roadblockGroup);
   }
 
   public notifyHorn(px: number, pz: number): void {
@@ -196,6 +271,10 @@ export class TrafficSystem {
       stopTimer: 0,
       preferredSpeed: 10,
       layer: gY > 1 ? 'elevated' : 'ground',
+      driftAngle: 0,
+      isDrifting: false,
+      pitchAngle: 0,
+      rollAngle: 0,
     });
 
     return { x: safe.x, y: gY, z: safe.z };
@@ -210,18 +289,73 @@ export class TrafficSystem {
     playerX: number,
     playerZ: number
   ): void {
+    const customs = pState.vehicleCustoms;
+    const customsKey = `${customs.paintId}|${customs.underglowId}|${customs.armorPlatingLevel}|${customs.nitroEnabled}`;
+    const sirenPhaseRed = Math.floor(nowMs / 115) % 2 === 0;
+
     for (const v of this.vehicles) {
       if (v.type === 'heli' || v.type === 'vtol_jet') {
         const rotor =
-          v.mesh.getObjectByName('heliRotor') ||
-          (v.mesh.userData.mainRotor as THREE.Object3D | undefined);
+          (v.mesh.userData.mainRotor as THREE.Object3D | undefined) ||
+          v.mesh.getObjectByName('heliRotor');
         if (rotor) {
+          v.mesh.userData.mainRotor = rotor;
           const isActiveAircraft = v.id === drivingVehicleId;
           rotor.rotation.y += dt * (isActiveAircraft ? 22 : 4.5);
         }
+      } else {
+        // Spin 3D wheels proportionally to linear speed
+        const wheels = v.mesh.userData.wheels as THREE.Object3D[] | undefined;
+        if (wheels && Math.abs(v.speed) > 0.05) {
+          for (let wi = 0; wi < wheels.length; wi++) {
+            const wObj = wheels[wi];
+            const radius = (wObj.userData.wheelRadius as number) || 0.38;
+            wObj.rotation.x += (v.speed * dt) / radius;
+          }
+        }
       }
+
+      // Brake / taillight emissive boost when stopped or handbrake drifting
+      const tailMat = v.mesh.userData.taillightMat as
+        | THREE.MeshStandardMaterial
+        | undefined;
+      if (tailMat) {
+        const isBraking =
+          v.isDrifting ||
+          (v.id === drivingVehicleId && v.speed < -0.2) ||
+          (v.isTraffic && v.speed < 1.2);
+        tailMat.emissiveIntensity = isBraking ? 2.4 : 0.9;
+      }
+
+      // Alternating red/blue police lightbars on Patwal & Barracuda units
+      const sirenRedMat = v.mesh.userData.sirenRedMat as
+        | THREE.MeshStandardMaterial
+        | undefined;
+      const sirenBlueMat = v.mesh.userData.sirenBlueMat as
+        | THREE.MeshStandardMaterial
+        | undefined;
+      if (sirenRedMat && sirenBlueMat) {
+        const sirenOn =
+          pState.wantedLevel > 0 ||
+          (v.id === drivingVehicleId &&
+            (v.type === 'polisi' || v.type === 'barracuda'));
+        sirenRedMat.emissiveIntensity = sirenOn
+          ? sirenPhaseRed
+            ? 2.8
+            : 0.25
+          : 0.45;
+        sirenBlueMat.emissiveIntensity = sirenOn
+          ? !sirenPhaseRed
+            ? 2.8
+            : 0.25
+          : 0.45;
+      }
+
       if (v.id === drivingVehicleId || v.type === 'supercar') {
-        applyVehicleCustomizationToMesh(v.mesh, pState.vehicleCustoms);
+        if (v.mesh.userData.lastCustomsKey !== customsKey) {
+          v.mesh.userData.lastCustomsKey = customsKey;
+          applyVehicleCustomizationToMesh(v.mesh, customs);
+        }
       }
     }
 
@@ -238,8 +372,17 @@ export class TrafficSystem {
       this.policeHeliMesh.rotation.y = -heliOrbit + Math.PI;
       const pRotor = this.policeHeliMesh.getObjectByName('heliRotor');
       if (pRotor) pRotor.rotation.y += dt * 24;
+
+      this.chopperSpotLight.position.set(hx, 21.8, hz);
+      this.chopperSpotLight.target.position.set(
+        playerX + Math.sin(heliOrbit * 0.6) * 2.5,
+        0,
+        playerZ + Math.cos(heliOrbit * 0.6) * 2.5
+      );
+      this.chopperSpotLight.intensity = 5.5;
     } else {
       this.policeHeliMesh.visible = false;
+      this.chopperSpotLight.intensity = 0;
     }
   }
 
@@ -254,27 +397,89 @@ export class TrafficSystem {
     playerZ: number,
     nightFactor: number,
     isWheelSlowMo: boolean
-  ): boolean {
+  ): { spottedByPolice: boolean; signalPhase: TrafficSignalPhase } {
     const hornTriggered = this.pendingHornPulse;
     this.pendingHornPulse = false;
 
+    this.signalState = stepTrafficSignals(this.signalState, simDt);
+    const signalPhase = this.signalState.phase;
+
+    // Tactical Police Roadblock (Wanted >= 3)
+    this.roadblockCooldown = Math.max(0, this.roadblockCooldown - simDt);
+    if (
+      pState.wantedLevel >= 3 &&
+      pState.currentInterior === 'exterior'
+    ) {
+      if (
+        !this.roadblockActive ||
+        (Math.hypot(this.roadblockX - playerX, this.roadblockZ - playerZ) > 68 &&
+          this.roadblockCooldown <= 0)
+      ) {
+        const anchorZ = playerZ > 0 ? -38 : 38;
+        this.roadblockX = Math.abs(playerX) < 16 ? 0 : playerX > 0 ? 32 : -32;
+        this.roadblockZ = anchorZ;
+        this.roadblockGroup.position.set(this.roadblockX, 0, this.roadblockZ);
+        this.roadblockGroup.rotation.y = 0;
+        this.roadblockActive = true;
+        this.roadblockCooldown = 8;
+      }
+      this.roadblockGroup.visible = this.roadblockActive;
+
+      // Check collision if player rams through barricade
+      if (
+        this.roadblockActive &&
+        activeVehicle &&
+        activeVehicle.y < 2.2 &&
+        Math.abs(playerX - this.roadblockX) < 5.0 &&
+        Math.abs(playerZ - this.roadblockZ) < 1.6
+      ) {
+        activeVehicle.speed *= 0.45;
+        this.roadblockActive = false;
+        this.roadblockGroup.visible = false;
+        this.roadblockCooldown = 10;
+        soundEngine.playPropCrash(0);
+      }
+    } else {
+      this.roadblockActive = false;
+      this.roadblockGroup.visible = false;
+    }
+
     let spottedByPolice = false;
+    // Police Helicopter Searchlight cone detection (can evade under Tol Layang cover!)
+    if (
+      pState.wantedLevel >= 3 &&
+      this.policeHeliMesh.visible &&
+      pState.currentInterior === 'exterior'
+    ) {
+      const spotTarget = this.chopperSpotLight.target.position;
+      const inCone = Math.hypot(playerX - spotTarget.x, playerZ - spotTarget.z) < 8.5;
+      const underOverpassCover =
+        Math.abs(playerZ - -26) < 4.5 && playerY < 3.0;
+      if (inCone && !underOverpassCover) {
+        spottedByPolice = true;
+      }
+    }
+
     for (let vi = 0; vi < this.vehicles.length; vi++) {
       const v = this.vehicles[vi];
       if (!v.isTraffic || v.id === drivingVehicleId) continue;
 
-      if (v.type === 'polisi' && pState.wantedLevel > 0) {
+      if (
+        (v.type === 'polisi' && pState.wantedLevel > 0) ||
+        (v.type === 'barracuda' && pState.wantedLevel >= 3)
+      ) {
         const kiranaEmp =
           pState.activeProtagonist === 'kirana' && pState.fokusActive;
         const pSpeed = kiranaEmp ? 1.5 : 13.5 + pState.wantedLevel * 1.4;
         const dxP = playerX - v.x;
         const dzP = playerZ - v.z;
         const distP = Math.hypot(dxP, dzP) || 1;
-        if (distP < 34) {
+        if (distP < 32) {
           spottedByPolice = true;
         }
         if (distP > 4.5) {
           v.heading = Math.atan2(dxP, dzP);
+          v.speed = pSpeed;
           const nx = v.x + (dxP / distP) * pSpeed * simDt;
           const nz = v.z + (dzP / distP) * pSpeed * simDt;
           const col = resolveCircleAABBCollision(
@@ -325,6 +530,8 @@ export class TrafficSystem {
           playerWantedLevel: pState.wantedLevel,
           hornTriggered:
             hornTriggered && Math.hypot(v.x - playerX, v.z - playerZ) < 30,
+          signalPhase,
+          buildingGrid: this.buildingGrid,
         });
         v.y = v.layer === 'elevated' ? getGroundElevationAt(v.x, v.z) : 0;
       }
@@ -333,7 +540,8 @@ export class TrafficSystem {
       v.mesh.rotation.y = v.heading;
     }
 
-    // Active Vehicle Headlights & Police Siren Light
+    // Active Vehicle Headlights & Cabin Acoustic Muffling
+    soundEngine.setVehicleCabinMuffle(Boolean(activeVehicle));
     if (activeVehicle && pState.currentInterior === 'exterior') {
       const vSpec = VEHICLE_SPECS[activeVehicle.type];
       const speedRatio =
@@ -372,7 +580,7 @@ export class TrafficSystem {
       let nearestPolice: VehicleEntity | null = null;
       let bestPoliceDist = 48;
       for (const v of this.vehicles) {
-        if (v.type !== 'polisi') continue;
+        if (v.type !== 'polisi' && v.type !== 'barracuda') continue;
         const dPol = Math.hypot(v.x - playerX, v.z - playerZ);
         if (dPol < bestPoliceDist) {
           bestPoliceDist = dPol;
@@ -396,7 +604,7 @@ export class TrafficSystem {
       this.sirenLight.intensity = 0;
     }
 
-    return spottedByPolice;
+    return { spottedByPolice, signalPhase };
   }
 
   public getNearbyVehicleType(px: number, pz: number): VehicleType | null {
@@ -444,5 +652,6 @@ export class TrafficSystem {
       disposeGroup(v.mesh);
     }
     disposeGroup(this.policeHeliMesh);
+    disposeGroup(this.roadblockGroup);
   }
 }

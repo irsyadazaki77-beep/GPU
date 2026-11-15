@@ -1,14 +1,32 @@
 import {
   AudioChannelVolumes,
+  GameSettings,
+  GraphicsQualityTier,
   OriginArchetype,
   PlayerProgressState,
+  SaveSlotId,
   WeatherMode,
   createInitialPlayerState,
 } from './rules';
 
-export const SAVE_VERSION = 2 as const;
-export const SAVE_STORAGE_KEY = 'san_nabilo_save_v2';
+export const SAVE_VERSION = 3 as const;
+export const SAVE_STORAGE_KEY = 'san_nabilo_save_v3';
+export const SAVE_SLOT_2_KEY = 'san_nabilo_save_v3_slot2';
+export const SAVE_SLOT_3_KEY = 'san_nabilo_save_v3_slot3';
+export const ACTIVE_SAVE_SLOT_KEY = 'san_nabilo_active_save_slot';
+export const V2_SAVE_STORAGE_KEY = 'san_nabilo_save_v2';
 export const LEGACY_SAVE_STORAGE_KEY = 'san_nabilo_save_v1';
+
+export interface SaveSlotSummary {
+  slotId: SaveSlotId;
+  exists: boolean;
+  savedAt: number | null;
+  origin: OriginArchetype | null;
+  rupiah: number;
+  completedMissionsCount: number;
+  controlledDistrictsCount: number;
+  snapshot: SavedGameSnapshot | null;
+}
 
 export const DEFAULT_AUDIO_VOLUMES: AudioChannelVolumes = {
   master: 1,
@@ -17,14 +35,22 @@ export const DEFAULT_AUDIO_VOLUMES: AudioChannelVolumes = {
   ambience: 0.9,
 };
 
+export const DEFAULT_GAME_SETTINGS: GameSettings = {
+  graphicsTier: 'auto',
+  voiceActingEnabled: true,
+  cinematicCameraEnabled: true,
+  touchControlsMode: 'auto',
+};
+
 export interface SavedGameSnapshot {
-  version: 2;
+  version: 3;
   origin: OriginArchetype;
   selectedStage: 1 | 2 | 3 | 4 | 5;
   weatherMode: WeatherMode;
   playerState: PlayerProgressState;
   playerPos: { x: number; z: number };
   audioSettings: AudioChannelVolumes;
+  gameSettings: GameSettings;
   completedDynamicQuests: string[];
   savedAt: number;
 }
@@ -47,8 +73,15 @@ function clampUnitVolume(n: unknown, fallback: number): number {
   return Math.max(0, Math.min(1, n));
 }
 
+const VALID_TIERS: GraphicsQualityTier[] = [
+  'auto',
+  'performance',
+  'balanced',
+  'ultra',
+];
+
 /**
- * Validates and migrates a v1 or v2 snapshot into the current v2 schema.
+ * Validates and migrates a v1, v2, or v3 snapshot into the current v3 schema.
  */
 export function migrateSavedGame(raw: unknown): SavedGameSnapshot | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -57,7 +90,9 @@ export function migrateSavedGame(raw: unknown): SavedGameSnapshot | null {
     playerPos?: { x?: unknown; z?: unknown };
   };
 
-  if (parsed.version !== 1 && parsed.version !== 2) return null;
+  if (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3) {
+    return null;
+  }
   if (!parsed.playerState || typeof parsed.playerState !== 'object') return null;
 
   const origin: OriginArchetype = VALID_ORIGINS.includes(
@@ -150,6 +185,18 @@ export function migrateSavedGame(raw: unknown): SavedGameSnapshot | null {
       typeof savedState.lastSnackEaten === 'string'
         ? savedState.lastSnackEaten
         : null,
+    characterSkills: {
+      ...fallbackState.characterSkills,
+      ...(savedState.characterSkills || {}),
+    },
+    weaponAttachments: {
+      ...fallbackState.weaponAttachments,
+      ...(savedState.weaponAttachments || {}),
+    },
+    districtTurf: {
+      ...fallbackState.districtTurf,
+      ...(savedState.districtTurf || {}),
+    },
   };
 
   const playerPos = {
@@ -165,6 +212,29 @@ export function migrateSavedGame(raw: unknown): SavedGameSnapshot | null {
     ambience: clampUnitVolume(rawAudio.ambience, DEFAULT_AUDIO_VOLUMES.ambience),
   };
 
+  const rawSettings = (parsed.gameSettings || {}) as Partial<GameSettings>;
+  const gameSettings: GameSettings = {
+    graphicsTier: VALID_TIERS.includes(
+      rawSettings.graphicsTier as GraphicsQualityTier
+    )
+      ? (rawSettings.graphicsTier as GraphicsQualityTier)
+      : DEFAULT_GAME_SETTINGS.graphicsTier,
+    voiceActingEnabled:
+      typeof rawSettings.voiceActingEnabled === 'boolean'
+        ? rawSettings.voiceActingEnabled
+        : DEFAULT_GAME_SETTINGS.voiceActingEnabled,
+    cinematicCameraEnabled:
+      typeof rawSettings.cinematicCameraEnabled === 'boolean'
+        ? rawSettings.cinematicCameraEnabled
+        : DEFAULT_GAME_SETTINGS.cinematicCameraEnabled,
+    touchControlsMode:
+      rawSettings.touchControlsMode === 'auto' ||
+      rawSettings.touchControlsMode === 'on' ||
+      rawSettings.touchControlsMode === 'off'
+        ? rawSettings.touchControlsMode
+        : 'auto',
+  };
+
   const completedDynamicQuests = Array.isArray(parsed.completedDynamicQuests)
     ? parsed.completedDynamicQuests.filter((q): q is string => typeof q === 'string')
     : [];
@@ -177,25 +247,63 @@ export function migrateSavedGame(raw: unknown): SavedGameSnapshot | null {
     playerState: mergedState,
     playerPos,
     audioSettings,
+    gameSettings,
     completedDynamicQuests,
     savedAt: typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now(),
   };
 }
 
-export function loadSavedGame(): SavedGameSnapshot | null {
-  if (typeof window === 'undefined' || !window.localStorage) return null;
+export function getSaveSlotStorageKey(slotId: SaveSlotId): string {
+  if (slotId === 2) return SAVE_SLOT_2_KEY;
+  if (slotId === 3) return SAVE_SLOT_3_KEY;
+  return SAVE_STORAGE_KEY;
+}
+
+export function getActiveSaveSlot(): SaveSlotId {
+  if (typeof window === 'undefined' || !window.localStorage) return 1;
   try {
-    const rawV2 = window.localStorage.getItem(SAVE_STORAGE_KEY);
-    if (rawV2) {
-      return migrateSavedGame(JSON.parse(rawV2));
+    const raw = window.localStorage.getItem(ACTIVE_SAVE_SLOT_KEY);
+    if (raw === '2') return 2;
+    if (raw === '3') return 3;
+    return 1;
+  } catch {
+    return 1;
+  }
+}
+
+export function setActiveSaveSlot(slotId: SaveSlotId): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(ACTIVE_SAVE_SLOT_KEY, String(slotId));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function loadSavedGame(slotId?: SaveSlotId): SavedGameSnapshot | null {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  const targetSlot = slotId ?? getActiveSaveSlot();
+  const slotKey = getSaveSlotStorageKey(targetSlot);
+  try {
+    const rawV3 = window.localStorage.getItem(slotKey);
+    if (rawV3) {
+      return migrateSavedGame(JSON.parse(rawV3));
     }
-    const rawV1 = window.localStorage.getItem(LEGACY_SAVE_STORAGE_KEY);
-    if (rawV1) {
-      const migrated = migrateSavedGame(JSON.parse(rawV1));
-      if (migrated) {
-        saveGameSnapshot(migrated);
+    if (targetSlot === 1) {
+      const rawV2 = window.localStorage.getItem(V2_SAVE_STORAGE_KEY);
+      if (rawV2) {
+        const migrated = migrateSavedGame(JSON.parse(rawV2));
+        if (migrated) saveGameSnapshot(migrated, 1);
+        return migrated;
       }
-      return migrated;
+      const rawV1 = window.localStorage.getItem(LEGACY_SAVE_STORAGE_KEY);
+      if (rawV1) {
+        const migrated = migrateSavedGame(JSON.parse(rawV1));
+        if (migrated) {
+          saveGameSnapshot(migrated, 1);
+        }
+        return migrated;
+      }
     }
     return null;
   } catch {
@@ -203,21 +311,85 @@ export function loadSavedGame(): SavedGameSnapshot | null {
   }
 }
 
-export function saveGameSnapshot(snapshot: SavedGameSnapshot): void {
+export function saveGameSnapshot(
+  snapshot: SavedGameSnapshot,
+  slotId?: SaveSlotId
+): void {
   if (typeof window === 'undefined' || !window.localStorage) return;
+  const targetSlot = slotId ?? getActiveSaveSlot();
+  const slotKey = getSaveSlotStorageKey(targetSlot);
   try {
-    window.localStorage.setItem(SAVE_STORAGE_KEY, JSON.stringify(snapshot));
+    window.localStorage.setItem(slotKey, JSON.stringify(snapshot));
   } catch {
     // Ignore storage quota / privacy mode errors
   }
 }
 
-export function clearSavedGame(): void {
+export function clearSavedGame(slotId?: SaveSlotId): void {
   if (typeof window === 'undefined' || !window.localStorage) return;
+  const targetSlot = slotId ?? getActiveSaveSlot();
+  const slotKey = getSaveSlotStorageKey(targetSlot);
   try {
-    window.localStorage.removeItem(SAVE_STORAGE_KEY);
-    window.localStorage.removeItem(LEGACY_SAVE_STORAGE_KEY);
+    window.localStorage.removeItem(slotKey);
+    if (targetSlot === 1) {
+      window.localStorage.removeItem(V2_SAVE_STORAGE_KEY);
+      window.localStorage.removeItem(LEGACY_SAVE_STORAGE_KEY);
+    }
   } catch {
     // Ignore errors
   }
 }
+
+export function listSaveSlotSummaries(): SaveSlotSummary[] {
+  const slots: SaveSlotId[] = [1, 2, 3];
+  return slots.map((slotId) => {
+    const snap = loadSavedGame(slotId);
+    if (!snap) {
+      return {
+        slotId,
+        exists: false,
+        savedAt: null,
+        origin: null,
+        rupiah: 0,
+        completedMissionsCount: 0,
+        controlledDistrictsCount: 0,
+        snapshot: null,
+      };
+    }
+    const turf = snap.playerState.districtTurf || {};
+    const controlledDistrictsCount = Object.values(turf).filter(
+      (t) => t && t.owner === 'player'
+    ).length;
+    return {
+      slotId,
+      exists: true,
+      savedAt: snap.savedAt,
+      origin: snap.origin,
+      rupiah: snap.playerState.rupiah,
+      completedMissionsCount: snap.playerState.completedMissions.length,
+      controlledDistrictsCount,
+      snapshot: snap,
+    };
+  });
+}
+
+export function exportSavedGameJson(
+  slotOrSnapshot?: SaveSlotId | SavedGameSnapshot
+): string {
+  if (typeof slotOrSnapshot === 'object' && slotOrSnapshot !== null) {
+    return JSON.stringify(slotOrSnapshot, null, 2);
+  }
+  const snap = loadSavedGame(slotOrSnapshot);
+  if (!snap) return '';
+  return JSON.stringify(snap, null, 2);
+}
+
+export function parseImportedSaveJson(rawJson: string): SavedGameSnapshot | null {
+  try {
+    const parsed = JSON.parse(rawJson);
+    return migrateSavedGame(parsed);
+  } catch {
+    return null;
+  }
+}
+

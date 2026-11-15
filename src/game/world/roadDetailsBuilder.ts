@@ -82,7 +82,7 @@ export function buildProceduralRoadDetailSystem(
     cleanoutSpecs.length
   );
   cleanoutSpecs.forEach((s, i) => {
-    dummy.position.set(s.x, 0.045, s.z);
+    dummy.position.set(s.x, 0.048, s.z);
     dummy.rotation.set(0, 0, 0);
     dummy.scale.set(s.w, 1, s.d);
     dummy.updateMatrix();
@@ -98,11 +98,11 @@ export function buildProceduralRoadDetailSystem(
     new THREE.MeshStandardMaterial({
       map: yellowBoxTex,
       transparent: true,
-      opacity: 0.82,
+      opacity: 0.7,
       depthWrite: false,
-      roughness: 0.82,
-      metalness: 0.04,
-      envMapIntensity: 0.2,
+      roughness: 0.94,
+      metalness: 0.0,
+      envMapIntensity: 0.04,
       polygonOffset: true,
       polygonOffsetFactor: -2,
       polygonOffsetUnits: -2,
@@ -120,7 +120,7 @@ export function buildProceduralRoadDetailSystem(
     yellowBoxCoords.length
   );
   yellowBoxCoords.forEach((jb, i) => {
-    dummy.position.set(jb.x, 0.049, jb.z);
+    dummy.position.set(jb.x, 0.052, jb.z);
     dummy.rotation.set(0, 0, 0);
     dummy.scale.set(jb.w, 1, jb.d);
     dummy.updateMatrix();
@@ -212,11 +212,11 @@ export function buildProceduralRoadDetailSystem(
     new THREE.MeshStandardMaterial({
       map: stripeTex,
       transparent: true,
-      opacity: 0.84,
+      opacity: 0.72,
       depthWrite: false,
-      roughness: 0.84,
-      metalness: 0.04,
-      envMapIntensity: 0.2,
+      roughness: 0.96,
+      metalness: 0.0,
+      envMapIntensity: 0.04,
       polygonOffset: true,
       polygonOffsetFactor: -3,
       polygonOffsetUnits: -3,
@@ -305,42 +305,46 @@ export function buildProceduralRoadDetailSystem(
   zebraInst.receiveShadow = true;
   group.add(zebraInst);
 
-  // 5. Intersection Stop Lines & Directional Lane Arrows
+  // 5. Intersection Stop Lines (Indonesian left-hand drive approach lanes) & Directional Lane Arrows
   const paintLineMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0xcbd5e1,
-      roughness: 0.82,
-      metalness: 0.04,
-      envMapIntensity: 0.2,
+      color: 0x94a3b8,
+      roughness: 0.96,
+      metalness: 0.0,
+      envMapIntensity: 0.04,
       transparent: true,
-      opacity: 0.82,
+      opacity: 0.54,
       depthWrite: false,
       polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -3,
     })
   );
   const stopLines: { x: number; z: number; rotY: number; w: number }[] = [
-    { x: -3.4, z: -21.7, rotY: 0, w: 6.0 },
-    { x: 3.4, z: 21.7, rotY: 0, w: 6.0 },
-    { x: -21.7, z: 3.4, rotY: Math.PI / 2, w: 6.0 },
-    { x: 21.7, z: -3.4, rotY: Math.PI / 2, w: 6.0 },
-    { x: -3.4, z: -40.1, rotY: 0, w: 6.0 },
-    { x: 3.4, z: -24.4, rotY: 0, w: 6.0 },
-    { x: -3.4, z: 24.4, rotY: 0, w: 6.0 },
-    { x: 3.4, z: 40.1, rotY: 0, w: 6.0 },
-    { x: -40.1, z: 3.4, rotY: Math.PI / 2, w: 6.0 },
-    { x: -24.4, z: -3.4, rotY: Math.PI / 2, w: 6.0 },
-    { x: 24.4, z: 3.4, rotY: Math.PI / 2, w: 6.0 },
-    { x: 40.1, z: -3.4, rotY: Math.PI / 2, w: 6.0 },
-    { x: -10.3, z: -34.2, rotY: Math.PI / 2, w: 4.1 },
-    { x: 10.3, z: -29.8, rotY: Math.PI / 2, w: 4.1 },
-    { x: -10.3, z: 34.2, rotY: Math.PI / 2, w: 4.1 },
-    { x: 10.3, z: 29.8, rotY: Math.PI / 2, w: 4.1 },
-    { x: -34.2, z: 10.3, rotY: 0, w: 4.1 },
-    { x: -29.8, z: -10.3, rotY: 0, w: 4.1 },
-    { x: 29.8, z: 10.3, rotY: 0, w: 4.1 },
-    { x: 34.2, z: -10.3, rotY: 0, w: 4.1 },
+    // Monas Plaza crosswalk approaches (left-hand drive)
+    { x: 3.5, z: -21.6, rotY: 0, w: 5.4 },
+    { x: -3.5, z: 21.6, rotY: 0, w: 5.4 },
+    { x: -21.6, z: -3.5, rotY: Math.PI / 2, w: 5.4 },
+    { x: 21.6, z: 3.5, rotY: Math.PI / 2, w: 5.4 },
+    // Major z = +-32 intersections along Sudirman
+    { x: 3.5, z: -40.0, rotY: 0, w: 5.4 },
+    { x: -3.5, z: -24.4, rotY: 0, w: 5.4 },
+    { x: 3.5, z: 24.4, rotY: 0, w: 5.4 },
+    { x: -3.5, z: 40.0, rotY: 0, w: 5.4 },
+    // Major x = +-32 intersections along Merdeka
+    { x: -40.0, z: -3.5, rotY: Math.PI / 2, w: 5.4 },
+    { x: -24.4, z: 3.5, rotY: Math.PI / 2, w: 5.4 },
+    { x: 24.4, z: -3.5, rotY: Math.PI / 2, w: 5.4 },
+    { x: 40.0, z: 3.5, rotY: Math.PI / 2, w: 5.4 },
+    // Ring street approaches
+    { x: -10.3, z: -29.8, rotY: Math.PI / 2, w: 3.8 },
+    { x: 10.3, z: -34.2, rotY: Math.PI / 2, w: 3.8 },
+    { x: -10.3, z: 29.8, rotY: Math.PI / 2, w: 3.8 },
+    { x: 10.3, z: 34.2, rotY: Math.PI / 2, w: 3.8 },
+    { x: -34.2, z: -10.3, rotY: 0, w: 3.8 },
+    { x: -29.8, z: 10.3, rotY: 0, w: 3.8 },
+    { x: 29.8, z: -10.3, rotY: 0, w: 3.8 },
+    { x: 34.2, z: 10.3, rotY: 0, w: 3.8 },
   ];
   const stopLineInst = new THREE.InstancedMesh(
     unitPlaneGeo,
@@ -348,9 +352,9 @@ export function buildProceduralRoadDetailSystem(
     stopLines.length
   );
   stopLines.forEach((sl, i) => {
-    dummy.position.set(sl.x, 0.051, sl.z);
+    dummy.position.set(sl.x, 0.054, sl.z);
     dummy.rotation.set(0, sl.rotY, 0);
-    dummy.scale.set(sl.w, 1, 0.42);
+    dummy.scale.set(sl.w, 1, 0.32);
     dummy.updateMatrix();
     stopLineInst.setMatrixAt(i, dummy.matrix);
   });
@@ -368,7 +372,9 @@ export function buildProceduralRoadDetailSystem(
       map: straightArrowTex,
       transparent: true,
       depthWrite: false,
-      roughness: 0.72,
+      roughness: 0.95,
+      metalness: 0.0,
+      envMapIntensity: 0.04,
       polygonOffset: true,
       polygonOffsetFactor: -2,
       polygonOffsetUnits: -2,
@@ -379,7 +385,9 @@ export function buildProceduralRoadDetailSystem(
       map: straightRightArrowTex,
       transparent: true,
       depthWrite: false,
-      roughness: 0.72,
+      roughness: 0.95,
+      metalness: 0.0,
+      envMapIntensity: 0.04,
       polygonOffset: true,
       polygonOffsetFactor: -2,
       polygonOffsetUnits: -2,
@@ -480,7 +488,9 @@ export function buildProceduralRoadDetailSystem(
   }[] = [];
 
   const pushRoadWear = (x: number, z: number) => {
-    if (x * x + z * z < 20.5 * 20.5) return;
+    if (x * x + z * z < 21.5 * 21.5) return;
+    if (Math.abs(Math.abs(z) - 20) < 2.5 || Math.abs(Math.abs(z) - 26.1) < 2.5 || Math.abs(Math.abs(z) - 38.3) < 2.5) return;
+    if (Math.abs(Math.abs(x) - 20) < 2.5 || Math.abs(Math.abs(x) - 26.1) < 2.5 || Math.abs(Math.abs(x) - 38.3) < 2.5) return;
     roadCrackSpecs.push({
       x,
       z,
@@ -759,16 +769,16 @@ export function buildProceduralRoadDetailSystem(
 
   const setWeatherTransition = (wetnessFactor: number) => {
     const w = Math.max(0, Math.min(1, wetnessFactor));
-    cleanoutMat.roughness = 0.88 - w * 0.64;
-    cleanoutMat.metalness = 0.05 + w * 0.19;
-    yellowBoxMat.roughness = 0.82 - w * 0.56;
-    stripeMat.roughness = 0.84 - w * 0.56;
-    paintLineMat.roughness = 0.82 - w * 0.54;
-    straightArrowMat.roughness = 0.72 - w * 0.44;
-    straightRightArrowMat.roughness = 0.72 - w * 0.44;
-    buswayStencilMat.roughness = 0.7 - w * 0.44;
-    swCrackMatA.roughness = 0.85 - w * 0.51;
-    swCrackMatB.roughness = 0.85 - w * 0.51;
+    cleanoutMat.roughness = 0.94 - w * 0.54;
+    cleanoutMat.metalness = 0.02 + w * 0.14;
+    yellowBoxMat.roughness = 0.94 - w * 0.46;
+    stripeMat.roughness = 0.96 - w * 0.46;
+    paintLineMat.roughness = 0.96 - w * 0.46;
+    straightArrowMat.roughness = 0.95 - w * 0.42;
+    straightRightArrowMat.roughness = 0.95 - w * 0.42;
+    buswayStencilMat.roughness = 0.92 - w * 0.42;
+    swCrackMatA.roughness = 0.92 - w * 0.45;
+    swCrackMatB.roughness = 0.92 - w * 0.45;
   };
 
   const setWeatherVisuals = (weather: WeatherMode) => {
