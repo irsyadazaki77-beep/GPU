@@ -1,9 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
+  NpcDialogueRequest,
+  NpcDialogueResponse,
   StoryChoiceOption,
   StoryMission,
   formatRupiah,
 } from '../game/rules';
+import { gameStore, useGameStore } from '../state/gameStore';
 
 interface StoryDialogueModalProps {
   mission: StoryMission;
@@ -20,11 +23,76 @@ const FACTION_LABELS: Record<
   rakyat: { name: 'Bela Rakyat', color: '#22c55e' },
 };
 
+const QUICK_PROMPTS = [
+  'Info patroli polisi sekitar sini?',
+  'Ada kerjaan cepat berbayar?',
+  'Bagaimana situasi faksi Jakarta saat ini?',
+];
+
 export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
   mission,
   onSelectChoice,
   onClose,
 }) => {
+  const origin = useGameStore((s) => s.origin);
+  const wantedLevel = useGameStore((s) => s.playerState.wantedLevel);
+  const reputation = useGameStore((s) => s.playerState.reputation);
+  const completedDynamicQuests = useGameStore((s) => s.completedDynamicQuests);
+
+  const [promptInput, setPromptInput] = useState('');
+  const [loadingAi, setLoadingAi] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [dialogueRes, setDialogueRes] = useState<NpcDialogueResponse | null>(
+    null
+  );
+
+  const requestNpcDialogue = async (question: string) => {
+    const trimmed = question.trim();
+    if (!trimmed || loadingAi) return;
+    setLoadingAi(true);
+    setAiError(null);
+
+    const payload: NpcDialogueRequest = {
+      npcName: mission.giverName,
+      npcRole: mission.giverRole,
+      locationName: mission.locationName,
+      missionTitle: mission.title,
+      playerPrompt: trimmed,
+      origin,
+      wantedLevel,
+      reputation,
+    };
+
+    try {
+      const res = await fetch('/api/npc/dialogue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as NpcDialogueResponse;
+      setDialogueRes(data);
+      setPromptInput('');
+    } catch {
+      setAiError(
+        'Kanal komunikasi Jakarta terputus sementara. Coba kirim ulang pertanyaanmu.'
+      );
+    } finally {
+      setLoadingAi(false);
+    }
+  };
+
+  const handleSubmitForm = (e: React.FormEvent) => {
+    e.preventDefault();
+    void requestNpcDialogue(promptInput);
+  };
+
+  const claimedQuest =
+    dialogueRes?.sideQuest &&
+    completedDynamicQuests.includes(dialogueRes.sideQuest.id);
+
   return (
     <div
       role="dialog"
@@ -69,6 +137,109 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
         <p className="mt-4 text-sm md:text-base leading-relaxed text-[#cbd5e1] max-w-[65ch]">
           {mission.briefing}
         </p>
+
+        {/* Interactive Jakarta Informant AI Dialogue + Dynamic Side-Quest */}
+        <div className="mt-5 rounded-xl border border-[#38bdf8]/25 bg-[#09111d]/75 p-4 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-[#38bdf8]">
+              Obrolan Informan Jakarta · {mission.giverName}
+            </span>
+            {dialogueRes && (
+              <span className="text-[11px] font-mono-num text-[#94a3b8]">
+                Nada: {dialogueRes.tone} ·{' '}
+                {dialogueRes.source === 'gemini' ? 'Gemini AI' : 'Lokal Offline'}
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {QUICK_PROMPTS.map((q) => (
+              <button
+                key={q}
+                type="button"
+                disabled={loadingAi}
+                onClick={() => void requestNpcDialogue(q)}
+                className="px-2.5 py-1 rounded-md bg-white/8 hover:bg-white/15 text-[11px] text-[#e2e8f0] cursor-pointer disabled:opacity-50 transition-colors"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+
+          <form onSubmit={handleSubmitForm} className="flex items-center gap-2">
+            <label htmlFor="npc-dialogue-prompt" className="sr-only">
+              Tanya informan Jakarta
+            </label>
+            <input
+              id="npc-dialogue-prompt"
+              type="text"
+              value={promptInput}
+              onChange={(e) => setPromptInput(e.target.value)}
+              placeholder={`Tanya ${mission.giverName.split(' ')[0]} soal rute, polisi, atau kontrak cepat...`}
+              maxLength={200}
+              className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-[#05080f] border border-white/15 text-xs text-[#f4f1ea] placeholder-[#64748b] focus:outline-none focus:border-[#38bdf8]"
+            />
+            <button
+              type="submit"
+              disabled={loadingAi || !promptInput.trim()}
+              className="px-3.5 py-2 rounded-lg bg-[#38bdf8] hover:bg-[#7dd3fc] text-[#090c12] font-semibold text-xs cursor-pointer disabled:opacity-50 whitespace-nowrap"
+            >
+              {loadingAi ? 'Mengontak...' : 'Tanya NPC'}
+            </button>
+          </form>
+
+          {aiError && (
+            <p className="text-xs text-[#f87171]">{aiError}</p>
+          )}
+
+          {dialogueRes && (
+            <div className="rounded-lg bg-white/[0.04] border border-white/10 p-3 flex flex-col gap-2.5">
+              <p className="text-xs md:text-sm text-[#e2e8f0] leading-relaxed">
+                “{dialogueRes.reply}”
+              </p>
+
+              {dialogueRes.sideQuest && (
+                <div className="pt-2.5 border-t border-white/10 flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                      <span className="font-semibold text-[#f59e0b]">
+                        Kontrak Sampingan: {dialogueRes.sideQuest.title}
+                      </span>
+                      <span
+                        className="font-mono-num text-[11px] whitespace-nowrap shrink-0"
+                        style={{
+                          color: FACTION_LABELS[dialogueRes.sideQuest.faction].color,
+                        }}
+                      >
+                        +{formatRupiah(dialogueRes.sideQuest.rewardRp)}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#94a3b8] mt-0.5">
+                      {dialogueRes.sideQuest.description}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={Boolean(claimedQuest)}
+                    onClick={() => {
+                      if (dialogueRes.sideQuest) {
+                        gameStore.claimDynamicSideQuest(dialogueRes.sideQuest);
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer ${
+                      claimedQuest
+                        ? 'bg-[#22c55e]/20 text-[#4ade80] cursor-default'
+                        : 'bg-[#f59e0b] hover:bg-[#fbbf24] text-[#090c12]'
+                    }`}
+                  >
+                    {claimedQuest ? 'Kontrak Selesai' : 'Ambil & Klaim Kontrak'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="mt-6 flex flex-col gap-2">
           <p className="text-xs font-semibold text-[#94a3b8]">

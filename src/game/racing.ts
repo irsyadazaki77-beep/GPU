@@ -1,0 +1,773 @@
+import type {
+  RoadsideSpawnLayout,
+  SidewalkBounds,
+  StreetRaceSpec,
+  TollSignSpawn,
+  TrafficAISteppable,
+  TrafficRouteId,
+  TrafficSignKind,
+  TrafficSignSpawn,
+  TrafficSpawnSpec,
+  TrafficWaypoint,
+  TransJakartaHalteSpawn,
+  VehicleCustomPaintSpec,
+  VehicleSpec,
+  VehicleType,
+  VehicleUnderglowSpec,
+} from './types';
+import { ENTERABLE_INTERIORS } from './heists';
+import { CITY_BUILDINGS, MAIN_BOULEVARD_SIDEWALK_SLABS } from './world/bounds';
+import { resolveCircleAABBCollision } from './world/spatial';
+
+export const VEHICLE_SPECS: Record<VehicleType, VehicleSpec> = {
+  bajaj: {
+    type: 'bajaj',
+    name: 'Bajaj Oranye BBG',
+    subtitle: 'Lincah di Gang Sempit · Putar Balik Cepat',
+    maxSpeed: 22,
+    acceleration: 16,
+    turnRate: 3.4,
+    maxHp: 140,
+    colorHex: 0xea580c,
+    accentHex: 0xfef08a,
+    radius: 1.8,
+  },
+  ojek: {
+    type: 'ojek',
+    name: 'Motor Ojek SanNabilo',
+    subtitle: 'Akselerasi Kilat · Selap-Selip Macet',
+    maxSpeed: 31,
+    acceleration: 25,
+    turnRate: 3.8,
+    maxHp: 100,
+    colorHex: 0x16a34a,
+    accentHex: 0x111827,
+    radius: 1.3,
+  },
+  angkot: {
+    type: 'angkot',
+    name: 'Angkot Mikrolet M-15',
+    subtitle: 'Raja Ngetem Tanah Abang · Audio Bass Jalanan',
+    maxSpeed: 26,
+    acceleration: 19,
+    turnRate: 3.1,
+    maxHp: 190,
+    colorHex: 0x0284c7,
+    accentHex: 0xe0f2fe,
+    radius: 2.1,
+  },
+  sedan: {
+    type: 'sedan',
+    name: 'Sedan Sport Sudirman',
+    subtitle: 'Kecepatan Tinggi · Stabil di Jalan Protokol',
+    maxSpeed: 36,
+    acceleration: 22,
+    turnRate: 2.7,
+    maxHp: 220,
+    colorHex: 0xdc2626,
+    accentHex: 0x1e293b,
+    radius: 2.3,
+  },
+  metromini: {
+    type: 'metromini',
+    name: 'Bus Kota Raja Jalanan',
+    subtitle: 'Bodi Baja Tebal · Tabrakan Beruntun',
+    maxSpeed: 24,
+    acceleration: 13,
+    turnRate: 2.0,
+    maxHp: 380,
+    colorHex: 0x2563eb,
+    accentHex: 0xf97316,
+    radius: 3.0,
+  },
+  polisi: {
+    type: 'polisi',
+    name: 'Patroli Sabhara Cepat',
+    subtitle: 'Sirine Aktif · Mesin Interseptor',
+    maxSpeed: 34,
+    acceleration: 24,
+    turnRate: 2.9,
+    maxHp: 260,
+    colorHex: 0x1e293b,
+    accentHex: 0x3b82f6,
+    radius: 2.3,
+  },
+  transjakarta: {
+    type: 'transjakarta',
+    name: 'Bus TransNabilo Koridor 1',
+    subtitle: 'Raja Jalur Busway Sudirman - Kota (Tahap 3)',
+    maxSpeed: 29,
+    acceleration: 18,
+    turnRate: 2.2,
+    maxHp: 450,
+    colorHex: 0x1d4ed8,
+    accentHex: 0xf8fafc,
+    radius: 3.1,
+  },
+  barracuda: {
+    type: 'barracuda',
+    name: 'Rantis Taktis Barracuda',
+    subtitle: 'Lapis Baja Anti-Peluru · Penggilas Barikade (Tahap 3)',
+    maxSpeed: 33,
+    acceleration: 23,
+    turnRate: 2.6,
+    maxHp: 540,
+    colorHex: 0x334155,
+    accentHex: 0xf59e0b,
+    radius: 2.7,
+  },
+  heli: {
+    type: 'heli',
+    name: 'Helikopter Nabilo-Air',
+    subtitle: 'Lintas Langit Jakarta · Spasi Naik / C Turun',
+    maxSpeed: 42,
+    acceleration: 28,
+    turnRate: 2.6,
+    maxHp: 320,
+    colorHex: 0xf59e0b,
+    accentHex: 0x0f172a,
+    radius: 2.6,
+    isAircraft: true,
+  },
+  supercar: {
+    type: 'supercar',
+    name: 'Hypercar Garuda GT-X',
+    subtitle: 'Aerodinamika V12 Nusantara · Raja Aspal Tahap 4',
+    maxSpeed: 46,
+    acceleration: 32,
+    turnRate: 3.1,
+    maxHp: 280,
+    colorHex: 0xdc2626,
+    accentHex: 0xfacc15,
+    radius: 2.2,
+  },
+  vtol_jet: {
+    type: 'vtol_jet',
+    name: 'Jet VTOL Elang Nusantara',
+    subtitle: 'Supersonik Stealth Udara · Spasi Naik / C Turun (Fase 5)',
+    maxSpeed: 54,
+    acceleration: 38,
+    turnRate: 2.9,
+    maxHp: 420,
+    colorHex: 0x0f172a,
+    accentHex: 0x38bdf8,
+    radius: 2.8,
+    isAircraft: true,
+  },
+};
+
+export const VEHICLE_CUSTOM_PAINTS: VehicleCustomPaintSpec[] = [
+  {
+    id: 'paint_jawara_crimson',
+    name: 'Merah Jawara Metalik',
+    primaryHex: 0xdc2626,
+    accentHex: 0xfacc15,
+    finish: 'metallic',
+    price: 0,
+  },
+  {
+    id: 'paint_garuda_gold',
+    name: 'Emas Murni Kencana (Chrome)',
+    primaryHex: 0xf59e0b,
+    accentHex: 0x0f172a,
+    finish: 'chrome',
+    price: 180000,
+  },
+  {
+    id: 'paint_stealth_obsidian',
+    name: 'Hitam Siluman Taktis (Matte)',
+    primaryHex: 0x111827,
+    accentHex: 0x38bdf8,
+    finish: 'matte',
+    price: 150000,
+  },
+  {
+    id: 'paint_scbd_sapphire',
+    name: 'Biru Safir Eksekutif SCBD',
+    primaryHex: 0x0284c7,
+    accentHex: 0xe0f2fe,
+    finish: 'metallic',
+    price: 140000,
+  },
+  {
+    id: 'paint_emerald_nusantara',
+    name: 'Zamrud Khatulistiwa Metalik',
+    primaryHex: 0x16a34a,
+    accentHex: 0xfef08a,
+    finish: 'metallic',
+    price: 140000,
+  },
+  {
+    id: 'paint_cyber_violet',
+    name: 'Ungu Siber Kemayoran (Chrome)',
+    primaryHex: 0x7e22ce,
+    accentHex: 0x22d3ee,
+    finish: 'chrome',
+    price: 200000,
+  },
+];
+
+export const VEHICLE_UNDERGLOWS: VehicleUnderglowSpec[] = [
+  { id: 'glow_off', name: 'Tanpa Lampu Kolong', colorHex: null, cssColor: '#334155', price: 0 },
+  { id: 'glow_cyan', name: 'Neon Sian Siber', colorHex: 0x22d3ee, cssColor: '#22d3ee', price: 95000 },
+  { id: 'glow_gold', name: 'Neon Emas Monas', colorHex: 0xfacc15, cssColor: '#facc15', price: 95000 },
+  { id: 'glow_red', name: 'Neon Merah Balap', colorHex: 0xef4444, cssColor: '#ef4444', price: 95000 },
+  { id: 'glow_purple', name: 'Neon Ungu Malam', colorHex: 0xc084fc, cssColor: '#c084fc', price: 110000 },
+  { id: 'glow_green', name: 'Neon Hijau Nitro', colorHex: 0x22c55e, cssColor: '#22c55e', price: 95000 },
+];
+
+export const STREET_RACES: StreetRaceSpec[] = [
+  {
+    id: 'race_tol_layang',
+    name: 'GP Malam Tol Layang Semanggi',
+    subtitle: 'Lintasan Atas Jalan Tol Layang & Tanjakan Kemayoran (4 Checkpoint)',
+    entryFeeRp: 50000,
+    rewardRp: 650000,
+    checkpoints: [
+      [-45, -26],
+      [0, -26],
+      [45, -26],
+      [0, 18],
+    ],
+  },
+  {
+    id: 'race_sudirman_sprint',
+    name: 'Sprint Neon Sudirman – Monas',
+    subtitle: 'Adu Kecepatan Tinggi Mengitari Tugu Monas & Bundaran HI (5 Checkpoint)',
+    entryFeeRp: 100000,
+    rewardRp: 1200000,
+    checkpoints: [
+      [0, -32],
+      [0, -64],
+      [32, -32],
+      [32, 24],
+      [0, 24],
+    ],
+  },
+];
+
+export function getRoadsideGroundY(
+  x: number,
+  z: number,
+  sidewalkSlabs: SidewalkBounds[] = MAIN_BOULEVARD_SIDEWALK_SLABS
+): number {
+  for (const s of sidewalkSlabs) {
+    if (x >= s.minX && x <= s.maxX && z >= s.minZ && z <= s.maxZ) {
+      return 0.14;
+    }
+  }
+  return 0;
+}
+
+const KNOWN_PJU_POLES: [number, number][] = (() => {
+  const pts: [number, number][] = [];
+  for (let z = -76; z <= 76; z += 18) {
+    if (Math.abs(z) < 21 || Math.abs(z - -26) < 7 || Math.abs(Math.abs(z) - 32) < 6) {
+      continue;
+    }
+    pts.push([-7.45, z], [7.45, z]);
+  }
+  for (let x = -76; x <= 76; x += 20) {
+    if (Math.abs(x) < 21 || Math.abs(Math.abs(x) - 32) < 6) continue;
+    pts.push([x, -7.45], [x, 7.45]);
+  }
+  return pts;
+})();
+
+const KNOWN_BOULEVARD_TREES: [number, number][] = (() => {
+  const pts: [number, number][] = [];
+  for (let idx = 0; idx < 36; idx++) {
+    const side = idx % 2 === 0 ? -10.8 : 10.8;
+    const tx = idx < 18 ? side : -76 + (idx - 18) * 9;
+    const tz = idx < 18 ? -76 + idx * 9 : side;
+    pts.push([tx, tz]);
+  }
+  return pts;
+})();
+
+const KNOWN_STREETSCAPE_OBSTACLES: { x: number; z: number; hx: number; hz: number }[] = [
+  { x: -7.8, z: -38.5, hx: 1.4, hz: 1.4 },
+  { x: 7.8, z: -19.5, hx: 1.4, hz: 1.4 },
+  { x: -7.8, z: 19.5, hx: 1.4, hz: 1.4 },
+  { x: 7.8, z: 38.5, hx: 1.4, hz: 1.4 },
+  { x: -38.5, z: -7.8, hx: 1.4, hz: 1.4 },
+  { x: 38.5, z: 7.8, hx: 1.4, hz: 1.4 },
+  { x: -7.5, z: -50, hx: 1.8, hz: 1.8 },
+  { x: 7.5, z: -50, hx: 1.8, hz: 1.8 },
+  { x: -7.5, z: 42, hx: 1.8, hz: 1.8 },
+  { x: 7.5, z: 42, hx: 1.8, hz: 1.8 },
+  { x: -42, z: -7.5, hx: 1.8, hz: 1.8 },
+  { x: -42, z: 7.5, hx: 1.8, hz: 1.8 },
+  { x: -11, z: 22, hx: 2.6, hz: 2.6 },
+  { x: 11, z: 20, hx: 2.6, hz: 2.6 },
+  { x: -14, z: -22, hx: 2.6, hz: 2.6 },
+  { x: 14, z: -22, hx: 2.6, hz: 2.6 },
+  { x: -9.0, z: -42, hx: 2.2, hz: 5.8 },
+  { x: 9.0, z: 42, hx: 2.2, hz: 5.8 },
+  { x: 8.5, z: -16, hx: 2.2, hz: 3.2 },
+  ...ENTERABLE_INTERIORS.map((p) => ({
+    x: p.portalX,
+    z: p.portalZ,
+    hx: 3.2,
+    hz: 3.2,
+  })),
+  ...KNOWN_PJU_POLES.map(([x, z]) => ({ x, z, hx: 0.85, hz: 0.85 })),
+  ...KNOWN_BOULEVARD_TREES.map(([x, z]) => ({ x, z, hx: 1.5, hz: 1.5 })),
+];
+
+export function isOnMainRoadwayFootprint(
+  x: number,
+  z: number,
+  pad: number = 0.1
+): boolean {
+  if (Math.abs(x) < 7.0 + pad && Math.abs(z) < 96) return true;
+  if (Math.abs(z) < 7.0 + pad && Math.abs(x) < 96) return true;
+  if (Math.abs(Math.abs(x) - 32) < 5.0 + pad && Math.abs(z) < 82) return true;
+  if (Math.abs(Math.abs(z) - 32) < 5.0 + pad && Math.abs(x) < 82) return true;
+  if (z >= -30.6 - pad && z <= -21.4 + pad && Math.abs(x) <= 68.5 + pad) {
+    return true;
+  }
+  return false;
+}
+
+export function isRoadsideSpotClear(
+  x: number,
+  z: number,
+  halfX: number,
+  halfZ: number,
+  occupied: { x: number; z: number; hx: number; hz: number }[]
+): boolean {
+  if (Math.abs(x) + halfX > 88 || Math.abs(z) + halfZ > 88) return false;
+  const roadPad = Math.min(halfX, halfZ) * 0.25;
+  if (isOnMainRoadwayFootprint(x, z, roadPad)) return false;
+  if (x * x + z * z < 19.6 * 19.6) return false;
+  if (Math.abs(x) < 11.8 && z >= 18.0 && z <= 29.0) return false;
+
+  for (const b of CITY_BUILDINGS) {
+    const hw = b.width * 0.5 + halfX + 0.8;
+    const hd = b.depth * 0.5 + halfZ + 0.8;
+    if (Math.abs(x - b.x) < hw && Math.abs(z - b.z) < hd) return false;
+  }
+  for (const obs of KNOWN_STREETSCAPE_OBSTACLES) {
+    if (Math.abs(x - obs.x) < halfX + obs.hx && Math.abs(z - obs.z) < halfZ + obs.hz) {
+      return false;
+    }
+  }
+  for (const item of occupied) {
+    if (Math.abs(x - item.x) < halfX + item.hx && Math.abs(z - item.z) < halfZ + item.hz) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function generateRoadsideSpawnLayout(
+  sidewalkSlabs: SidewalkBounds[] = MAIN_BOULEVARD_SIDEWALK_SLABS
+): RoadsideSpawnLayout {
+  const occupied: { x: number; z: number; hx: number; hz: number }[] = [];
+  const trafficSigns: TrafficSignSpawn[] = [];
+  const tollSigns: TollSignSpawn[] = [];
+  const transJakartaHaltes: TransJakartaHalteSpawn[] = [];
+
+  const halteCandidates: Omit<TransJakartaHalteSpawn, 'y'>[] = [
+    { id: 'halte_bundaran_hi', stationName: 'HALTE BUNDARAN HI', corridorCode: 'K1', routeSummary: 'BLOK M  <->  KOTA', x: -9.65, z: -67, rotY: 0 },
+    { id: 'halte_dukuh_atas', stationName: 'HALTE DUKUH ATAS', corridorCode: 'K1', routeSummary: 'MONAS  <->  SENAYAN', x: 9.65, z: -58, rotY: Math.PI },
+    { id: 'halte_blok_m', stationName: 'HALTE BLOK M', corridorCode: 'K1', routeSummary: 'BLOK M  <->  HARMONI', x: -9.65, z: 59, rotY: 0 },
+    { id: 'halte_karet_sudirman', stationName: 'HALTE KARET SUDIRMAN', corridorCode: 'K1', routeSummary: 'SUDIRMAN  <->  MELAWAI', x: 9.65, z: 68, rotY: Math.PI },
+    { id: 'halte_tanah_abang', stationName: 'HALTE TANAH ABANG', corridorCode: 'K8', routeSummary: 'HARMONI  <->  LEBAK BULUS', x: -58, z: 9.65, rotY: Math.PI / 2 },
+    { id: 'halte_kota_tua', stationName: 'HALTE KOTA TUA', corridorCode: 'K12', routeSummary: 'KOTA  <->  TANJUNG PRIOK', x: 50, z: 9.65, rotY: Math.PI / 2 },
+    { id: 'halte_glodok_harco', stationName: 'HALTE GLODOK HARCO', corridorCode: 'K1', routeSummary: 'KOTA TUA  <->  BLOK M', x: 75, z: -9.65, rotY: -Math.PI / 2 },
+  ];
+
+  for (const hc of halteCandidates) {
+    const alongZ = Math.abs(Math.cos(hc.rotY)) > 0.5;
+    const hx = alongZ ? 1.25 : 4.8;
+    const hz = alongZ ? 4.8 : 1.25;
+    if (isRoadsideSpotClear(hc.x, hc.z, hx, hz, occupied)) {
+      transJakartaHaltes.push({ ...hc, y: getRoadsideGroundY(hc.x, hc.z, sidewalkSlabs) });
+      occupied.push({ x: hc.x, z: hc.z, hx: hx + 0.8, hz: hz + 0.8 });
+    }
+  }
+
+  const tollCandidates: Omit<TollSignSpawn, 'y'>[] = [
+    { id: 'toll_sudirman_northbound', variant: 'cantilever', theme: 'green_arterial', topText: 'TOL DALAM KOTA ↑', bottomText: 'SEMANGGI · CAWANG · PRIOK', badgeText: 'TOL', x: -7.75, z: 45.5, rotY: 0 },
+    { id: 'toll_sudirman_southbound', variant: 'cantilever', theme: 'green_arterial', topText: 'BLOK M · SENAYAN GBK ↑', bottomText: 'JALUR PROTOKOL SELATAN', badgeText: 'JKT', x: 7.75, z: 78.5, rotY: Math.PI },
+    { id: 'toll_thamrin_southbound', variant: 'cantilever', theme: 'green_arterial', topText: 'TOL SEMANGGI · MONAS ↑', bottomText: 'CAWANG · HALIM · BLOK M', badgeText: 'TOL', x: 7.75, z: -44.5, rotY: Math.PI },
+    { id: 'toll_thamrin_northbound', variant: 'cantilever', theme: 'blue_toll', topText: 'SCBD ←   PRIOK →', bottomText: 'TOL BANDARA SOETTA ↑', badgeText: 'TOL', x: -7.75, z: -80.5, rotY: 0 },
+    { id: 'toll_ramp_semanggi_west', variant: 'twin_post', theme: 'blue_toll', topText: 'GERBANG TOL SEMANGGI', bottomText: 'e-TOLL · TOL LAYANG →', badgeText: 'TOL', x: -64.5, z: -19.8, rotY: -Math.PI / 2 },
+    { id: 'toll_ramp_kemayoran_east', variant: 'twin_post', theme: 'blue_toll', topText: 'TOL LAYANG KEMAYORAN', bottomText: '← SCBD · SENAYAN · PIK 2', badgeText: 'TOL', x: 64.5, z: -19.8, rotY: Math.PI / 2 },
+    { id: 'toll_ew_west_approach', variant: 'cantilever', theme: 'green_arterial', topText: 'MONAS · SUDIRMAN ↑', bottomText: 'AKSES TOL DALAM KOTA 200m', badgeText: 'TOL', x: -48.5, z: 7.75, rotY: -Math.PI / 2 },
+    { id: 'toll_ew_east_approach', variant: 'cantilever', theme: 'green_arterial', topText: 'KOTA TUA ←   MONAS ↑', bottomText: 'TOL TANJUNG PRIOK · HALIM →', badgeText: 'TOL', x: 67.5, z: -7.75, rotY: Math.PI / 2 },
+  ];
+
+  for (const tc of tollCandidates) {
+    const hx = tc.variant === 'twin_post' ? 2.1 : 1.0;
+    const hz = tc.variant === 'twin_post' ? 1.4 : 1.0;
+    if (isRoadsideSpotClear(tc.x, tc.z, hx, hz, occupied)) {
+      tollSigns.push({ ...tc, y: getRoadsideGroundY(tc.x, tc.z, sidewalkSlabs) });
+      occupied.push({ x: tc.x, z: tc.z, hx: hx + 1.5, hz: hz + 1.5 });
+    }
+  }
+
+  const nsSignSequence: TrafficSignKind[] = [
+    'khusus_busway',
+    'batas_kecepatan_60',
+    'dilarang_parkir',
+    'peringatan_penyeberangan',
+    'arah_wajib_lurus',
+    'batas_kecepatan_40',
+  ];
+  let signIndex = 0;
+
+  const nsZStops = [-81, -69, -54, -44, -22, 16, 22, 37, 48, 66, 79];
+  for (const zPos of nsZStops) {
+    for (const sideX of [-7.45, 7.45]) {
+      const rotY = sideX < 0 ? 0 : Math.PI;
+      const nearCrosswalk =
+        Math.abs(Math.abs(zPos) - 21) < 3 || Math.abs(Math.abs(zPos) - 38) < 3;
+      const kind: TrafficSignKind = nearCrosswalk
+        ? 'peringatan_penyeberangan'
+        : nsSignSequence[signIndex % nsSignSequence.length];
+      if (isRoadsideSpotClear(sideX, zPos, 0.55, 0.55, occupied)) {
+        trafficSigns.push({
+          id: `rambu_ns_${signIndex}`,
+          kind,
+          x: sideX,
+          y: getRoadsideGroundY(sideX, zPos, sidewalkSlabs),
+          z: zPos,
+          rotY,
+          corridor: 'sudirman_ns',
+        });
+        occupied.push({ x: sideX, z: zPos, hx: 1.8, hz: 1.8 });
+        signIndex++;
+      }
+    }
+  }
+
+  const ewXStops = [-78, -62, -46, -22, 22, 42, 58, 76];
+  for (const xPos of ewXStops) {
+    for (const sideZ of [-7.45, 7.45]) {
+      const rotY = sideZ < 0 ? -Math.PI / 2 : Math.PI / 2;
+      const nearCrosswalk = Math.abs(Math.abs(xPos) - 22) < 3;
+      const kind: TrafficSignKind = nearCrosswalk
+        ? 'peringatan_penyeberangan'
+        : nsSignSequence[(signIndex + 2) % nsSignSequence.length];
+      if (isRoadsideSpotClear(xPos, sideZ, 0.55, 0.55, occupied)) {
+        trafficSigns.push({
+          id: `rambu_ew_${signIndex}`,
+          kind,
+          x: xPos,
+          y: getRoadsideGroundY(xPos, sideZ, sidewalkSlabs),
+          z: sideZ,
+          rotY,
+          corridor: 'merdeka_ew',
+        });
+        occupied.push({ x: xPos, z: sideZ, hx: 1.8, hz: 1.8 });
+        signIndex++;
+      }
+    }
+  }
+
+  const tollShoulderCandidates: { x: number; z: number; rotY: number; kind: TrafficSignKind }[] = [
+    { x: -58, z: -20.5, rotY: -Math.PI / 2, kind: 'batas_kecepatan_60' },
+    { x: -45, z: -20.5, rotY: -Math.PI / 2, kind: 'arah_wajib_lurus' },
+    { x: 58, z: -31.5, rotY: Math.PI / 2, kind: 'batas_kecepatan_60' },
+    { x: 45, z: -31.5, rotY: Math.PI / 2, kind: 'arah_wajib_lurus' },
+  ];
+  for (const ts of tollShoulderCandidates) {
+    if (isRoadsideSpotClear(ts.x, ts.z, 0.55, 0.55, occupied)) {
+      trafficSigns.push({
+        id: `rambu_tol_${signIndex}`,
+        kind: ts.kind,
+        x: ts.x,
+        y: getRoadsideGroundY(ts.x, ts.z, sidewalkSlabs),
+        z: ts.z,
+        rotY: ts.rotY,
+        corridor: 'tol_layang',
+      });
+      occupied.push({ x: ts.x, z: ts.z, hx: 1.8, hz: 1.8 });
+      signIndex++;
+    }
+  }
+
+  return { trafficSigns, tollSigns, transJakartaHaltes };
+}
+
+export const TRAFFIC_ROUTES: Record<TrafficRouteId, TrafficWaypoint[]> = {
+  ring_clockwise: [
+    { x: -34.4, z: 34.4 },
+    { x: -34.4, z: -34.4 },
+    { x: 34.4, z: -34.4 },
+    { x: 34.4, z: 34.4 },
+  ],
+  ring_ccw: [
+    { x: -29.6, z: -29.6 },
+    { x: -29.6, z: 29.6 },
+    { x: 29.6, z: 29.6 },
+    { x: 29.6, z: -29.6 },
+  ],
+  sudirman_north_arterial: [
+    { x: -4.6, z: -34.4 },
+    { x: -4.6, z: -80 },
+    { x: 4.6, z: -80 },
+    { x: 4.6, z: -34.4 },
+  ],
+  sudirman_south_arterial: [
+    { x: 4.6, z: 34.4 },
+    { x: 4.6, z: 80 },
+    { x: -4.6, z: 80 },
+    { x: -4.6, z: 34.4 },
+  ],
+  busway_corridor_north: [
+    { x: -1.85, z: -38 },
+    { x: -1.85, z: -67, pauseSec: 1.6 },
+    { x: -1.85, z: -81 },
+    { x: 1.85, z: -81 },
+    { x: 1.85, z: -58, pauseSec: 1.6 },
+    { x: 1.85, z: -38 },
+  ],
+  busway_corridor_south: [
+    { x: 1.85, z: 38 },
+    { x: 1.85, z: 68, pauseSec: 1.6 },
+    { x: 1.85, z: 81 },
+    { x: -1.85, z: 81 },
+    { x: -1.85, z: 59, pauseSec: 1.6 },
+    { x: -1.85, z: 38 },
+  ],
+  merdeka_west_arterial: [
+    { x: -34.4, z: 0.8 },
+    { x: -80, z: 0.8 },
+    { x: -80, z: 4.6 },
+    { x: -34.4, z: 4.6 },
+  ],
+  merdeka_east_arterial: [
+    { x: 34.4, z: 4.6 },
+    { x: 80, z: 4.6 },
+    { x: 80, z: 0.8 },
+    { x: 34.4, z: 0.8 },
+  ],
+  grand_boulevard_circuit: [
+    { x: -34.4, z: -34.4 },
+    { x: -4.6, z: -34.4 },
+    { x: -4.6, z: -78 },
+    { x: 4.6, z: -78 },
+    { x: 4.6, z: -34.4 },
+    { x: 34.4, z: -34.4 },
+    { x: 34.4, z: 4.6 },
+    { x: 78, z: 4.6 },
+    { x: 78, z: 0.8 },
+    { x: 34.4, z: 0.8 },
+    { x: 34.4, z: 34.4 },
+    { x: 4.6, z: 34.4 },
+    { x: 4.6, z: 78 },
+    { x: -4.6, z: 78 },
+    { x: -4.6, z: 34.4 },
+    { x: -34.4, z: 34.4 },
+    { x: -34.4, z: 0.8 },
+    { x: -78, z: 0.8 },
+    { x: -78, z: 4.6 },
+    { x: -34.4, z: 4.6 },
+  ],
+  tol_layang_express: [
+    { x: -65, z: -24.2 },
+    { x: 65, z: -24.2 },
+    { x: 65, z: -27.8 },
+    { x: -65, z: -27.8 },
+  ],
+};
+
+function interpolateRoutePosition(
+  route: TrafficWaypoint[],
+  segmentIndex: number,
+  t: number
+): { x: number; z: number; heading: number; waypointIndex: number } {
+  const idx = ((segmentIndex % route.length) + route.length) % route.length;
+  const nextIdx = (idx + 1) % route.length;
+  const a = route[idx];
+  const b = route[nextIdx];
+  const x = a.x + (b.x - a.x) * t;
+  const z = a.z + (b.z - a.z) * t;
+  const heading = Math.atan2(b.x - a.x, b.z - a.z);
+  return { x, z, heading, waypointIndex: nextIdx };
+}
+
+export function generateInitialTrafficSpawns(): TrafficSpawnSpec[] {
+  const assignments: {
+    id: string;
+    type: VehicleType;
+    routeId: TrafficRouteId;
+    seg: number;
+    t: number;
+    speed: number;
+  }[] = [
+    { id: 'traffic_tj_n1', type: 'transjakarta', routeId: 'busway_corridor_north', seg: 0, t: 0.35, speed: 9.2 },
+    { id: 'traffic_tj_n2', type: 'transjakarta', routeId: 'busway_corridor_north', seg: 3, t: 0.4, speed: 9.2 },
+    { id: 'traffic_tj_s1', type: 'transjakarta', routeId: 'busway_corridor_south', seg: 0, t: 0.45, speed: 9.2 },
+    { id: 'traffic_polisi_1', type: 'polisi', routeId: 'ring_clockwise', seg: 1, t: 0.42, speed: 11.2 },
+    { id: 'traffic_polisi_2', type: 'polisi', routeId: 'grand_boulevard_circuit', seg: 10, t: 0.5, speed: 11.4 },
+    { id: 'traffic_angkot_ring', type: 'angkot', routeId: 'ring_clockwise', seg: 3, t: 0.35, speed: 9.4 },
+    { id: 'traffic_sedan_ring', type: 'sedan', routeId: 'ring_ccw', seg: 0, t: 0.48, speed: 12.2 },
+    { id: 'traffic_bajaj_ring', type: 'bajaj', routeId: 'ring_ccw', seg: 2, t: 0.52, speed: 7.8 },
+    { id: 'traffic_sedan_ns1', type: 'sedan', routeId: 'sudirman_north_arterial', seg: 0, t: 0.38, speed: 12.6 },
+    { id: 'traffic_ojek_ns2', type: 'ojek', routeId: 'sudirman_north_arterial', seg: 2, t: 0.42, speed: 11.0 },
+    { id: 'traffic_angkot_ss1', type: 'angkot', routeId: 'sudirman_south_arterial', seg: 0, t: 0.35, speed: 9.5 },
+    { id: 'traffic_bajaj_ss2', type: 'bajaj', routeId: 'sudirman_south_arterial', seg: 2, t: 0.5, speed: 8.0 },
+    { id: 'traffic_metromini_ew1', type: 'metromini', routeId: 'merdeka_west_arterial', seg: 0, t: 0.3, speed: 8.6 },
+    { id: 'traffic_ojek_ew2', type: 'ojek', routeId: 'merdeka_east_arterial', seg: 0, t: 0.45, speed: 11.2 },
+    { id: 'traffic_angkot_grand', type: 'angkot', routeId: 'grand_boulevard_circuit', seg: 1, t: 0.55, speed: 9.6 },
+    { id: 'traffic_sedan_tol1', type: 'sedan', routeId: 'tol_layang_express', seg: 0, t: 0.32, speed: 15.8 },
+    { id: 'traffic_sedan_tol2', type: 'sedan', routeId: 'tol_layang_express', seg: 2, t: 0.35, speed: 14.8 },
+  ];
+
+  return assignments.map((item) => {
+    const route = TRAFFIC_ROUTES[item.routeId];
+    const pos = interpolateRoutePosition(route, item.seg, item.t);
+    return {
+      id: item.id,
+      type: item.type,
+      routeId: item.routeId,
+      layer: item.routeId === 'tol_layang_express' ? 'elevated' : 'ground',
+      x: pos.x,
+      z: pos.z,
+      heading: pos.heading,
+      waypointIndex: pos.waypointIndex,
+      preferredSpeed: item.speed,
+    };
+  });
+}
+
+export function stepTrafficVehicleInPlace(
+  vehicle: TrafficAISteppable,
+  route: TrafficWaypoint[],
+  aheadObstacleDist: number,
+  dt: number,
+  options?: { playerWantedLevel?: number; hornTriggered?: boolean }
+): void {
+  if (route.length === 0 || dt <= 0) return;
+
+  const wpIdx = ((vehicle.waypointIndex % route.length) + route.length) % route.length;
+  const targetWp = route[wpIdx];
+  const dx = targetWp.x - vehicle.x;
+  const dz = targetWp.z - vehicle.z;
+  const distToWp = Math.hypot(dx, dz);
+
+  if (distToWp < 2.2) {
+    if (targetWp.pauseSec && targetWp.pauseSec > 0) {
+      vehicle.stopTimer = targetWp.pauseSec;
+    }
+    vehicle.waypointIndex = (wpIdx + 1) % route.length;
+  }
+
+  // Jakarta AI Behavior Extensions:
+  // 1) Angkot stochastic ngetem curb pause along busy streets
+  if (vehicle.vehicleType === 'angkot' && vehicle.layer === 'ground') {
+    if ((vehicle.ngetemCooldown ?? 0) > 0) {
+      vehicle.ngetemCooldown = Math.max(0, (vehicle.ngetemCooldown ?? 0) - dt);
+    }
+    if ((vehicle.ngetemTimer ?? 0) > 0) {
+      vehicle.ngetemTimer = Math.max(0, (vehicle.ngetemTimer ?? 0) - dt);
+      vehicle.stopTimer = Math.max(vehicle.stopTimer, vehicle.ngetemTimer);
+    } else if (
+      (vehicle.ngetemCooldown ?? 0) <= 0 &&
+      aheadObstacleDist > 12 &&
+      Math.abs(Math.sin(vehicle.x * 0.37 + vehicle.z * 0.23)) > 0.992
+    ) {
+      vehicle.ngetemTimer = 2.0;
+      vehicle.ngetemCooldown = 14.0;
+      vehicle.stopTimer = Math.max(vehicle.stopTimer, 2.0);
+    }
+  }
+
+  // 2) Ojol lane-splitting weave & reaction to Klakson or player wanted sirens
+  if (options?.hornTriggered) {
+    vehicle.hornReactionTimer = 1.4;
+    if (vehicle.vehicleType === 'angkot') {
+      // Honking nudges a ngetem angkot to roll forward sooner
+      vehicle.ngetemTimer = 0;
+      vehicle.stopTimer = 0;
+    }
+  } else if ((vehicle.hornReactionTimer ?? 0) > 0) {
+    vehicle.hornReactionTimer = Math.max(0, (vehicle.hornReactionTimer ?? 0) - dt);
+  }
+
+  const nextWp = route[vehicle.waypointIndex];
+  const ndx = nextWp.x - vehicle.x;
+  const ndz = nextWp.z - vehicle.z;
+  let targetHeading =
+    ndx * ndx + ndz * ndz > 0.0001 ? Math.atan2(ndx, ndz) : vehicle.heading;
+
+  // Ojol nimble lane-splitting when traffic ahead slows down or horn/wanted is active
+  if (vehicle.vehicleType === 'ojek') {
+    const yielding =
+      (vehicle.hornReactionTimer ?? 0) > 0 || (options?.playerWantedLevel ?? 0) >= 2;
+    const weaving = aheadObstacleDist < 12.0;
+    const desiredOffset = yielding ? 0.52 : weaving ? -0.34 : 0;
+    const curOffset = vehicle.weaveOffset ?? 0;
+    vehicle.weaveOffset = curOffset + (desiredOffset - curOffset) * Math.min(1, dt * 6);
+    targetHeading += vehicle.weaveOffset * 0.45;
+  }
+
+  const angleDiff = Math.atan2(
+    Math.sin(targetHeading - vehicle.heading),
+    Math.cos(targetHeading - vehicle.heading)
+  );
+  const turnCap = vehicle.vehicleType === 'ojek' ? 5.2 : 3.8;
+  const maxTurn = turnCap * dt;
+  vehicle.heading += Math.max(-maxTurn, Math.min(maxTurn, angleDiff));
+
+  let targetSpeed = vehicle.preferredSpeed;
+  if (Math.abs(angleDiff) > 0.36) {
+    targetSpeed = Math.min(targetSpeed, 5.8);
+  }
+  if (vehicle.vehicleType === 'ojek' && (vehicle.hornReactionTimer ?? 0) > 0) {
+    targetSpeed *= 1.25;
+  }
+
+  if (vehicle.stopTimer > 0) {
+    vehicle.stopTimer = Math.max(0, vehicle.stopTimer - dt);
+    targetSpeed = 0;
+  }
+
+  // Ojol can filter closer than four-wheeled vehicles
+  const hardStopDist = vehicle.vehicleType === 'ojek' ? 3.2 : 5.4;
+  if (aheadObstacleDist < hardStopDist) {
+    targetSpeed = 0;
+  } else if (aheadObstacleDist < 13.5) {
+    const gapFactor = (aheadObstacleDist - hardStopDist) / (13.5 - hardStopDist);
+    targetSpeed = Math.min(targetSpeed, vehicle.preferredSpeed * gapFactor);
+  }
+
+  const rate = targetSpeed < vehicle.speed ? 16.5 : 8.5;
+  const deltaV = targetSpeed - vehicle.speed;
+  const maxStep = rate * dt;
+  if (Math.abs(deltaV) <= maxStep) {
+    vehicle.speed = targetSpeed;
+  } else {
+    vehicle.speed += Math.sign(deltaV) * maxStep;
+  }
+  if (vehicle.speed < 0) vehicle.speed = 0;
+
+  const nx = vehicle.x + Math.sin(vehicle.heading) * vehicle.speed * dt;
+  const nz = vehicle.z + Math.cos(vehicle.heading) * vehicle.speed * dt;
+
+  if (vehicle.layer === 'ground') {
+    const col = resolveCircleAABBCollision(nx, nz, 1.9);
+    vehicle.x = col.x;
+    vehicle.z = col.z;
+  } else {
+    vehicle.x = nx;
+    vehicle.z = nz;
+  }
+}
+
+export function stepTrafficVehicleAI(
+  state: TrafficAISteppable,
+  route: TrafficWaypoint[],
+  aheadObstacleDist: number,
+  dt: number,
+  options?: { playerWantedLevel?: number; hornTriggered?: boolean }
+): TrafficAISteppable {
+  const next: TrafficAISteppable = { ...state };
+  stepTrafficVehicleInPlace(next, route, aheadObstacleDist, dt, options);
+  return next;
+}

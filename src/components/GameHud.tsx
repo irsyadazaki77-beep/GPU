@@ -15,6 +15,7 @@ import {
   WeatherMode,
   formatRupiah,
 } from '../game/rules';
+import { MiniMapRadar } from './MiniMapRadar';
 
 interface GameHudProps {
   playerState: PlayerProgressState;
@@ -40,10 +41,10 @@ interface GameHudProps {
     targetId: ProtagonistId;
     stage: 1 | 2 | 3;
   } | null;
-  radarCanvasRef: React.RefObject<HTMLCanvasElement | null>;
   onSelectWeapon: (w: WeaponId) => void;
   onTogglePhone: () => void;
   onToggleVehicle: () => void;
+  onHonk?: () => void;
   onToggleFokus: () => void;
   onToggleDrone: () => void;
   onToggleTpsAim: () => void;
@@ -52,6 +53,7 @@ interface GameHudProps {
   onSwitchProtagonist: (targetId: ProtagonistId) => void;
   onOpenHeistBoard: () => void;
   onOpenCustomsGarage: () => void;
+  onOpenWarung: () => void;
   onEnterOrExitInterior: () => void;
   onOpenMissionDialog: (m: StoryMission) => void;
   onCycleWeather: () => void;
@@ -131,14 +133,15 @@ export const GameHud: React.FC<GameHudProps> = ({
   tpsAiming,
   lastOutcomeText,
   skySwitchPhase,
-  radarCanvasRef,
   onTogglePhone,
   onToggleVehicle,
+  onHonk,
   onToggleFokus,
   onToggleDrone,
   onOpenWeaponWheel,
   onOpenCharacterWheel,
   onOpenCustomsGarage,
+  onOpenWarung,
   onEnterOrExitInterior,
   onOpenMissionDialog,
   onPause,
@@ -213,22 +216,22 @@ export const GameHud: React.FC<GameHudProps> = ({
 
   // Determine single highest-priority contextual prompt for bottom-center
   const primaryPrompt =
-    nearbyMission && !activeMission
-      ? {
-          keycap: 'E',
-          label: `Bicara dengan ${nearbyMission.giverName}`,
-          accent: '#f59e0b',
-          onClick: () => onOpenMissionDialog(nearbyMission),
-        }
-      : nearbyInterior || playerState.currentInterior !== 'exterior'
+    nearbyInterior || playerState.currentInterior !== 'exterior'
       ? {
           keycap: 'G',
           label:
             playerState.currentInterior !== 'exterior'
               ? 'Keluar Gedung'
               : `Masuk ${nearbyInterior?.name}`,
-          accent: '#c084fc',
+          accent: '#10b981',
           onClick: onEnterOrExitInterior,
+        }
+      : nearbyMission && !activeMission
+      ? {
+          keycap: 'E',
+          label: `Bicara dengan ${nearbyMission.giverName}`,
+          accent: '#f59e0b',
+          onClick: () => onOpenMissionDialog(nearbyMission),
         }
       : drivingVehicle || nearbyVehicle
       ? {
@@ -333,12 +336,12 @@ export const GameHud: React.FC<GameHudProps> = ({
       )}
 
       {/* ==================== TOP ROW ==================== */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-2 sm:gap-4">
         {/* TOP-LEFT: Frameless Active Objective OR Transient District Reveal */}
-        <div className="flex flex-col gap-2 max-w-sm min-w-0">
+        <div className="flex flex-col gap-2 flex-1 max-w-sm min-w-0">
           {activeMission && activeChoice ? (
-            <div className="aaa-glass-subtle rounded-lg px-3.5 py-2.5 shadow-lg pointer-events-auto animate-aaa-up">
-              <div className="flex items-center justify-between gap-3">
+            <div className="aaa-glass-subtle rounded-lg px-3 py-2 sm:px-3.5 sm:py-2.5 shadow-lg pointer-events-auto animate-aaa-up">
+              <div className="flex items-center justify-between gap-2 sm:gap-3">
                 <span className="text-xs font-semibold text-[#f59e0b] truncate">
                   {activeMission.title}
                 </span>
@@ -364,26 +367,36 @@ export const GameHud: React.FC<GameHudProps> = ({
               </div>
             </div>
           ) : (
-            <div className="aaa-glass-subtle rounded-lg border-l-2 border-l-[#f59e0b] px-3.5 py-2 flex flex-col gap-0.5 shadow-xl">
-              <div className="flex items-center gap-2 text-xs font-medium text-[#e2e8f0] hud-stroke-sm">
-                <span className="font-display text-base md:text-lg font-bold uppercase tracking-wide text-[#f4f1ea]">
+            <div className="aaa-glass-subtle rounded-lg border-l-2 border-l-[#f59e0b] px-2.5 py-1.5 sm:px-3.5 sm:py-2 flex flex-col gap-0.5 shadow-xl min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 text-xs font-medium text-[#e2e8f0] hud-stroke-sm min-w-0">
+                <span className="font-display text-sm sm:text-base md:text-lg font-bold uppercase tracking-wide text-[#f4f1ea] truncate">
                   {district.name}
                 </span>
-                <span aria-hidden="true" className="text-[#f59e0b]">
+                <span aria-hidden="true" className="hidden sm:inline text-[#f59e0b] shrink-0">
                   ·
                 </span>
-                <span className="text-[#cbd5e1] whitespace-nowrap">{weatherSpec.label}</span>
+                <span className="hidden sm:inline text-[#cbd5e1] whitespace-nowrap">
+                  {weatherSpec.label}
+                </span>
               </div>
-              <div className="text-[11px] font-mono-num text-[#94a3b8] hud-stroke-sm flex items-center gap-1.5 flex-wrap">
+              <div className="text-[10px] sm:text-[11px] font-mono-num text-[#94a3b8] hud-stroke-sm flex items-center gap-1.5 flex-wrap">
                 <span>
                   Babak {playerState.completedMissions.length}/15 · Heist{' '}
                   {playerState.completedHeists.length}/3
                   {playerState.currentInterior !== 'exterior' && ' · Interior'}
                 </span>
-                {ambientCueLabel && !muted && playerState.currentInterior === 'exterior' && (
+                {playerState.staminaBuffTimer > 0 && (
                   <>
                     <span aria-hidden="true" className="text-[#64748b]">·</span>
-                    <span className="text-[#38bdf8] font-sans font-medium">
+                    <span className="text-[#34d399] font-bold">
+                      Stamina +{Math.ceil(playerState.staminaBuffTimer)}d
+                    </span>
+                  </>
+                )}
+                {ambientCueLabel && !muted && playerState.currentInterior === 'exterior' && (
+                  <>
+                    <span aria-hidden="true" className="hidden sm:inline text-[#64748b]">·</span>
+                    <span className="hidden sm:inline text-[#38bdf8] font-sans font-medium">
                       {ambientCueLabel}
                     </span>
                   </>
@@ -446,7 +459,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                       +{formatRupiah(passiveIncome)}
                     </span>
                   )}
-                  <span className="font-display text-xl md:text-2xl font-extrabold text-[#22c55e] hud-stroke tracking-tight whitespace-nowrap font-mono-num">
+                  <span className="font-display text-base sm:text-xl md:text-2xl font-extrabold text-[#22c55e] hud-stroke tracking-tight whitespace-nowrap font-mono-num">
                     {formatRupiah(playerState.rupiah)}
                   </span>
                 </div>
@@ -537,98 +550,102 @@ export const GameHud: React.FC<GameHudProps> = ({
       </div>
 
       {/* ==================== BOTTOM ROW ==================== */}
-      <div className="flex items-end justify-between gap-4">
-        {/* BOTTOM-LEFT: Iconic GTA V Frameless Minimap + Integrated Tri-Bar (Zero Clutter) */}
-        <div className="pointer-events-auto shrink-0">
-          <div className="relative bg-[#070a10] border-2 border-[#0d111a] shadow-[0_10px_28px_rgba(0,0,0,0.85)] overflow-hidden rounded-sm">
-            {/* Live Minimap Canvas (1:1 aspect match 196x122) */}
-            <div className="relative w-[196px] h-[122px] bg-[#070b12]">
-              <canvas
-                ref={radarCanvasRef}
-                width={196}
-                height={122}
-                className="w-full h-full block"
-              />
-              {/* Subtle North Indicator */}
-              <span className="absolute top-1.5 right-1.5 px-1 rounded bg-[#070a10]/90 text-[9px] font-mono-num font-bold text-[#cbd5e1] pointer-events-none">
-                U
-              </span>
-              {/* Subtle Inner Edge Shadow */}
-              <div
-                className="absolute inset-0 pointer-events-none"
-                style={{
-                  boxShadow: 'inset 0 0 14px rgba(0,0,0,0.55)',
-                }}
-              />
-            </div>
-
-            {/* GTA V Signature Integrated Tri-Bar (50% HP | 25% Armor | 25% Special) */}
-            <div className="w-full h-2 bg-[#05070b] flex items-center gap-[2px] pt-[2px]">
-              <div className="relative w-1/2 h-full bg-[#1e293b]/80 overflow-hidden">
-                <div
-                  className="absolute inset-y-0 left-0 bg-[#f87171]/60 transition-all duration-300"
-                  style={{ width: `${Math.max(0, Math.min(100, ghostHp))}%` }}
-                />
-                <div
-                  className={`relative h-full transition-all duration-150 ${
-                    lowHp ? 'bg-[#ef4444]' : 'bg-[#22c55e]'
-                  }`}
-                  style={{
-                    width: `${Math.max(0, Math.min(100, playerState.hp))}%`,
-                  }}
-                />
-              </div>
-
-              <div className="w-1/4 h-full bg-[#1e293b]/80 overflow-hidden">
-                <div
-                  className="h-full bg-[#38bdf8] transition-all duration-150"
-                  style={{
-                    width: `${Math.max(0, Math.min(100, playerState.armor))}%`,
-                  }}
-                />
-              </div>
-
-              <div className="w-1/4 h-full bg-[#1e293b]/80 overflow-hidden">
-                <div
-                  className="h-full bg-[#facc15] transition-all duration-150"
-                  style={{
-                    width: `${Math.max(
-                      0,
-                      Math.min(100, playerState.fokusEnergy)
-                    )}%`,
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* BOTTOM-CENTER: Single Clean Contextual Interaction Prompt */}
-        <div className="flex flex-col items-center justify-end pointer-events-auto min-w-0 max-w-md mx-auto pb-1">
-          {primaryPrompt && (
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 sm:gap-4">
+        {/* Mobile: Contextual prompt sits cleanly above Radar + Ability bar */}
+        {primaryPrompt && (
+          <div className="flex sm:hidden items-center justify-center pointer-events-auto">
             <button
               type="button"
               onClick={primaryPrompt.onClick}
-              className="aaa-glass hover:bg-white/10 px-3.5 py-2 rounded-lg shadow-xl flex items-center gap-2.5 cursor-pointer transition-colors animate-aaa-up"
+              className="aaa-glass hover:bg-white/10 px-3 py-1.5 rounded-lg shadow-xl flex items-center gap-2 cursor-pointer transition-colors max-w-full"
             >
               <span
-                className="w-6 h-6 rounded flex items-center justify-center font-mono-num text-xs font-bold text-[#090c12] shrink-0"
+                className="w-5 h-5 rounded flex items-center justify-center font-mono-num text-[11px] font-bold text-[#090c12] shrink-0"
                 style={{ backgroundColor: primaryPrompt.accent }}
               >
                 {primaryPrompt.keycap}
               </span>
-              <span className="text-xs md:text-sm font-semibold text-[#f4f1ea] whitespace-nowrap truncate">
+              <span className="text-xs font-semibold text-[#f4f1ea] truncate">
                 {primaryPrompt.label}
               </span>
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* BOTTOM-RIGHT: Sleek Driving Speedometer Arc + Minimal Character/Ability Dock */}
-        <div className="flex flex-col items-end gap-2.5 pointer-events-auto shrink-0">
+        <div className="flex items-end justify-between gap-2 sm:contents">
+          {/* BOTTOM-LEFT: Iconic GTA V Frameless Minimap + Integrated Tri-Bar (Zero Clutter) */}
+          <div className="pointer-events-auto shrink-0">
+            <div className="relative bg-[#070a10] border-2 border-[#0d111a] shadow-[0_10px_28px_rgba(0,0,0,0.85)] overflow-hidden rounded-sm">
+              {/* Live Standalone Minimap (20fps isolated from React reconciler) */}
+              <MiniMapRadar />
+
+              {/* GTA V Signature Integrated Tri-Bar (50% HP | 25% Armor | 25% Special) */}
+              <div className="w-full h-2 bg-[#05070b] flex items-center gap-[2px] pt-[2px]">
+                <div className="relative w-1/2 h-full bg-[#1e293b]/80 overflow-hidden">
+                  <div
+                    className="absolute inset-y-0 left-0 bg-[#f87171]/60 transition-all duration-300"
+                    style={{ width: `${Math.max(0, Math.min(100, ghostHp))}%` }}
+                  />
+                  <div
+                    className={`relative h-full transition-all duration-150 ${
+                      lowHp ? 'bg-[#ef4444]' : 'bg-[#22c55e]'
+                    }`}
+                    style={{
+                      width: `${Math.max(0, Math.min(100, playerState.hp))}%`,
+                    }}
+                  />
+                </div>
+
+                <div className="w-1/4 h-full bg-[#1e293b]/80 overflow-hidden">
+                  <div
+                    className="h-full bg-[#38bdf8] transition-all duration-150"
+                    style={{
+                      width: `${Math.max(0, Math.min(100, playerState.armor))}%`,
+                    }}
+                  />
+                </div>
+
+                <div className="w-1/4 h-full bg-[#1e293b]/80 overflow-hidden">
+                  <div
+                    className="h-full bg-[#facc15] transition-all duration-150"
+                    style={{
+                      width: `${Math.max(
+                        0,
+                        Math.min(100, playerState.fokusEnergy)
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* BOTTOM-CENTER (Desktop): Single Clean Contextual Interaction Prompt */}
+          <div className="hidden sm:flex flex-col items-center justify-end pointer-events-auto min-w-0 max-w-md mx-auto pb-1">
+            {primaryPrompt && (
+              <button
+                type="button"
+                onClick={primaryPrompt.onClick}
+                className="aaa-glass hover:bg-white/10 px-3.5 py-2 rounded-lg shadow-xl flex items-center gap-2.5 cursor-pointer transition-colors animate-aaa-up"
+              >
+                <span
+                  className="w-6 h-6 rounded flex items-center justify-center font-mono-num text-xs font-bold text-[#090c12] shrink-0"
+                  style={{ backgroundColor: primaryPrompt.accent }}
+                >
+                  {primaryPrompt.keycap}
+                </span>
+                <span className="text-xs md:text-sm font-semibold text-[#f4f1ea] whitespace-nowrap truncate">
+                  {primaryPrompt.label}
+                </span>
+              </button>
+            )}
+          </div>
+
+          {/* BOTTOM-RIGHT: Sleek Driving Speedometer Arc + Minimal Character/Ability Dock */}
+          <div className="flex flex-col items-end gap-2 pointer-events-auto min-w-0 sm:shrink-0">
           {drivingVehicle && vehicleSpec && (
-            <div className="flex items-center gap-3 aaa-glass-subtle px-3.5 py-2 rounded-xl shadow-xl animate-aaa-up">
-              <div className="relative w-14 h-14 flex items-center justify-center shrink-0">
+            <div className="flex items-center gap-2.5 sm:gap-3 aaa-glass-subtle px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl shadow-xl animate-aaa-up">
+              <div className="relative w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center shrink-0">
                 <svg
                   viewBox="0 0 100 100"
                   className="w-full h-full -rotate-[212deg]"
@@ -661,7 +678,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                   />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                  <span className="font-mono-num text-base font-extrabold text-[#f4f1ea] leading-none">
+                  <span className="font-mono-num text-sm sm:text-base font-extrabold text-[#f4f1ea] leading-none">
                     {Math.round(vehicleSpeedKmh)}
                   </span>
                   <span className="text-[8px] font-mono-num text-[#94a3b8]">
@@ -675,7 +692,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               </div>
 
               <div className="flex flex-col items-end text-right">
-                <span className="font-display text-base font-bold uppercase text-[#f4f1ea] leading-none whitespace-nowrap">
+                <span className="font-display text-sm sm:text-base font-bold uppercase text-[#f4f1ea] leading-none whitespace-nowrap">
                   {vehicleSpec.name}
                 </span>
                 <span className="text-[10px] font-mono-num text-[#94a3b8] mt-1 whitespace-nowrap">
@@ -683,7 +700,20 @@ export const GameHud: React.FC<GameHudProps> = ({
                     ? `Alt ${Math.round(aircraftAltitude)} m`
                     : `Turbo Lv.${playerState.vehicleUpgradeLevel}`}
                 </span>
-                <div className="flex items-center gap-2 mt-1.5 text-[11px] font-mono-num">
+                <div className="flex items-center gap-1.5 sm:gap-2 mt-1.5 text-[10px] sm:text-[11px] font-mono-num">
+                  {onHonk && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={onHonk}
+                        title="Bunyikan Klakson untuk reaksi Ojol/Angkot [K]"
+                        className="text-[#facc15] hover:text-[#fef08a] cursor-pointer transition-colors"
+                      >
+                        [K]<span className="hidden sm:inline"> Klakson</span>
+                      </button>
+                      <span className="text-white/20">·</span>
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={onToggleFokus}
@@ -693,7 +723,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                         : 'text-[#cbd5e1] hover:text-white'
                     }`}
                   >
-                    [Q] Nitro
+                    [Q]<span className="hidden sm:inline"> Nitro</span>
                   </button>
                   <span className="text-white/20">·</span>
                   <button
@@ -701,7 +731,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                     onClick={onOpenCustomsGarage}
                     className="text-[#c084fc] hover:text-[#e9d5ff] cursor-pointer transition-colors"
                   >
-                    [B] Bengkel
+                    [B]<span className="hidden sm:inline"> Bengkel</span>
                   </button>
                 </div>
               </div>
@@ -709,53 +739,73 @@ export const GameHud: React.FC<GameHudProps> = ({
           )}
 
           {/* Compact Protagonist & Tactical Ability Strip */}
-          <div className="flex items-center gap-2 aaa-glass-subtle px-2.5 py-1.5 rounded-lg">
+          <div className="flex items-center gap-1 sm:gap-2 aaa-glass-subtle px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-lg max-w-full">
             <button
               type="button"
               onClick={onToggleFokus}
               title={`Aktifkan ${activeProtagonistProf.specialAbilityName} [Q]`}
-              className={`px-2 py-0.5 rounded text-[11px] font-mono-num font-semibold cursor-pointer transition-colors whitespace-nowrap ${
+              className={`px-1.5 sm:px-2 py-0.5 rounded text-[11px] font-mono-num font-semibold cursor-pointer transition-colors whitespace-nowrap ${
                 playerState.fokusActive
                   ? 'bg-[#facc15] text-[#090c12]'
                   : 'text-[#fef08a] hover:bg-white/10'
               }`}
             >
-              [Q] Fokus
+              [Q]<span className="hidden sm:inline"> Fokus</span>
             </button>
 
             <button
               type="button"
               onClick={onToggleDrone}
               title="Aktifkan/Matikan Drone Rajawali [Z]"
-              className={`px-2 py-0.5 rounded text-[11px] font-mono-num font-semibold cursor-pointer transition-colors whitespace-nowrap ${
+              className={`px-1.5 sm:px-2 py-0.5 rounded text-[11px] font-mono-num font-semibold cursor-pointer transition-colors whitespace-nowrap ${
                 playerState.droneActive
                   ? 'bg-[#38bdf8]/20 text-[#38bdf8]'
                   : 'text-[#94a3b8] hover:bg-white/10'
               }`}
             >
-              [Z] Drone
+              [Z]<span className="hidden sm:inline"> Drone</span>
             </button>
 
-            <div className="h-3.5 w-[1px] bg-white/15" />
+            <button
+              type="button"
+              onClick={onOpenWarung}
+              title="Masuk Warung Kopi & Jajanan Nusantara [J]"
+              className={`px-1.5 sm:px-2 py-0.5 rounded text-[11px] font-mono-num font-semibold cursor-pointer transition-colors whitespace-nowrap ${
+                playerState.currentInterior === 'warung' ||
+                playerState.staminaBuffTimer > 0
+                  ? 'bg-[#10b981]/25 text-[#34d399]'
+                  : 'text-[#34d399] hover:bg-white/10'
+              }`}
+            >
+              [J]<span className="hidden sm:inline"> Warung</span>
+              {playerState.staminaBuffTimer > 0 && (
+                <span className="ml-1 text-[#fde047]">
+                  +{Math.ceil(playerState.staminaBuffTimer)}d
+                </span>
+              )}
+            </button>
+
+            <div className="h-3.5 w-[1px] bg-white/15 shrink-0" />
 
             <button
               type="button"
               onClick={onOpenCharacterWheel}
               title="Buka Roda 3 Protagonis [C]"
-              className="flex items-center gap-1.5 px-2 py-0.5 rounded hover:bg-white/10 cursor-pointer transition-colors whitespace-nowrap"
+              className="flex items-center gap-1.5 px-1.5 sm:px-2 py-0.5 rounded hover:bg-white/10 cursor-pointer transition-colors whitespace-nowrap"
             >
               <span
                 className="w-2 h-2 rounded-full shrink-0"
                 style={{ backgroundColor: activeProtagonistProf.colorHex }}
               />
-              <span className="font-display text-sm font-bold uppercase tracking-wide text-[#f4f1ea]">
+              <span className="font-display text-xs sm:text-sm font-bold uppercase tracking-wide text-[#f4f1ea]">
                 {activeProtagonistProf.name.split(' ')[0]}
               </span>
-              <span className="font-mono-num text-[10px] text-[#94a3b8]">
+              <span className="hidden sm:inline font-mono-num text-[10px] text-[#94a3b8]">
                 [C]
               </span>
             </button>
           </div>
+        </div>
         </div>
       </div>
     </div>

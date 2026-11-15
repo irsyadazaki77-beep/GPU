@@ -16,6 +16,7 @@ import {
   formatRupiah,
   getDominantFactionTitle,
 } from '../game/rules';
+import { gameStore, useGameStore } from '../state/gameStore';
 
 interface StatusModalProps {
   mode: 'paused' | 'victory' | 'defeat';
@@ -50,6 +51,7 @@ const CONTROL_GROUPS: {
       { keycap: 'X / Klik Kanan', action: 'Aktifkan bidikan bahu TPS presisi' },
       { keycap: 'Q', action: 'Aktifkan kemampuan khusus / Nitro kendaraan' },
       { keycap: 'F', action: 'Masuk atau keluar dari kendaraan terdekat' },
+      { keycap: 'K', action: 'Bunyikan klakson (reaksi ojol & angkot)' },
       { keycap: 'G', action: 'Masuk atau keluar interior gedung' },
       { keycap: 'E', action: 'Bicara dengan pemberi misi terdekat' },
     ],
@@ -87,6 +89,7 @@ export const StatusModal: React.FC<StatusModalProps> = ({
   onOpenCustomsGarage,
 }) => {
   const [activeTab, setActiveTab] = useState<PauseTab>('peta');
+  const audioVolumes = useGameStore((s) => s.audioVolumes);
   const dominant = getDominantFactionTitle(snapshot.reputation);
   const passiveIncome = calculatePassivePropertyIncome(snapshot.ownedProperties);
 
@@ -505,6 +508,49 @@ export const StatusModal: React.FC<StatusModalProps> = ({
                   >
                     {muted ? 'Nonaktif (Mute)' : 'Aktif'}
                   </button>
+                </div>
+
+                {/* 4-Channel Audio Mixer (Master, SFX, Radio, Ambience) */}
+                <div className="flex flex-col gap-2.5 pt-1 border-t border-white/10">
+                  {(
+                    [
+                      { key: 'master', label: 'Volume Master' },
+                      { key: 'sfx', label: 'Efek & Mesin (SFX)' },
+                      { key: 'radio', label: 'Radio FM Jakarta' },
+                      { key: 'ambience', label: 'Suasana Kota (Ambience)' },
+                    ] as const
+                  ).map((ch) => {
+                    const pct = Math.round(audioVolumes[ch.key] * 100);
+                    return (
+                      <div key={ch.key} className="flex flex-col gap-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <label
+                            htmlFor={`audio-slider-${ch.key}`}
+                            className="text-[#cbd5e1]"
+                          >
+                            {ch.label}
+                          </label>
+                          <span className="font-mono-num text-[#f59e0b]">
+                            {pct}%
+                          </span>
+                        </div>
+                        <input
+                          id={`audio-slider-${ch.key}`}
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={audioVolumes[ch.key]}
+                          onChange={(e) =>
+                            gameStore.setAudioVolumes({
+                              [ch.key]: Number(e.target.value),
+                            })
+                          }
+                          className="w-full accent-[#f59e0b] cursor-pointer"
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <div>

@@ -16,6 +16,13 @@ import {
   upgradeVehicleGarage,
   upgradeDroneTech,
   stepFokusAbility,
+  buyStockShares,
+  sellStockShares,
+  stepStockMarketTick,
+  triggerStockMarketImpact,
+  calculateHeistBreakdown,
+  VEHICLE_SPECS,
+  STREET_RACES,
   STORY_MISSIONS,
   CITY_BUILDINGS,
   TRAFFIC_ROUTES,
@@ -29,7 +36,18 @@ import {
   WEATHER_ENVIRONMENT_TARGETS,
   createInitialWeatherTransitionState,
   stepWeatherTransition,
+  ENTERABLE_INTERIORS,
+  WARUNG_SNACKS,
+  evaluateWarungMiniGame,
+  consumeWarungSnack,
+  stepWarungStaminaBuff,
+  getPlayerStaminaSpeedMultiplier,
 } from './rules';
+import { SAVE_VERSION, migrateSavedGame } from './save';
+import {
+  buildFallbackNpcDialogue,
+  sanitizeDialogueInput,
+} from '../../server/npcDialogue';
 
 test('createInitialPlayerState configures origin bonuses properly including Fase 5 Drone Rajawali-X & Gatotkaca', () => {
   const jalanan = createInitialPlayerState('anak_jalanan');
@@ -93,7 +111,7 @@ test('resolveDistrictAtPosition identifies all 13 Jakarta districts including PI
 test('applyStoryChoice and completeMissionReward update reputation, rupiah, and completed missions across 15 chapters', () => {
   assert.equal(STORY_MISSIONS.length, 15);
   const initial = createInitialPlayerState('mantan_kurir');
-  const mission13 = STORY_MISSIONS[12]; // Babak 13 Operasi Pulau Reklamasi PIK 2 (Fase 5)
+  const mission13 = STORY_MISSIONS[12];
   const choice = mission13.choices[0];
 
   const afterChoice = applyStoryChoice(initial, choice);
@@ -107,18 +125,16 @@ test('applyStoryChoice and completeMissionReward update reputation, rupiah, and 
 });
 
 test('purchaseProperty, calculatePassivePropertyIncome, recruitCrewMember, upgradeVehicleGarage, upgradeDroneTech, and stepFokusAbility work for Jakarta empire', () => {
-  const initial = createInitialPlayerState('mantan_kurir'); // Rp 550.000
-  const buy1 = purchaseProperty(initial, 'prop_warung_blokm'); // Rp 150.000
+  const initial = createInitialPlayerState('mantan_kurir');
+  const buy1 = purchaseProperty(initial, 'prop_warung_blokm');
   assert.equal(buy1.purchased, true);
   assert.equal(buy1.nextState.ownedProperties.includes('prop_warung_blokm'), true);
   assert.equal(calculatePassivePropertyIncome(buy1.nextState.ownedProperties), 12000);
 
-  // Recruit a Jawara crew member (costs Rp 200.000)
   const crewRes = recruitCrewMember(buy1.nextState);
   assert.equal(crewRes.recruited, true);
   assert.equal(crewRes.nextState.crewCount, 1);
 
-  // Upgrade vehicle garage & Drone Rajawali-X with extra funds
   const richState = { ...crewRes.nextState, rupiah: 900000, fokusActive: true };
   const upgRes = upgradeVehicleGarage(richState);
   assert.equal(upgRes.upgraded, true);
@@ -128,13 +144,11 @@ test('purchaseProperty, calculatePassivePropertyIncome, recruitCrewMember, upgra
   assert.equal(droneRes.upgraded, true);
   assert.equal(droneRes.nextState.droneLevel, 2);
 
-  // Step Fokus Badai energy drain and recharge
   const drained = stepFokusAbility(droneRes.nextState, 1.0);
   assert.equal(drained.fokusEnergy < 100, true);
   const recharged = stepFokusAbility({ ...drained, fokusActive: false }, 0.5);
   assert.equal(recharged.fokusEnergy > drained.fokusEnergy, true);
 
-  // Duplicate property purchase rejected
   const buyDup = purchaseProperty(buy1.nextState, 'prop_warung_blokm');
   assert.equal(buyDup.purchased, false);
 });
@@ -179,7 +193,6 @@ test('generateRoadsideSpawnLayout spawns traffic signs, toll signs, and TransJak
   assert.equal(layout.tollSigns.length >= 6, true);
   assert.equal(layout.transJakartaHaltes.length >= 5, true);
 
-  // Verify coverage across main corridors
   assert.equal(
     layout.trafficSigns.some((s) => s.corridor === 'sudirman_ns'),
     true
@@ -193,7 +206,6 @@ test('generateRoadsideSpawnLayout spawns traffic signs, toll signs, and TransJak
     true
   );
 
-  // Verify every spawned item sits flush on sidewalk/ground, clear of roadways, Monas plaza, and buildings
   const allItems = [
     ...layout.trafficSigns.map((i) => ({ id: i.id, x: i.x, y: i.y, z: i.z })),
     ...layout.tollSigns.map((i) => ({ id: i.id, x: i.x, y: i.y, z: i.z })),
@@ -226,7 +238,6 @@ test('generateInitialTrafficSpawns creates bustling Jakarta lane traffic clear o
     true
   );
 
-  // Verify every route segment stays outside Monas plaza and CITY_BUILDINGS
   for (const [routeId, wps] of Object.entries(TRAFFIC_ROUTES)) {
     for (let i = 0; i < wps.length; i++) {
       const a = wps[i];
@@ -253,9 +264,8 @@ test('generateInitialTrafficSpawns creates bustling Jakarta lane traffic clear o
   }
 });
 
-test('stepTrafficVehicleAI follows waypoints, stops at Halte bus stops, and brakes for vehicles ahead', () => {
+test('stepTrafficVehicleAI handles Halte bus stops, Angkot ngetem nudging, and Ojol lane-splitting/horn reaction', () => {
   const busRoute = TRAFFIC_ROUTES.busway_corridor_north;
-  // Approach Halte stop waypoint index 1 at (-1.85, -67)
   let bus: TrafficAISteppable = {
     x: -1.85,
     z: -64.5,
@@ -265,15 +275,15 @@ test('stepTrafficVehicleAI follows waypoints, stops at Halte bus stops, and brak
     stopTimer: 0,
     preferredSpeed: 9.2,
     layer: 'ground',
+    vehicleType: 'transjakarta',
   };
 
   for (let i = 0; i < 6; i++) {
     bus = stepTrafficVehicleAI(bus, busRoute, 999, 0.1);
   }
-  assert.equal(bus.waypointIndex, 2, 'Bus should advance past Halte waypoint');
-  assert.equal(bus.stopTimer > 0, true, 'Bus should dwell at Halte pauseSec waypoint');
+  assert.equal(bus.waypointIndex, 2);
+  assert.equal(bus.stopTimer > 0, true);
 
-  // Verify car-following braking when obstacle is directly ahead (< 5.4m)
   const blocked = stepTrafficVehicleAI(
     {
       x: -34.4,
@@ -289,11 +299,56 @@ test('stepTrafficVehicleAI follows waypoints, stops at Halte bus stops, and brak
     3.5,
     0.2
   );
-  assert.equal(blocked.speed < 10, true, 'Vehicle must decelerate when another vehicle blocks lane ahead');
+  assert.equal(blocked.speed < 10, true);
+
+  // Angkot ngetem resumes rolling immediately when honked
+  const angkotNgetem: TrafficAISteppable = {
+    x: 34,
+    z: 12,
+    heading: 0,
+    speed: 0,
+    waypointIndex: 1,
+    stopTimer: 2.0,
+    ngetemTimer: 2.0,
+    preferredSpeed: 9.0,
+    layer: 'ground',
+    vehicleType: 'angkot',
+  };
+  const nudgedAngkot = stepTrafficVehicleAI(
+    angkotNgetem,
+    TRAFFIC_ROUTES.ring_clockwise,
+    50,
+    0.2,
+    { hornTriggered: true }
+  );
+  assert.equal(nudgedAngkot.ngetemTimer, 0);
+  assert.equal(nudgedAngkot.stopTimer, 0);
+  assert.equal(nudgedAngkot.speed > 0, true);
+
+  // Ojol weaves smoothly when traffic ahead slows and accelerates to yield on Klakson
+  const ojolWeave = stepTrafficVehicleAI(
+    {
+      x: -34,
+      z: -10,
+      heading: 0,
+      speed: 9,
+      waypointIndex: 1,
+      stopTimer: 0,
+      preferredSpeed: 12,
+      layer: 'ground',
+      vehicleType: 'ojek',
+      weaveOffset: 0,
+    },
+    TRAFFIC_ROUTES.ring_clockwise,
+    8.0,
+    0.2,
+    { hornTriggered: true, playerWantedLevel: 3 }
+  );
+  assert.equal((ojolWeave.weaveOffset ?? 0) > 0, true);
+  assert.equal((ojolWeave.hornReactionTimer ?? 0) > 1.0, true);
 });
 
 test('resolveJakartaAmbientProfile cycles through authentic Jakarta soundscapes by district and time of day', () => {
-  // Dusk ('senja') at Monas starts with prayer call echo, then distant traffic, then street food vendors
   const monasStep0 = resolveJakartaAmbientProfile('monas', 'senja', 0);
   const monasStep1 = resolveJakartaAmbientProfile('monas', 'senja', 1);
   const monasStep2 = resolveJakartaAmbientProfile('monas', 'senja', 2);
@@ -301,17 +356,14 @@ test('resolveJakartaAmbientProfile cycles through authentic Jakarta soundscapes 
   assert.equal(monasStep1.activeCue, 'distant_traffic');
   assert.equal(monasStep2.activeCue, 'street_vendor_tektek');
 
-  // Night ('malam') at Blok M culinary market features street food vendors
   const blokMNight = resolveJakartaAmbientProfile('blok_m', 'malam', 0);
   assert.equal(blokMNight.primaryBed, 'market_hum');
   assert.equal(blokMNight.activeCue, 'street_vendor_tektek');
 
-  // Coastal Tanjung Priok features harbor foghorn & coastal wind bed
   const priokDay = resolveJakartaAmbientProfile('tanjung_priok', 'siang', 0);
   assert.equal(priokDay.primaryBed, 'coastal_wind');
   assert.equal(priokDay.activeCue, 'harbor_foghorn_gulls');
 
-  // Monsoon rain ('hujan') activates monsoon downpour bed and thunder cue
   const rainSudirman = resolveJakartaAmbientProfile('sudirman', 'hujan', 0);
   assert.equal(rainSudirman.primaryBed, 'monsoon_downpour');
   assert.equal(rainSudirman.activeCue, 'monsoon_rain_thunder');
@@ -321,7 +373,6 @@ test('stepWeatherTransition smoothly interpolates skybox, lighting, fog, and wet
   const start = createInitialWeatherTransitionState('senja');
   const targetMalam = WEATHER_ENVIRONMENT_TARGETS.malam;
 
-  // After a single 0.2s frame, lighting & skybox should be strictly between senja and malam
   const mid = stepWeatherTransition(start, 'malam', 0.2, 1.65);
   assert.equal(mid.targetMode, 'malam');
   assert.equal(mid.sunIntensity < start.sunIntensity, true);
@@ -330,7 +381,6 @@ test('stepWeatherTransition smoothly interpolates skybox, lighting, fog, and wet
   assert.equal(mid.nightFactor < targetMalam.nightFactor, true);
   assert.equal(mid.skyHorizonRgb.r < start.skyHorizonRgb.r, true);
 
-  // Transitioning toward 'hujan' gradually increases wetnessFactor and fogDensity
   let wetState = mid;
   for (let i = 0; i < 6; i++) {
     wetState = stepWeatherTransition(wetState, 'hujan', 0.2, 1.65);
@@ -340,7 +390,6 @@ test('stepWeatherTransition smoothly interpolates skybox, lighting, fog, and wet
   assert.equal(wetState.fogDensity > start.fogDensity, true);
   assert.equal(wetState.fogDensity < WEATHER_ENVIRONMENT_TARGETS.hujan.fogDensity, true);
 
-  // After sufficient elapsed time, state converges tightly onto target values
   let converged = wetState;
   for (let i = 0; i < 40; i++) {
     converged = stepWeatherTransition(converged, 'siang', 0.25, 1.65);
@@ -349,6 +398,153 @@ test('stepWeatherTransition smoothly interpolates skybox, lighting, fog, and wet
   assert.equal(Math.abs(converged.wetnessFactor) < 0.005, true);
   assert.equal(Math.abs(converged.nightFactor) < 0.005, true);
 });
+
+test('BAJSA stock market trading, sabotage impact, and market ticks update portfolio accurately', () => {
+  const rich = { ...createInitialPlayerState('anak_jalanan'), rupiah: 500000 };
+  const bought = buyStockShares(rich, 'BNBL', 10);
+  assert.equal(bought.bought, true);
+  assert.equal(bought.nextState.stockPortfolio.BNBL.ownedShares, 10);
+  assert.equal(bought.nextState.rupiah < 500000, true);
+
+  const impacted = triggerStockMarketImpact(bought.nextState, 'BNBL', 'SCBD', 0.25, 0.3);
+  assert.equal(
+    impacted.stockPortfolio.BNBL.currentPrice <
+      bought.nextState.stockPortfolio.BNBL.currentPrice,
+    true
+  );
+  assert.equal(
+    impacted.stockPortfolio.SCBD.currentPrice >
+      bought.nextState.stockPortfolio.SCBD.currentPrice,
+    true
+  );
+
+  const ticked = stepStockMarketTick({ ...impacted, wantedLevel: 4 });
+  assert.equal(ticked.stockPortfolio.GATO.history.length, 8);
+
+  const sold = sellStockShares(ticked, 'BNBL', 10);
+  assert.equal(sold.sold, true);
+  assert.equal(sold.nextState.stockPortfolio.BNBL.ownedShares, 0);
+  assert.equal(sold.proceedsRp > 0, true);
+
+  const oversell = sellStockShares(sold.nextState, 'BNBL', 1);
+  assert.equal(oversell.sold, false);
+});
+
+test('calculateHeistBreakdown and STREET_RACES/VEHICLE_SPECS produce valid payout and fleet data', () => {
+  const breakdown = calculateHeistBreakdown(
+    'heist_bank_sentral',
+    'crew_dimas_siber',
+    'crew_sari_drift',
+    'crew_bang_tigers'
+  );
+  assert.equal(breakdown.grossTakeRp, 8500000);
+  assert.equal(breakdown.totalCrewCutPercent, 12 + 10 + 14);
+  assert.equal(breakdown.crewCutRp + breakdown.netPlayerTakeRp, breakdown.grossTakeRp);
+  assert.equal(STREET_RACES.length >= 2, true);
+  assert.equal(VEHICLE_SPECS.transjakarta.maxHp >= 400, true);
+});
+
+test('migrateSavedGame upgrades v1 snapshots to v2, clamps invalid coordinates, and preserves audio channels', () => {
+  const basePlayer = createInitialPlayerState('teknisi_glodok');
+  const legacyV1 = {
+    version: 1,
+    origin: 'teknisi_glodok',
+    selectedStage: 4,
+    weatherMode: 'malam',
+    playerState: { ...basePlayer, rupiah: 1234567, hp: 85 },
+    playerPos: { x: 250, z: -200 },
+    savedAt: 1700000000000,
+  };
+
+  const migrated = migrateSavedGame(legacyV1);
+  assert.ok(migrated);
+  assert.equal(migrated.version, SAVE_VERSION);
+  assert.equal(migrated.origin, 'teknisi_glodok');
+  assert.equal(migrated.playerState.rupiah, 1234567);
+  assert.equal(migrated.playerPos.x, 88);
+  assert.equal(migrated.playerPos.z, -88);
+  assert.equal(migrated.audioSettings.master, 1);
+  assert.deepEqual(migrated.completedDynamicQuests, []);
+
+  assert.equal(migrateSavedGame(null), null);
+  assert.equal(migrateSavedGame({ version: 99 }), null);
+});
+
+test('sanitizeDialogueInput and buildFallbackNpcDialogue provide deterministic Jakarta dialogue and side-quests offline', () => {
+  const cleaned = sanitizeDialogueInput('  <script>\nInfo patroli\tpolisi?`{}  ');
+  assert.equal(cleaned.includes('<'), false);
+  assert.equal(cleaned.includes('\n'), false);
+
+  const res = buildFallbackNpcDialogue({
+    npcName: 'Bang Jali',
+    npcRole: 'Koordinator Lapangan',
+    locationName: 'Terminal Blok M',
+    missionTitle: 'Kudeta Senyap',
+    playerPrompt: 'Ada info patroli polisi?',
+    origin: 'anak_jalanan',
+    wantedLevel: 2,
+    reputation: { jalanan: 50, sindikat: 20, rakyat: 35 },
+  });
+
+  assert.equal(res.source, 'fallback');
+  assert.equal(res.reply.length > 20, true);
+  assert.ok(res.sideQuest);
+  assert.equal(res.sideQuest.faction, 'jalanan');
+  assert.equal(res.sideQuest.rewardRp >= 60000, true);
+});
+
+test('Warung interior mini-game evaluates serve quality, recovers minor HP, and grants temporary stamina buffs', () => {
+  assert.equal(
+    ENTERABLE_INTERIORS.some((i) => i.id === 'warung'),
+    true
+  );
+  assert.equal(WARUNG_SNACKS.length, 6);
+
+  // Mini-game sweet-spot evaluation
+  const zone: [number, number] = [38, 66];
+  assert.equal(evaluateWarungMiniGame(52, zone), 'sempurna');
+  assert.equal(evaluateWarungMiniGame(41, zone), 'mantap');
+  assert.equal(evaluateWarungMiniGame(15, zone), 'biasa');
+
+  const base = {
+    ...createInitialPlayerState('anak_jalanan'),
+    hp: 60,
+    fokusEnergy: 50,
+    rupiah: 100000,
+    staminaBuffTimer: 0,
+  };
+  assert.equal(getPlayerStaminaSpeedMultiplier(base), 1.0);
+
+  // Consume Es Kopi Susu Gula Aren with 'sempurna' (1.5x) quality
+  const kopiRes = consumeWarungSnack(base, 'es_kopi_susu', 'sempurna');
+  assert.equal(kopiRes.consumed, true);
+  assert.equal(kopiRes.multiplier, 1.5);
+  assert.equal(kopiRes.hpRecovered, Math.round(12 * 1.5));
+  assert.equal(kopiRes.staminaAddedSec, Math.round(45 * 1.5));
+  assert.equal(kopiRes.nextState.hp, 60 + Math.round(12 * 1.5));
+  assert.equal(kopiRes.nextState.staminaBuffTimer, Math.round(45 * 1.5));
+  assert.equal(kopiRes.nextState.lastSnackEaten, 'es_kopi_susu');
+  assert.equal(kopiRes.nextState.rupiah, 100000 - 18000);
+  assert.equal(getPlayerStaminaSpeedMultiplier(kopiRes.nextState), 1.28);
+
+  // Tick down stamina buff and verify passive Fokus regeneration
+  const afterTick = stepWarungStaminaBuff(
+    { ...kopiRes.nextState, fokusEnergy: 60 },
+    5.0
+  );
+  assert.equal(
+    afterTick.staminaBuffTimer,
+    kopiRes.nextState.staminaBuffTimer - 5.0
+  );
+  assert.equal(afterTick.fokusEnergy > 60, true);
+
+  // Insufficient funds guard
+  const broke = { ...afterTick, rupiah: 5000 };
+  const failRes = consumeWarungSnack(broke, 'sate_padang', 'mantap');
+  assert.equal(failRes.consumed, false);
+  assert.equal(failRes.nextState.rupiah, 5000);
+});
+
 
 
 

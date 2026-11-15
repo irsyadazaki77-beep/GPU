@@ -1,0 +1,111 @@
+import type {
+  OutfitSpec,
+  ProtagonistId,
+  ProtagonistProfileSpec,
+  RadioStationSpec,
+} from './types';
+
+export const NABILO_OUTFITS: OutfitSpec[] = [
+  {
+    id: 'jaket_jawara',
+    name: 'Jaket Jawara Tanah Abang',
+    subtitle: 'Setelan Klasik Merah-Hitam Nabilo',
+    jacketHex: 0xdc2626,
+    pantsHex: 0x1e293b,
+    capHex: 0x111827,
+  },
+  {
+    id: 'jas_scbd',
+    name: 'Jas Eksekutif Komisaris SCBD',
+    subtitle: 'Setelan Jas Emas-Safir Konglomerat',
+    jacketHex: 0x1e3a8a,
+    pantsHex: 0x0f172a,
+    capHex: 0xfacc15,
+  },
+  {
+    id: 'rompi_taktis',
+    name: 'Rompi Taktis Pasukan Khusus',
+    subtitle: 'Armor Kevlar Hijau Rimba & Baret',
+    jacketHex: 0x15803d,
+    pantsHex: 0x1c1917,
+    capHex: 0x991b1b,
+  },
+  {
+    id: 'hoodie_siber',
+    name: 'Jaket Neon Siber Kemayoran',
+    subtitle: 'Gaya Peretas Malam Ungu-Sian',
+    jacketHex: 0x7e22ce,
+    pantsHex: 0x090d16,
+    capHex: 0x22d3ee,
+  },
+];
+
+export const RADIO_STATIONS: RadioStationSpec[] = [
+  { id: 'off', name: 'Radio Mati', freq: '-', genre: 'Hening' },
+  {
+    id: 'prambors',
+    name: 'Kemayoran Hits FM',
+    freq: '102.2 FM',
+    genre: 'Beat Pop & Funk Jakarta',
+  },
+  {
+    id: 'koplo',
+    name: 'Pantura Koplo Bass',
+    freq: '98.8 FM',
+    genre: 'Dangdut Koplo Angkot',
+  },
+  {
+    id: 'synth_scbd',
+    name: 'SCBD Nightwave',
+    freq: '106.4 FM',
+    genre: 'Cyberpunk Sudirman Synth',
+  },
+];
+
+export const PROTAGONIST_PROFILES: Record<ProtagonistId, ProtagonistProfileSpec> = {
+  nabilo: {
+    id: 'nabilo',
+    name: 'Nabilo',
+    codename: 'Sang Jawara Tanah Abang',
+    roleTitle: 'Komandan Serbu & Taktik Lapangan',
+    specialAbilityName: 'Fokus Badai [Q]',
+    specialAbilityDesc: 'Perlambatan Waktu Tempur 0.38x & +75% Daya Hancur Senjata',
+    colorHex: '#ef4444',
+    threeColorHex: 0xef4444,
+    defaultOutfitId: 'jaket_jawara',
+    homeDistrictName: 'Medan Merdeka & Monas',
+    spawnX: 0,
+    spawnZ: 26,
+    idleActivity: 'Mengawasi arus kurir di Plaza Selatan Monas',
+  },
+  raka: {
+    id: 'raka',
+    name: 'Raka Wijaya',
+    codename: 'Raja Aspal Kemayoran',
+    roleTitle: 'Spesialis Pelarian & Balap Jalan Tol',
+    specialAbilityName: 'Overdrive Nitro & Drift [Q]',
+    specialAbilityDesc: '+45% Akselerasi Turbo, Kemudi Drift Tajam & Kebal Benturan',
+    colorHex: '#38bdf8',
+    threeColorHex: 0x38bdf8,
+    defaultOutfitId: 'rompi_taktis',
+    homeDistrictName: 'Tol Layang Semanggi & Kemayoran',
+    spawnX: 32,
+    spawnZ: -26,
+    idleActivity: 'Menyetel mesin Hypercar Garuda GT-X di jalur layang',
+  },
+  kirana: {
+    id: 'kirana',
+    name: 'Kirana Larasati',
+    codename: 'Arsitek Siber SCBD',
+    roleTitle: 'Peretas Brankas, Drone & Bursa Saham',
+    specialAbilityName: 'Gelombang EMP & Overclock Drone [Q]',
+    specialAbilityDesc: 'Lumpuhkan Patroli Polisi Sekitar & Tembakan Drone 2x Lipat',
+    colorHex: '#f59e0b',
+    threeColorHex: 0xf59e0b,
+    defaultOutfitId: 'hoodie_siber',
+    homeDistrictName: 'Menara Bursa SCBD',
+    spawnX: -48,
+    spawnZ: -44,
+    idleActivity: 'Memantau algoritma saham BAJSA & frekuensi radio aparat',
+  },
+};

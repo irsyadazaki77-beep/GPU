@@ -1,13 +1,22 @@
 import {
   AmbientCueId,
   AmbientSoundscapeProfile,
+  AudioChannelVolumes,
   WeatherMode,
   resolveJakartaAmbientProfile,
 } from './rules';
 
+export type AudioChannel = 'sfx' | 'radio' | 'ambience';
+
 class SoundEngine {
   private ctx: AudioContext | null = null;
   public muted: boolean = false;
+  private channelVolumes: AudioChannelVolumes = {
+    master: 1,
+    sfx: 1,
+    radio: 0.85,
+    ambience: 0.9,
+  };
 
   private engineOsc: OscillatorNode | null = null;
   private engineSubOsc: OscillatorNode | null = null;
@@ -15,7 +24,6 @@ class SoundEngine {
   private engineGain: GainNode | null = null;
   private engineRunning: boolean = false;
 
-  // Dynamic Jakarta Ambient Soundscape Layer
   private ambientNoiseBuffer: AudioBuffer | null = null;
   private ambientBedSource: AudioBufferSourceNode | null = null;
   private ambientBedFilter: BiquadFilterNode | null = null;
@@ -25,6 +33,39 @@ class SoundEngine {
   private ambientRunning: boolean = false;
   private currentAmbientProfile: AmbientSoundscapeProfile | null = null;
   private userUnlocked: boolean = false;
+
+  public getChannelVolumes(): AudioChannelVolumes {
+    return { ...this.channelVolumes };
+  }
+
+  public setChannelVolumes(next: Partial<AudioChannelVolumes>): AudioChannelVolumes {
+    const clamp = (v: number | undefined, fallback: number) =>
+      typeof v === 'number' && Number.isFinite(v)
+        ? Math.max(0, Math.min(1, v))
+        : fallback;
+
+    this.channelVolumes = {
+      master: clamp(next.master, this.channelVolumes.master),
+      sfx: clamp(next.sfx, this.channelVolumes.sfx),
+      radio: clamp(next.radio, this.channelVolumes.radio),
+      ambience: clamp(next.ambience, this.channelVolumes.ambience),
+    };
+
+    if (this.ctx && this.ambientBedGain && this.currentAmbientProfile && this.ambientRunning) {
+      const target = Math.max(
+        0.0001,
+        this.currentAmbientProfile.bedGain * this.getChannelGain('ambience')
+      );
+      this.ambientBedGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.12);
+    }
+
+    return this.getChannelVolumes();
+  }
+
+  private getChannelGain(channel: AudioChannel): number {
+    if (this.muted) return 0;
+    return this.channelVolumes.master * this.channelVolumes[channel];
+  }
 
   public unlockAudio(): void {
     this.userUnlocked = true;
@@ -62,7 +103,6 @@ class SoundEngine {
     const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const output = buffer.getChannelData(0);
 
-    // Paul Kellet's pink noise filter approximation for warm urban/rain/coastal ambience
     let b0 = 0;
     let b1 = 0;
     let b2 = 0;
@@ -74,10 +114,10 @@ class SoundEngine {
       const white = Math.random() * 2 - 1;
       b0 = 0.99886 * b0 + white * 0.0555179;
       b1 = 0.99332 * b1 + white * 0.0750759;
-      b2 = 0.96900 * b2 + white * 0.1538520;
+      b2 = 0.96900 * b2 + white * 0.153852;
       b3 = 0.86650 * b3 + white * 0.3104856;
       b4 = 0.55000 * b4 + white * 0.5329522;
-      b5 = -0.7616 * b5 - white * 0.0168980;
+      b5 = -0.7616 * b5 - white * 0.016898;
       output[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.08;
       b6 = white * 0.115926;
     }
@@ -110,6 +150,12 @@ class SoundEngine {
 
     const ctx = this.ensureContext();
     if (!ctx) return profile;
+
+    const ambMult = this.getChannelGain('ambience');
+    if (ambMult <= 0.001) {
+      this.stopAmbientSoundscape(false);
+      return profile;
+    }
 
     try {
       const now = ctx.currentTime;
@@ -179,7 +225,11 @@ class SoundEngine {
         now,
         0.45
       );
-      this.ambientBedGain.gain.setTargetAtTime(profile.bedGain, now, 0.55);
+      this.ambientBedGain.gain.setTargetAtTime(
+        Math.max(0.0001, profile.bedGain * ambMult),
+        now,
+        0.55
+      );
 
       if (triggerCue) {
         this.triggerAmbientCue(profile.activeCue);
@@ -239,6 +289,8 @@ class SoundEngine {
 
   public triggerAmbientCue(cue: AmbientCueId) {
     if (this.muted) return;
+    const ambMult = this.getChannelGain('ambience');
+    if (ambMult <= 0.001) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
 
@@ -246,14 +298,12 @@ class SoundEngine {
       const now = ctx.currentTime;
 
       if (cue === 'distant_traffic') {
-        // Distant Jakarta Bajaj/Metromini two-tone horn & passing Doppler swell
         const isBusHorn = Math.random() > 0.45;
         const baseA = isBusHorn ? 196 : 340;
         const baseB = isBusHorn ? 247 : 425;
-        this.scheduleMuffledHorn(ctx, now + 0.05, baseA, baseB, 0.14, 0.018);
-        this.scheduleMuffledHorn(ctx, now + 0.25, baseA, baseB, 0.22, 0.02);
+        this.scheduleMuffledHorn(ctx, now + 0.05, baseA, baseB, 0.14, 0.018 * ambMult);
+        this.scheduleMuffledHorn(ctx, now + 0.25, baseA, baseB, 0.22, 0.02 * ambMult);
       } else if (cue === 'street_vendor_tektek') {
-        // Authentic street food vendor bamboo kentongan / wok "tek-tek-tek" rhythm
         const pattern = [
           { offset: 0.04, freq: 860, vol: 0.024 },
           { offset: 0.18, freq: 880, vol: 0.022 },
@@ -270,26 +320,22 @@ class SoundEngine {
             now + tap.offset + 0.065
           );
           gain.gain.setValueAtTime(0.0001, now + tap.offset);
-          gain.gain.linearRampToValueAtTime(tap.vol, now + tap.offset + 0.008);
-          gain.gain.exponentialRampToValueAtTime(
-            0.0008,
-            now + tap.offset + 0.07
-          );
+          gain.gain.linearRampToValueAtTime(tap.vol * ambMult, now + tap.offset + 0.008);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + tap.offset + 0.07);
           osc.connect(gain);
           gain.connect(ctx.destination);
           osc.start(now + tap.offset);
           osc.stop(now + tap.offset + 0.075);
         }
       } else if (cue === 'prayer_call_echo') {
-        // Distant mosque bedug drum pulse + warm reverberant Hijaz/Pelog melodic phrase
-        this.playTone(74, 0.34, 'sine', 0.032, 0.62);
-        this.playTone(76, 0.28, 'sine', 0.024, 0.65);
+        this.playTone(74, 0.34, 'sine', 0.032, 0.62, 'ambience');
+        this.playTone(76, 0.28, 'sine', 0.024, 0.65, 'ambience');
 
         const notes = [
-          { offset: 0.22, freq: 293.66, dur: 0.55 }, // D4
-          { offset: 0.72, freq: 311.13, dur: 0.45 }, // Eb4 (Hijaz inflection)
-          { offset: 1.12, freq: 369.99, dur: 0.75 }, // F#4
-          { offset: 1.82, freq: 392.0, dur: 0.9 },   // G4
+          { offset: 0.22, freq: 293.66, dur: 0.55 },
+          { offset: 0.72, freq: 311.13, dur: 0.45 },
+          { offset: 1.12, freq: 369.99, dur: 0.75 },
+          { offset: 1.82, freq: 392.0, dur: 0.9 },
         ];
         for (const n of notes) {
           const osc = ctx.createOscillator();
@@ -301,11 +347,8 @@ class SoundEngine {
           filter.frequency.setValueAtTime(900, now + n.offset);
 
           gain.gain.setValueAtTime(0.0001, now + n.offset);
-          gain.gain.linearRampToValueAtTime(0.02, now + n.offset + 0.14);
-          gain.gain.exponentialRampToValueAtTime(
-            0.0008,
-            now + n.offset + n.dur
-          );
+          gain.gain.linearRampToValueAtTime(0.02 * ambMult, now + n.offset + 0.14);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + n.offset + n.dur);
 
           osc.connect(filter);
           filter.connect(gain);
@@ -314,19 +357,16 @@ class SoundEngine {
           osc.stop(now + n.offset + n.dur + 0.04);
         }
       } else if (cue === 'harbor_foghorn_gulls') {
-        // Deep Tanjung Priok / Ancol cargo vessel foghorn + distant coastal gull call
-        this.scheduleMuffledHorn(ctx, now + 0.05, 98, 147, 0.85, 0.026);
+        this.scheduleMuffledHorn(ctx, now + 0.05, 98, 147, 0.85, 0.026 * ambMult);
         window.setTimeout(() => {
-          this.playTone(1480, 0.24, 'sine', 0.014, 0.76);
+          this.playTone(1480, 0.24, 'sine', 0.014, 0.76, 'ambience');
         }, 480);
       } else if (cue === 'monsoon_rain_thunder') {
-        // Distant tropical monsoon thunder rumble across Jakarta skyline
-        this.playTone(58, 0.65, 'triangle', 0.036, 0.48);
+        this.playTone(58, 0.65, 'triangle', 0.036, 0.48, 'ambience');
         window.setTimeout(() => {
-          this.playTone(44, 0.75, 'sine', 0.032, 0.55);
+          this.playTone(44, 0.75, 'sine', 0.032, 0.55, 'ambience');
         }, 220);
       } else if (cue === 'mrt_chime_station') {
-        // 3-note Jakarta MRT/LRT transit station platform chime (C5 - E5 - G5)
         const chimeNotes = [523.25, 659.25, 783.99];
         chimeNotes.forEach((freq, idx) => {
           const t0 = now + idx * 0.22;
@@ -335,7 +375,7 @@ class SoundEngine {
           osc.type = 'sine';
           osc.frequency.setValueAtTime(freq, t0);
           gain.gain.setValueAtTime(0.0001, t0);
-          gain.gain.linearRampToValueAtTime(0.02, t0 + 0.02);
+          gain.gain.linearRampToValueAtTime(0.02 * ambMult, t0 + 0.02);
           gain.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.36);
           osc.connect(gain);
           gain.connect(ctx.destination);
@@ -343,7 +383,6 @@ class SoundEngine {
           osc.stop(t0 + 0.38);
         });
       } else if (cue === 'night_cicada_neon') {
-        // Tropical Jakarta night cricket chirps & subtle neon hum
         for (let i = 0; i < 3; i++) {
           const t0 = now + i * 0.14;
           const osc = ctx.createOscillator();
@@ -351,7 +390,7 @@ class SoundEngine {
           osc.type = 'sine';
           osc.frequency.setValueAtTime(2950 + (i % 2) * 180, t0);
           gain.gain.setValueAtTime(0.0001, t0);
-          gain.gain.linearRampToValueAtTime(0.011, t0 + 0.015);
+          gain.gain.linearRampToValueAtTime(0.011 * ambMult, t0 + 0.015);
           gain.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.09);
           osc.connect(gain);
           gain.connect(ctx.destination);
@@ -386,7 +425,7 @@ class SoundEngine {
     filter.frequency.setValueAtTime(620, startTime);
 
     gain.gain.setValueAtTime(0.0001, startTime);
-    gain.gain.linearRampToValueAtTime(volume, startTime + 0.03);
+    gain.gain.linearRampToValueAtTime(Math.max(0.0002, volume), startTime + 0.03);
     gain.gain.exponentialRampToValueAtTime(0.0008, startTime + duration);
 
     oscA.connect(filter);
@@ -407,7 +446,8 @@ class SoundEngine {
     nitroActive: boolean,
     active: boolean
   ) {
-    if (!active || !isDriving || this.muted) {
+    const sfxMult = this.getChannelGain('sfx');
+    if (!active || !isDriving || this.muted || sfxMult <= 0.001) {
       this.stopEngineAudio(this.muted);
       return;
     }
@@ -459,12 +499,12 @@ class SoundEngine {
         : 42 + sr * 76 + (nitroActive ? 26 : 0);
       const cutoff = 180 + sr * 520 + (nitroActive ? 240 : 0);
       const gainTarget =
-        0.02 + Math.min(1, sr) * 0.028 + (nitroActive ? 0.012 : 0);
+        (0.02 + Math.min(1, sr) * 0.028 + (nitroActive ? 0.012 : 0)) * sfxMult;
 
       this.engineOsc.frequency.setTargetAtTime(baseFreq, now, 0.08);
       this.engineSubOsc.frequency.setTargetAtTime(baseFreq * 0.5, now, 0.08);
       this.engineFilter.frequency.setTargetAtTime(cutoff, now, 0.08);
-      this.engineGain.gain.setTargetAtTime(gainTarget, now, 0.09);
+      this.engineGain.gain.setTargetAtTime(Math.max(0.0001, gainTarget), now, 0.09);
     } catch {
       // Ignore Web Audio errors on locked contexts
     }
@@ -516,8 +556,11 @@ class SoundEngine {
     duration: number,
     type: OscillatorType = 'sine',
     volume: number = 0.12,
-    pitchSlide: number = 1.0
+    pitchSlide: number = 1.0,
+    channel: AudioChannel = 'sfx'
   ) {
+    const chMult = this.getChannelGain(channel);
+    if (chMult <= 0.001) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
 
@@ -536,7 +579,8 @@ class SoundEngine {
         );
       }
 
-      gain.gain.setValueAtTime(volume, now);
+      const scaledVol = Math.max(0.0015, volume * chMult);
+      gain.gain.setValueAtTime(scaledVol, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
       osc.connect(gain);
@@ -546,6 +590,15 @@ class SoundEngine {
     } catch {
       // Ignore audio errors on locked contexts
     }
+  }
+
+  public playHorn() {
+    this.playTone(392, 0.14, 'sawtooth', 0.1, 1.0, 'sfx');
+    this.playTone(493.88, 0.14, 'triangle', 0.09, 1.0, 'sfx');
+    window.setTimeout(() => {
+      this.playTone(392, 0.2, 'sawtooth', 0.11, 0.98, 'sfx');
+      this.playTone(493.88, 0.2, 'triangle', 0.09, 0.98, 'sfx');
+    }, 150);
   }
 
   public playShoot(
@@ -559,22 +612,22 @@ class SoundEngine {
       | 'gatotkaca'
   ) {
     if (weapon === 'fist') {
-      this.playTone(130, 0.09, 'triangle', 0.15, 0.5);
+      this.playTone(130, 0.09, 'triangle', 0.15, 0.5, 'sfx');
     } else if (weapon === 'golok') {
-      this.playTone(320, 0.12, 'sawtooth', 0.14, 0.35);
+      this.playTone(320, 0.12, 'sawtooth', 0.14, 0.35, 'sfx');
     } else if (weapon === 'pistol') {
-      this.playTone(240, 0.14, 'sawtooth', 0.18, 0.25);
+      this.playTone(240, 0.14, 'sawtooth', 0.18, 0.25, 'sfx');
     } else if (weapon === 'mercon') {
-      this.playTone(90, 0.38, 'sawtooth', 0.24, 0.22);
-      setTimeout(() => this.playTone(65, 0.32, 'square', 0.2, 0.4), 80);
+      this.playTone(90, 0.38, 'sawtooth', 0.24, 0.22, 'sfx');
+      setTimeout(() => this.playTone(65, 0.32, 'square', 0.2, 0.4, 'sfx'), 80);
     } else if (weapon === 'pasopati') {
-      this.playTone(680, 0.18, 'sine', 0.2, 0.45);
-      setTimeout(() => this.playTone(420, 0.22, 'triangle', 0.16, 1.5), 55);
+      this.playTone(680, 0.18, 'sine', 0.2, 0.45, 'sfx');
+      setTimeout(() => this.playTone(420, 0.22, 'triangle', 0.16, 1.5, 'sfx'), 55);
     } else if (weapon === 'gatotkaca') {
-      this.playTone(840, 0.22, 'sawtooth', 0.22, 0.3);
-      setTimeout(() => this.playTone(110, 0.34, 'sine', 0.22, 0.5), 45);
+      this.playTone(840, 0.22, 'sawtooth', 0.22, 0.3, 'sfx');
+      setTimeout(() => this.playTone(110, 0.34, 'sine', 0.22, 0.5, 'sfx'), 45);
     } else {
-      this.playTone(290, 0.09, 'square', 0.15, 0.3);
+      this.playTone(290, 0.09, 'square', 0.15, 0.3, 'sfx');
     }
   }
 
@@ -582,91 +635,90 @@ class SoundEngine {
     station: 'prambors' | 'koplo' | 'synth_scbd',
     step: number
   ) {
-    if (this.muted) return;
+    if (this.muted || this.getChannelGain('radio') <= 0.001) return;
     if (station === 'prambors') {
       const leadNotes = [261.6, 329.6, 392.0, 523.2, 440.0, 392.0, 329.6, 293.7];
       const bassNotes = [130.8, 130.8, 164.8, 164.8, 174.6, 174.6, 196.0, 146.8];
       const idx = step % leadNotes.length;
-      this.playTone(bassNotes[idx], 0.18, 'triangle', 0.032, 0.98);
-      this.playTone(leadNotes[idx], 0.13, 'sine', 0.028, 1.01);
+      this.playTone(bassNotes[idx], 0.18, 'triangle', 0.032, 0.98, 'radio');
+      this.playTone(leadNotes[idx], 0.13, 'sine', 0.028, 1.01, 'radio');
       if (step % 2 === 1) {
-        this.playTone(880, 0.04, 'triangle', 0.012, 0.7);
+        this.playTone(880, 0.04, 'triangle', 0.012, 0.7, 'radio');
       }
     } else if (station === 'koplo') {
       const bassNotes = [110.0, 146.8, 110.0, 164.8, 130.8, 146.8, 196.0, 146.8];
       const melodyNotes = [220.0, 293.6, 329.6, 293.6, 261.6, 293.6, 392.0, 329.6];
       const idx = step % bassNotes.length;
-      this.playTone(bassNotes[idx], 0.16, 'sine', 0.042, 0.72);
+      this.playTone(bassNotes[idx], 0.16, 'sine', 0.042, 0.72, 'radio');
       if (step % 2 === 0) {
-        this.playTone(95, 0.11, 'triangle', 0.035, 0.45);
+        this.playTone(95, 0.11, 'triangle', 0.035, 0.45, 'radio');
       }
-      this.playTone(melodyNotes[idx], 0.14, 'triangle', 0.025, 0.96);
+      this.playTone(melodyNotes[idx], 0.14, 'triangle', 0.025, 0.96, 'radio');
     } else if (station === 'synth_scbd') {
       const arpNotes = [110.0, 164.8, 220.0, 261.6, 329.6, 261.6, 220.0, 196.0];
       const padNotes = [110.0, 110.0, 130.8, 130.8, 146.8, 146.8, 164.8, 130.8];
       const idx = step % arpNotes.length;
-      this.playTone(padNotes[idx], 0.24, 'sawtooth', 0.022, 1.0);
-      this.playTone(arpNotes[idx], 0.15, 'triangle', 0.026, 1.02);
+      this.playTone(padNotes[idx], 0.24, 'sawtooth', 0.022, 1.0, 'radio');
+      this.playTone(arpNotes[idx], 0.15, 'triangle', 0.026, 1.02, 'radio');
       if (step % 4 === 0) {
-        this.playTone(68, 0.14, 'sine', 0.038, 0.55);
+        this.playTone(68, 0.14, 'sine', 0.038, 0.55, 'radio');
       }
     }
   }
 
   public playHit(heavy: boolean = false) {
     if (heavy) {
-      this.playTone(95, 0.22, 'sawtooth', 0.22, 0.35);
+      this.playTone(95, 0.22, 'sawtooth', 0.22, 0.35, 'sfx');
     } else {
-      this.playTone(180, 0.08, 'triangle', 0.14, 0.6);
+      this.playTone(180, 0.08, 'triangle', 0.14, 0.6, 'sfx');
     }
   }
 
   public playPickup() {
-    this.playTone(520, 0.1, 'sine', 0.14, 1.45);
-    setTimeout(() => this.playTone(780, 0.14, 'sine', 0.14, 1.2), 70);
+    this.playTone(520, 0.1, 'sine', 0.14, 1.45, 'sfx');
+    setTimeout(() => this.playTone(780, 0.14, 'sine', 0.14, 1.2, 'sfx'), 70);
   }
 
   public playVehicleDoor() {
-    this.playTone(160, 0.14, 'triangle', 0.16, 1.35);
+    this.playTone(160, 0.14, 'triangle', 0.16, 1.35, 'sfx');
   }
 
   public playCharacterSwitchBoom(stage: 1 | 2 | 3) {
     if (stage === 1) {
-      this.playTone(110, 0.24, 'sawtooth', 0.18, 0.6);
-      setTimeout(() => this.playTone(220, 0.14, 'sine', 0.12, 1.3), 80);
+      this.playTone(110, 0.24, 'sawtooth', 0.18, 0.6, 'sfx');
+      setTimeout(() => this.playTone(220, 0.14, 'sine', 0.12, 1.3, 'sfx'), 80);
     } else if (stage === 2) {
-      this.playTone(165, 0.22, 'triangle', 0.16, 1.25);
+      this.playTone(165, 0.22, 'triangle', 0.16, 1.25, 'sfx');
     } else {
-      this.playTone(330, 0.18, 'sine', 0.18, 0.5);
-      setTimeout(() => this.playTone(520, 0.22, 'triangle', 0.15, 1.1), 90);
+      this.playTone(330, 0.18, 'sine', 0.18, 0.5, 'sfx');
+      setTimeout(() => this.playTone(520, 0.22, 'triangle', 0.15, 1.1, 'sfx'), 90);
     }
   }
 
   public playPoliceSiren() {
-    this.playTone(620, 0.22, 'sine', 0.055, 1.42);
-    setTimeout(() => this.playTone(880, 0.22, 'sine', 0.055, 0.7), 210);
+    this.playTone(620, 0.22, 'sine', 0.055, 1.42, 'sfx');
+    setTimeout(() => this.playTone(880, 0.22, 'sine', 0.055, 0.7, 'sfx'), 210);
   }
 
   public playNitroBoost() {
-    this.playTone(140, 0.35, 'sawtooth', 0.16, 2.2);
+    this.playTone(140, 0.35, 'sawtooth', 0.16, 2.2, 'sfx');
   }
 
   public playCashRegister() {
-    this.playTone(880, 0.08, 'sine', 0.14, 1.15);
-    setTimeout(() => this.playTone(1174, 0.16, 'sine', 0.15, 1.05), 75);
+    this.playTone(880, 0.08, 'sine', 0.14, 1.15, 'sfx');
+    setTimeout(() => this.playTone(1174, 0.16, 'sine', 0.15, 1.05, 'sfx'), 75);
   }
 
   public playMissionFanfare() {
-    this.playTone(440, 0.15, 'triangle', 0.16, 1.0);
-    setTimeout(() => this.playTone(554, 0.15, 'triangle', 0.16, 1.0), 120);
-    setTimeout(() => this.playTone(659, 0.3, 'triangle', 0.18, 1.05), 240);
+    this.playTone(440, 0.15, 'triangle', 0.16, 1.0, 'sfx');
+    setTimeout(() => this.playTone(554, 0.15, 'triangle', 0.16, 1.0, 'sfx'), 120);
+    setTimeout(() => this.playTone(659, 0.3, 'triangle', 0.18, 1.05, 'sfx'), 240);
   }
 
   public playDefeatSting() {
-    this.playTone(260, 0.25, 'sawtooth', 0.18, 0.7);
-    setTimeout(() => this.playTone(175, 0.45, 'sawtooth', 0.2, 0.5), 200);
+    this.playTone(260, 0.25, 'sawtooth', 0.18, 0.7, 'sfx');
+    setTimeout(() => this.playTone(175, 0.45, 'sawtooth', 0.2, 0.5, 'sfx'), 200);
   }
 }
 
 export const soundEngine = new SoundEngine();
-

@@ -6,6 +6,7 @@ import {
   WEAPONS,
   WeaponId,
 } from '../game/rules';
+import { gameStore, useGameStore } from '../state/gameStore';
 import { WeaponSilhouetteSvg } from './GameHud';
 
 interface RadialWheelOverlayProps {
@@ -95,6 +96,7 @@ export const RadialWheelOverlay: React.FC<RadialWheelOverlayProps> = ({
   onSwitchProtagonist,
   onClose,
 }) => {
+  const audioVolumes = useGameStore((s) => s.audioVolumes);
   const [hoveredWeapon, setHoveredWeapon] = useState<WeaponId>(
     playerState.activeWeapon
   );
@@ -428,8 +430,39 @@ export const RadialWheelOverlay: React.FC<RadialWheelOverlayProps> = ({
         </div>
       </div>
 
-      {/* Subtle Bottom Helper Caption */}
-      <div className="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none">
+      {/* Subtle Bottom Helper Caption + Quick Audio Channel Mix */}
+      <div className="fixed bottom-4 inset-x-0 flex flex-col items-center gap-2 pointer-events-none px-4">
+        <div className="aaa-glass-subtle px-4 py-2 rounded-xl text-[11px] text-[#cbd5e1] pointer-events-auto flex flex-wrap items-center justify-center gap-4">
+          {(
+            [
+              { key: 'master', label: 'Master' },
+              { key: 'sfx', label: 'SFX' },
+              { key: 'radio', label: 'Radio' },
+              { key: 'ambience', label: 'Kota' },
+            ] as const
+          ).map((ch) => (
+            <label
+              key={ch.key}
+              className="flex items-center gap-1.5 cursor-pointer"
+            >
+              <span className="text-[#94a3b8] font-medium">{ch.label}</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                aria-label={`Volume ${ch.label}`}
+                value={audioVolumes[ch.key]}
+                onChange={(e) =>
+                  gameStore.setAudioVolumes({
+                    [ch.key]: Number(e.target.value),
+                  })
+                }
+                className="w-16 accent-[#f59e0b] cursor-pointer"
+              />
+            </label>
+          ))}
+        </div>
         <div className="aaa-glass-subtle px-4 py-1.5 rounded-full text-xs text-[#cbd5e1] pointer-events-auto flex items-center gap-3">
           <span>Klik sektor senjata untuk memilih</span>
           <span className="text-white/20">·</span>

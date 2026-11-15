@@ -1,16 +1,13 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
-  DistrictZone,
   EnterableInteriorSpec,
   GRAND_HEISTS,
-  GameState,
   HeistId,
   InteriorZoneId,
   JAKARTA_DISTRICTS,
   OriginArchetype,
   OutfitId,
   PROTAGONIST_PROFILES,
-  PlayerProgressState,
   ProtagonistId,
   RadioStationId,
   STORY_MISSIONS,
@@ -18,8 +15,10 @@ import {
   StockSymbol,
   StoryChoiceOption,
   StoryMission,
-  VehicleType,
+  WARUNG_SNACKS,
   WEAPONS,
+  WarungServeQuality,
+  WarungSnackId,
   WeaponId,
   WeatherMode,
   applyDamageToPlayer,
@@ -28,17 +27,18 @@ import {
   calculateHeistBreakdown,
   calculatePassivePropertyIncome,
   completeMissionReward,
-  createInitialPlayerState,
+  consumeWarungSnack,
   formatRupiah,
   purchaseProperty,
   recruitCrewMember,
+  resolveJakartaAmbientProfile,
   sellStockShares,
   stepFokusAbility,
   stepStockMarketTick,
+  stepWarungStaminaBuff,
   triggerStockMarketImpact,
   upgradeDroneTech,
   upgradeVehicleGarage,
-  resolveJakartaAmbientProfile,
 } from './game/rules';
 import {
   JakartaWorldCanvas,
@@ -52,153 +52,59 @@ import { StatusModal } from './components/StatusModal';
 import { RadialWheelOverlay } from './components/RadialWheelOverlay';
 import { HeistPlanningModal } from './components/HeistPlanningModal';
 import { CustomsGarageModal } from './components/CustomsGarageModal';
+import { WarungSnackModal } from './components/WarungSnackModal';
 import { soundEngine } from './game/sound';
 import {
+  SAVE_VERSION,
   SavedGameSnapshot,
   loadSavedGame,
   saveGameSnapshot,
 } from './game/save';
+import {
+  buildInitialStateForStage,
+  gameStore,
+  useGameStore,
+} from './state/gameStore';
 
 const WEATHER_ORDER: WeatherMode[] = ['senja', 'malam', 'siang', 'hujan'];
 
-function buildInitialStateForStage(
-  chosenOrigin: OriginArchetype,
-  stage: 1 | 2 | 3 | 4 | 5
-): PlayerProgressState {
-  const base = createInitialPlayerState(chosenOrigin);
-  if (stage === 2) {
-    return {
-      ...base,
-      rupiah: base.rupiah + 250000,
-      unlockedWeapons: Array.from(
-        new Set<WeaponId>([...base.unlockedWeapons, 'pistol', 'mercon'])
-      ),
-      completedMissions: STORY_MISSIONS.slice(0, 3).map((m) => m.id),
-    };
-  }
-  if (stage === 3) {
-    return {
-      ...base,
-      rupiah: base.rupiah + 500000,
-      crewCount: Math.max(1, base.crewCount),
-      unlockedWeapons: Array.from(
-        new Set<WeaponId>([
-          ...base.unlockedWeapons,
-          'pistol',
-          'mercon',
-          'pasopati',
-        ])
-      ),
-      completedMissions: STORY_MISSIONS.slice(0, 6).map((m) => m.id),
-    };
-  }
-  if (stage === 4) {
-    return {
-      ...base,
-      rupiah: base.rupiah + 750000,
-      crewCount: Math.max(1, base.crewCount),
-      vehicleUpgradeLevel: 1,
-      unlockedWeapons: Array.from(
-        new Set<WeaponId>([
-          ...base.unlockedWeapons,
-          'pistol',
-          'rifle',
-          'mercon',
-          'pasopati',
-        ])
-      ),
-      completedMissions: STORY_MISSIONS.slice(0, 9).map((m) => m.id),
-    };
-  }
-  if (stage === 5) {
-    return {
-      ...base,
-      rupiah: base.rupiah + 1200000,
-      crewCount: Math.max(2, base.crewCount),
-      vehicleUpgradeLevel: 2,
-      droneLevel: Math.max(2, base.droneLevel),
-      droneActive: true,
-      unlockedWeapons: Array.from(
-        new Set<WeaponId>([
-          ...base.unlockedWeapons,
-          'pistol',
-          'rifle',
-          'mercon',
-          'pasopati',
-          'gatotkaca',
-        ])
-      ),
-      completedMissions: STORY_MISSIONS.slice(0, 12).map((m) => m.id),
-    };
-  }
-  return base;
-}
-
 export default function App() {
-  const isAutostart =
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('autostart') === '1';
+  const gameState = useGameStore((s) => s.gameState);
+  const origin = useGameStore((s) => s.origin);
+  const selectedStage = useGameStore((s) => s.selectedStage);
+  const weatherMode = useGameStore((s) => s.weatherMode);
+  const outcomeMode = useGameStore((s) => s.outcomeMode);
+  const playerState = useGameStore((s) => s.playerState);
+  const ghostHp = useGameStore((s) => s.ghostHp);
+  const endSnapshot = useGameStore((s) => s.endSnapshot);
+  const district = useGameStore((s) => s.district);
+  const drivingVehicle = useGameStore((s) => s.drivingVehicle);
+  const vehicleSpeedKmh = useGameStore((s) => s.vehicleSpeedKmh);
+  const aircraftAltitude = useGameStore((s) => s.aircraftAltitude);
+  const nearbyVehicle = useGameStore((s) => s.nearbyVehicle);
+  const nearbyMission = useGameStore((s) => s.nearbyMission);
+  const nearbyInterior = useGameStore((s) => s.nearbyInterior);
+  const objectiveProgress = useGameStore((s) => s.objectiveProgress);
+  const skySwitchPhase = useGameStore((s) => s.skySwitchPhase);
+  const dialogueMission = useGameStore((s) => s.dialogueMission);
+  const activeMission = useGameStore((s) => s.activeMission);
+  const activeChoice = useGameStore((s) => s.activeChoice);
+  const lastOutcomeText = useGameStore((s) => s.lastOutcomeText);
+  const phoneOpen = useGameStore((s) => s.phoneOpen);
+  const wheelMode = useGameStore((s) => s.wheelMode);
+  const heistBoardOpen = useGameStore((s) => s.heistBoardOpen);
+  const customsGarageOpen = useGameStore((s) => s.customsGarageOpen);
+  const warungModalOpen = useGameStore((s) => s.warungModalOpen);
+  const tpsAiming = useGameStore((s) => s.tpsAiming);
+  const muted = useGameStore((s) => s.muted);
+  const ambientCycleStep = useGameStore((s) => s.ambientCycleStep);
+  const savedGame = useGameStore((s) => s.savedGame);
+  const audioVolumes = useGameStore((s) => s.audioVolumes);
+  const completedDynamicQuests = useGameStore((s) => s.completedDynamicQuests);
 
-  const [origin, setOrigin] = useState<OriginArchetype>('anak_jalanan');
-  const [selectedStage, setSelectedStage] = useState<1 | 2 | 3 | 4 | 5>(5);
-  const [weatherMode, setWeatherMode] = useState<WeatherMode>('senja');
-  const [gameState, setGameState] = useState<GameState>(
-    isAutostart ? 'playing' : 'title'
-  );
-  const [outcomeMode, setOutcomeMode] = useState<'victory' | 'defeat'>('victory');
-  const [playerState, setPlayerState] = useState<PlayerProgressState>(() =>
-    buildInitialStateForStage('anak_jalanan', 5)
-  );
-  const [ghostHp, setGhostHp] = useState<number>(100);
-  const [endSnapshot, setEndSnapshot] = useState<PlayerProgressState>(() =>
-    buildInitialStateForStage('anak_jalanan', 5)
-  );
-
-  // World HUD telemetry state
-  const [district, setDistrict] = useState<DistrictZone>(JAKARTA_DISTRICTS[0]);
-  const [drivingVehicle, setDrivingVehicle] = useState<VehicleType | null>(null);
-  const [vehicleSpeedKmh, setVehicleSpeedKmh] = useState<number>(0);
-  const [aircraftAltitude, setAircraftAltitude] = useState<number>(0);
-  const [nearbyVehicle, setNearbyVehicle] = useState<VehicleType | null>('vtol_jet');
-  const [nearbyMission, setNearbyMission] = useState<StoryMission | null>(
-    STORY_MISSIONS[12]
-  );
-  const [nearbyInterior, setNearbyInterior] =
-    useState<EnterableInteriorSpec | null>(null);
-  const [objectiveProgress, setObjectiveProgress] = useState<number>(0);
-  const [skySwitchPhase, setSkySwitchPhase] = useState<{
-    active: boolean;
-    stage: 1 | 2 | 3;
-    targetId: ProtagonistId;
-  } | null>(null);
-
-  // Branching Narrative, NabiloPhone & GTA V Overlays
-  const [dialogueMission, setDialogueMission] = useState<StoryMission | null>(
-    null
-  );
-  const [activeMission, setActiveMission] = useState<StoryMission | null>(null);
-  const [activeChoice, setActiveChoice] = useState<StoryChoiceOption | null>(
-    null
-  );
-  const [lastOutcomeText, setLastOutcomeText] = useState<string | null>(null);
-  const [phoneOpen, setPhoneOpen] = useState<boolean>(false);
-  const [wheelMode, setWheelMode] = useState<'weapon' | 'character' | null>(
-    null
-  );
-  const [heistBoardOpen, setHeistBoardOpen] = useState<boolean>(false);
-  const [customsGarageOpen, setCustomsGarageOpen] = useState<boolean>(false);
-  const [tpsAiming, setTpsAiming] = useState<boolean>(false);
-  const [muted, setMuted] = useState<boolean>(false);
-  const [ambientCycleStep, setAmbientCycleStep] = useState<number>(0);
-
-  const [savedGame, setSavedGame] = useState<SavedGameSnapshot | null>(() =>
-    loadSavedGame()
-  );
-
-  const radarCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const controllerRef = useRef<WorldControllerHandle | null>(null);
 
-  // Mirror state to document.body.dataset.state immediately & silence engine/ambience on non-playing states
+  // Sync body dataset state and silence looped audio outside playing state
   useEffect(() => {
     document.body.dataset.state = gameState;
     if (gameState !== 'playing') {
@@ -207,16 +113,18 @@ export default function App() {
     }
   }, [gameState]);
 
-  // Cycle Jakarta Ambient Soundscape Cue every 6.5 seconds while playing outdoors
+  // Cycle Jakarta Ambient Soundscape Cue every 6.5s while playing
   useEffect(() => {
     if (gameState !== 'playing') return;
     const interval = window.setInterval(() => {
-      setAmbientCycleStep((prev) => prev + 1);
+      gameStore.setState((prev) => ({
+        ambientCycleStep: prev.ambientCycleStep + 1,
+      }));
     }, 6500);
     return () => clearInterval(interval);
   }, [gameState]);
 
-  // Update Dynamic Jakarta Ambient Soundscape Layer on district, time-of-day/weather, or cycle step change
+  // Update Dynamic Jakarta Ambient Soundscape Layer
   useEffect(() => {
     const isOutdoorPlaying =
       gameState === 'playing' &&
@@ -238,17 +146,18 @@ export default function App() {
     ambientCycleStep,
   ]);
 
-  // Unlock & resume continuous ambient city bed on first user pointer/keyboard gesture
+  // Unlock & resume continuous ambient city bed on first gesture
   useEffect(() => {
     const unlockAmbience = () => {
       soundEngine.unlockAudio();
-      if (gameState !== 'playing' || muted) return;
-      const isOutdoor = playerState.currentInterior === 'exterior';
+      const s = gameStore.getState();
+      if (s.gameState !== 'playing' || s.muted) return;
+      const isOutdoor = s.playerState.currentInterior === 'exterior';
       soundEngine.updateAmbientSoundscape(
-        district.id,
-        weatherMode,
+        s.district.id,
+        s.weatherMode,
         isOutdoor,
-        ambientCycleStep,
+        s.ambientCycleStep,
         false
       );
     };
@@ -258,37 +167,32 @@ export default function App() {
       window.removeEventListener('pointerdown', unlockAmbience);
       window.removeEventListener('keydown', unlockAmbience);
     };
-  }, [
-    gameState,
-    muted,
-    district.id,
-    weatherMode,
-    playerState.currentInterior,
-    ambientCycleStep,
-  ]);
+  }, []);
 
   // Delayed trailing ghost HP bar effect
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setGhostHp(playerState.hp);
+      gameStore.setState({ ghostHp: playerState.hp });
     }, 320);
     return () => clearTimeout(timer);
   }, [playerState.hp]);
 
-  // Tahap 4 Fokus Badai [Q] Energy Drain & Recharge Ticker (every 250ms)
+  // Fokus Badai [Q] energy drain & recharge + Warung Stamina Buff ticker (250ms)
   useEffect(() => {
     if (gameState !== 'playing') return;
     const interval = window.setInterval(() => {
-      setPlayerState((prev) => stepFokusAbility(prev, 0.25));
+      gameStore.updatePlayerState((prev) =>
+        stepWarungStaminaBuff(stepFokusAbility(prev, 0.25), 0.25)
+      );
     }, 250);
     return () => clearInterval(interval);
   }, [gameState]);
 
-  // Passive Property Dividend, Stock Market Ticker & Drone Rajawali-X Armor Regeneration (Every 4 seconds)
+  // Passive property dividend, BAJSA stock ticker & Drone Rajawali-X regen (4s)
   useEffect(() => {
     if (gameState !== 'playing') return;
     const interval = window.setInterval(() => {
-      setPlayerState((prev) => {
+      gameStore.updatePlayerState((prev) => {
         const tickedStocks = stepStockMarketTick(prev);
         const dividend = calculatePassivePropertyIncome(
           tickedStocks.ownedProperties
@@ -297,6 +201,7 @@ export default function App() {
           tickedStocks.droneActive && tickedStocks.droneLevel > 0
             ? tickedStocks.droneLevel * 3
             : 0;
+        const nextScore = tickedStocks.score + (dividend > 0 ? 25 : 0);
         return {
           ...tickedStocks,
           rupiah: tickedStocks.rupiah + dividend,
@@ -304,18 +209,15 @@ export default function App() {
             tickedStocks.maxArmor,
             tickedStocks.armor + armorRegen
           ),
-          score: tickedStocks.score + (dividend > 0 ? 25 : 0),
-          bestScore: Math.max(
-            tickedStocks.bestScore,
-            tickedStocks.score + (dividend > 0 ? 25 : 0)
-          ),
+          score: nextScore,
+          bestScore: Math.max(tickedStocks.bestScore, nextScore),
         };
       });
     }, 4000);
     return () => clearInterval(interval);
   }, [gameState]);
 
-  // Tahap 3, 4 & 5 Radio FM Jakarta Synthesizer Groove
+  // Radio FM Jakarta Groove
   useEffect(() => {
     if (gameState !== 'playing' || playerState.radioStation === 'off') return;
     let step = 0;
@@ -326,35 +228,24 @@ export default function App() {
     return () => clearInterval(interval);
   }, [gameState, playerState.radioStation]);
 
-  // Auto-Save Latest Snapshot Helper + Debounced & Periodic Sync
-  const latestSaveInputRef = useRef({
-    playerState,
-    origin,
-    selectedStage,
-    weatherMode,
-  });
-  latestSaveInputRef.current = {
-    playerState,
-    origin,
-    selectedStage,
-    weatherMode,
-  };
-
+  // Save v2 persistence helper + debounced & periodic auto-save
   const persistCurrentSave = useCallback(() => {
-    const cur = latestSaveInputRef.current;
+    const cur = gameStore.getState();
     if (cur.playerState.hp <= 0) return;
     const pos = controllerRef.current?.getPlayerPosition() || { x: 0, z: 26 };
     const snapshot: SavedGameSnapshot = {
-      version: 1,
+      version: SAVE_VERSION,
       origin: cur.origin,
       selectedStage: cur.selectedStage,
       weatherMode: cur.weatherMode,
       playerState: cur.playerState,
       playerPos: pos,
+      audioSettings: cur.audioVolumes,
+      completedDynamicQuests: cur.completedDynamicQuests,
       savedAt: Date.now(),
     };
     saveGameSnapshot(snapshot);
-    setSavedGame(snapshot);
+    gameStore.setState({ savedGame: snapshot });
   }, []);
 
   useEffect(() => {
@@ -369,6 +260,8 @@ export default function App() {
     origin,
     selectedStage,
     weatherMode,
+    audioVolumes,
+    completedDynamicQuests,
     persistCurrentSave,
   ]);
 
@@ -381,15 +274,15 @@ export default function App() {
   }, [gameState, persistCurrentSave]);
 
   const cycleWeather = useCallback(() => {
-    setWeatherMode((prev) => {
-      const idx = WEATHER_ORDER.indexOf(prev);
-      return WEATHER_ORDER[(idx + 1) % WEATHER_ORDER.length];
+    gameStore.setState((prev) => {
+      const idx = WEATHER_ORDER.indexOf(prev.weatherMode);
+      return { weatherMode: WEATHER_ORDER[(idx + 1) % WEATHER_ORDER.length] };
     });
     soundEngine.playPickup();
   }, []);
 
   const handleToggleFokus = useCallback(() => {
-    setPlayerState((prev) => {
+    gameStore.updatePlayerState((prev) => {
       if (prev.fokusActive) {
         soundEngine.playTone(320, 0.08, 'sine', 0.12);
         return { ...prev, fokusActive: false };
@@ -405,7 +298,7 @@ export default function App() {
   }, []);
 
   const handleToggleDrone = useCallback(() => {
-    setPlayerState((prev) => {
+    gameStore.updatePlayerState((prev) => {
       soundEngine.playPickup();
       if (prev.droneLevel <= 0) {
         return { ...prev, droneLevel: 1, droneActive: true };
@@ -419,14 +312,12 @@ export default function App() {
       x: 0,
       z: 18,
     };
-
-    setPlayerState((prev) => {
+    gameStore.updatePlayerState((prev) => {
       if (prev.activeProtagonist === targetId) return prev;
       const currentId = prev.activeProtagonist;
       const targetLive = prev.protagonistRoster[targetId];
       const targetProfile = PROTAGONIST_PROFILES[targetId];
 
-      // Trigger GTA V 3-Stage Satellite Sky-Switch Camera in 3D canvas
       controllerRef.current?.triggerSatelliteSwitch(
         targetId,
         targetLive.x,
@@ -455,142 +346,188 @@ export default function App() {
   }, []);
 
   const handleContinueGame = useCallback(() => {
-    const latest = loadSavedGame() || savedGame;
+    const latest = loadSavedGame() || gameStore.getState().savedGame;
     if (!latest) return;
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
+    soundEngine.setChannelVolumes(latest.audioSettings);
     document.body.dataset.state = 'playing';
-    setOrigin(latest.origin);
-    setSelectedStage(latest.selectedStage);
-    setWeatherMode(latest.weatherMode);
-    setPlayerState(latest.playerState);
-    setGhostHp(latest.playerState.hp);
-    setActiveMission(null);
-    setActiveChoice(null);
-    setDialogueMission(null);
-    setPhoneOpen(false);
-    setWheelMode(null);
-    setHeistBoardOpen(false);
-    setCustomsGarageOpen(false);
-    setTpsAiming(false);
-    setGameState('playing');
+    gameStore.setState({
+      origin: latest.origin,
+      selectedStage: latest.selectedStage,
+      weatherMode: latest.weatherMode,
+      playerState: latest.playerState,
+      ghostHp: latest.playerState.hp,
+      audioVolumes: latest.audioSettings,
+      completedDynamicQuests: latest.completedDynamicQuests,
+      activeMission: null,
+      activeChoice: null,
+      dialogueMission: null,
+      phoneOpen: false,
+      wheelMode: null,
+      heistBoardOpen: false,
+      customsGarageOpen: false,
+      warungModalOpen: false,
+      tpsAiming: false,
+      gameState: 'playing',
+    });
     requestAnimationFrame(() => {
       controllerRef.current?.restoreSavedPosition(
         latest.playerPos.x,
         latest.playerPos.z
       );
     });
-  }, [savedGame]);
+  }, []);
 
   const startNewGame = useCallback(
-    (
-      chosenOrigin: OriginArchetype = origin,
-      stage: 1 | 2 | 3 | 4 | 5 = selectedStage
-    ) => {
+    (chosenOrigin?: OriginArchetype, stage?: 1 | 2 | 3 | 4 | 5) => {
+      const cur = gameStore.getState();
+      const targetOrigin = chosenOrigin ?? cur.origin;
+      const targetStage = stage ?? cur.selectedStage;
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
       }
       document.body.dataset.state = 'playing';
-      const fresh = buildInitialStateForStage(chosenOrigin, stage);
-      setPlayerState(fresh);
-      setGhostHp(fresh.hp);
-      setActiveMission(null);
-      setActiveChoice(null);
-      setDialogueMission(null);
-      setPhoneOpen(false);
-      setWheelMode(null);
-      setHeistBoardOpen(false);
-      setCustomsGarageOpen(false);
-      setTpsAiming(false);
-      setGameState('playing');
+      const fresh = buildInitialStateForStage(targetOrigin, targetStage);
+      gameStore.setState({
+        origin: targetOrigin,
+        selectedStage: targetStage,
+        playerState: fresh,
+        ghostHp: fresh.hp,
+        activeMission: null,
+        activeChoice: null,
+        dialogueMission: null,
+        phoneOpen: false,
+        wheelMode: null,
+        heistBoardOpen: false,
+        customsGarageOpen: false,
+        warungModalOpen: false,
+        tpsAiming: false,
+        gameState: 'playing',
+      });
       controllerRef.current?.resetWorldForNewRun();
     },
-    [origin, selectedStage]
+    []
   );
 
-  // Keyboard bindings for Title Start, Pause, Phone [Tab], Fokus [Q], Wheel [Y], Protagonist [C], Heist [H], Customs [B], TPS Aim [X], Weapons [1-7]
+  // Global keyboard bindings
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (gameState === 'title') {
+      const target = e.target as HTMLElement | null;
+      const isTyping =
+        target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA';
+
+      const s = gameStore.getState();
+      if (s.gameState === 'title') {
         if (e.code === 'Enter' || e.code === 'Space') {
           e.preventDefault();
-          if (savedGame) {
+          if (s.savedGame) {
             handleContinueGame();
           } else {
-            startNewGame(origin, selectedStage);
+            startNewGame(s.origin, s.selectedStage);
           }
         }
         return;
       }
 
-      if (gameState === 'gameover') {
+      if (s.gameState === 'gameover') {
         if (e.code === 'Enter') {
           e.preventDefault();
-          startNewGame(origin, selectedStage);
+          startNewGame(s.origin, s.selectedStage);
         }
         return;
       }
 
       if (e.code === 'KeyP' || e.code === 'Escape') {
-        if (dialogueMission) {
-          setDialogueMission(null);
+        if (isTyping && e.code === 'KeyP') return;
+        if (s.dialogueMission) {
+          gameStore.setState({ dialogueMission: null });
           return;
         }
-        if (wheelMode) {
-          setWheelMode(null);
+        if (s.wheelMode) {
+          gameStore.setState({ wheelMode: null });
           return;
         }
-        if (heistBoardOpen) {
-          setHeistBoardOpen(false);
+        if (s.heistBoardOpen) {
+          gameStore.setState({ heistBoardOpen: false });
           return;
         }
-        if (customsGarageOpen) {
-          setCustomsGarageOpen(false);
+        if (s.customsGarageOpen) {
+          gameStore.setState({ customsGarageOpen: false });
           return;
         }
-        if (phoneOpen) {
-          setPhoneOpen(false);
+        if (s.warungModalOpen) {
+          gameStore.setState({ warungModalOpen: false });
+          return;
+        }
+        if (s.phoneOpen) {
+          gameStore.setState({ phoneOpen: false });
           return;
         }
         e.preventDefault();
-        setGameState((prev) => {
-          const next = prev === 'playing' ? 'paused' : 'playing';
-          document.body.dataset.state = next;
-          return next;
-        });
+        const next = s.gameState === 'playing' ? 'paused' : 'playing';
+        document.body.dataset.state = next;
+        gameStore.setState({ gameState: next });
         return;
       }
 
-      if (gameState !== 'playing') return;
+      if (s.gameState !== 'playing' || isTyping) return;
 
       if (e.code === 'Tab') {
         e.preventDefault();
-        setPhoneOpen((prev) => !prev);
-        setWheelMode(null);
-        setHeistBoardOpen(false);
-        setCustomsGarageOpen(false);
+        gameStore.setState((prev) => ({
+          phoneOpen: !prev.phoneOpen,
+          wheelMode: null,
+          heistBoardOpen: false,
+          customsGarageOpen: false,
+          warungModalOpen: false,
+        }));
       } else if (e.code === 'KeyY') {
         e.preventDefault();
-        setWheelMode((prev) => (prev === 'weapon' ? null : 'weapon'));
-        setPhoneOpen(false);
+        gameStore.setState((prev) => ({
+          wheelMode: prev.wheelMode === 'weapon' ? null : 'weapon',
+          phoneOpen: false,
+        }));
       } else if (e.code === 'KeyC') {
         e.preventDefault();
-        setWheelMode((prev) => (prev === 'character' ? null : 'character'));
-        setPhoneOpen(false);
+        gameStore.setState((prev) => ({
+          wheelMode: prev.wheelMode === 'character' ? null : 'character',
+          phoneOpen: false,
+        }));
       } else if (e.code === 'KeyH') {
         e.preventDefault();
-        setHeistBoardOpen((prev) => !prev);
-        setPhoneOpen(false);
-        setWheelMode(null);
+        gameStore.setState((prev) => ({
+          heistBoardOpen: !prev.heistBoardOpen,
+          phoneOpen: false,
+          wheelMode: null,
+        }));
       } else if (e.code === 'KeyB') {
         e.preventDefault();
-        setCustomsGarageOpen((prev) => !prev);
-        setPhoneOpen(false);
-        setWheelMode(null);
+        gameStore.setState((prev) => ({
+          customsGarageOpen: !prev.customsGarageOpen,
+          phoneOpen: false,
+          wheelMode: null,
+        }));
+      } else if (e.code === 'KeyJ') {
+        e.preventDefault();
+        soundEngine.playPickup();
+        gameStore.setState((prev) => ({
+          playerState: {
+            ...prev.playerState,
+            currentInterior: prev.warungModalOpen
+              ? prev.playerState.currentInterior
+              : 'warung',
+          },
+          warungModalOpen: !prev.warungModalOpen,
+          phoneOpen: false,
+          wheelMode: null,
+          heistBoardOpen: false,
+          customsGarageOpen: false,
+        }));
       } else if (e.code === 'KeyX') {
         e.preventDefault();
-        setTpsAiming((prev) => !prev);
+        gameStore.setState((prev) => ({ tpsAiming: !prev.tpsAiming }));
       } else if (e.code === 'KeyQ') {
         handleToggleFokus();
       } else if (e.code === 'KeyZ') {
@@ -598,67 +535,33 @@ export default function App() {
       } else if (e.code === 'KeyV') {
         cycleWeather();
       } else if (e.code === 'KeyM') {
-        soundEngine.muted = !soundEngine.muted;
-        if (soundEngine.muted) {
-          soundEngine.stopEngineAudio(true);
-          soundEngine.stopAmbientSoundscape(true);
-        }
-        setMuted(soundEngine.muted);
+        gameStore.toggleMute();
       } else if (e.code === 'KeyR') {
-        startNewGame(origin, selectedStage);
-      } else if (e.code === 'Digit1') {
-        setPlayerState((s) => ({ ...s, activeWeapon: 'fist' }));
-      } else if (e.code === 'Digit2') {
-        setPlayerState((s) =>
-          s.unlockedWeapons.includes('golok')
-            ? { ...s, activeWeapon: 'golok' }
-            : s
-        );
-      } else if (e.code === 'Digit3') {
-        setPlayerState((s) =>
-          s.unlockedWeapons.includes('pistol')
-            ? { ...s, activeWeapon: 'pistol' }
-            : s
-        );
-      } else if (e.code === 'Digit4') {
-        setPlayerState((s) =>
-          s.unlockedWeapons.includes('rifle')
-            ? { ...s, activeWeapon: 'rifle' }
-            : s
-        );
-      } else if (e.code === 'Digit5') {
-        setPlayerState((s) =>
-          s.unlockedWeapons.includes('mercon')
-            ? { ...s, activeWeapon: 'mercon' }
-            : s
-        );
-      } else if (e.code === 'Digit6') {
-        setPlayerState((s) =>
-          s.unlockedWeapons.includes('pasopati')
-            ? { ...s, activeWeapon: 'pasopati' }
-            : s
-        );
-      } else if (e.code === 'Digit7') {
-        setPlayerState((s) =>
-          s.unlockedWeapons.includes('gatotkaca')
-            ? { ...s, activeWeapon: 'gatotkaca' }
-            : s
-        );
+        startNewGame(s.origin, s.selectedStage);
+      } else {
+        const slotMap: Record<string, WeaponId> = {
+          Digit1: 'fist',
+          Digit2: 'golok',
+          Digit3: 'pistol',
+          Digit4: 'rifle',
+          Digit5: 'mercon',
+          Digit6: 'pasopati',
+          Digit7: 'gatotkaca',
+        };
+        const chosenWeapon = slotMap[e.code];
+        if (chosenWeapon) {
+          gameStore.updatePlayerState((prev) =>
+            prev.unlockedWeapons.includes(chosenWeapon)
+              ? { ...prev, activeWeapon: chosenWeapon }
+              : prev
+          );
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    gameState,
-    origin,
-    selectedStage,
-    savedGame,
-    dialogueMission,
-    phoneOpen,
-    wheelMode,
-    heistBoardOpen,
-    customsGarageOpen,
     handleContinueGame,
     startNewGame,
     cycleWeather,
@@ -666,20 +569,18 @@ export default function App() {
     handleToggleDrone,
   ]);
 
-  const handleSelectChoice = useCallback(
-    (choice: StoryChoiceOption) => {
-      if (!dialogueMission) return;
-      const mission = dialogueMission;
-      setDialogueMission(null);
-      setActiveMission(mission);
-      setActiveChoice({ ...choice });
-      setPlayerState((prev) => applyStoryChoice(prev, choice));
-      controllerRef.current?.startMissionObjective(mission, { ...choice });
-    },
-    [dialogueMission]
-  );
+  const handleSelectChoice = useCallback((choice: StoryChoiceOption) => {
+    const mission = gameStore.getState().dialogueMission;
+    if (!mission) return;
+    gameStore.setState((prev) => ({
+      dialogueMission: null,
+      activeMission: mission,
+      activeChoice: { ...choice },
+      playerState: applyStoryChoice(prev.playerState, choice),
+    }));
+    controllerRef.current?.startMissionObjective(mission, { ...choice });
+  }, []);
 
-  // Grand Heist Setup & Finale Launchers
   const handleLaunchHeistSetup = useCallback((heistId: HeistId) => {
     const heist =
       GRAND_HEISTS.find((h) => h.id === heistId) || GRAND_HEISTS[0];
@@ -711,73 +612,75 @@ export default function App() {
       nextMissionId: 'm1_bayangan_monas',
       outcomeNarrative: `Peralatan taktis untuk ${heist.title} berhasil diamankan! Brankas siap dieksekusi dari Papan Heist [H].`,
     };
-
-    setActiveMission(setupMission);
-    setActiveChoice(setupChoice);
+    gameStore.setState({
+      activeMission: setupMission,
+      activeChoice: setupChoice,
+    });
     controllerRef.current?.startMissionObjective(setupMission, setupChoice);
     soundEngine.playMissionFanfare();
   }, []);
 
-  const handleLaunchHeistFinale = useCallback(
-    (heistId: HeistId) => {
-      const heist =
-        GRAND_HEISTS.find((h) => h.id === heistId) || GRAND_HEISTS[0];
-      const plan = playerState.activeHeistPlan;
-      const breakdown = calculateHeistBreakdown(
-        heist.id,
-        plan.hackerId,
-        plan.driverId,
-        plan.gunmanId
-      );
-      const isStealth = plan.approach === 'stealth_cyber';
+  const handleLaunchHeistFinale = useCallback((heistId: HeistId) => {
+    const heist =
+      GRAND_HEISTS.find((h) => h.id === heistId) || GRAND_HEISTS[0];
+    const plan = gameStore.getState().playerState.activeHeistPlan;
+    const breakdown = calculateHeistBreakdown(
+      heist.id,
+      plan.hackerId,
+      plan.driverId,
+      plan.gunmanId
+    );
+    const isStealth = plan.approach === 'stealth_cyber';
 
-      const finaleMission: StoryMission = {
-        id: `heist_finale:${heist.id}`,
-        stageNumber: 5,
-        chapterNumber: 99,
-        title: `GRAND HEIST: ${heist.title}`,
-        giverName: 'Trio Protagonis Jakarta',
-        giverRole: isStealth
-          ? 'Operasi Siluman Siber'
-          : 'Serbuan Taktis Lapis Baja',
-        locationName: heist.targetLocation,
-        markerX: heist.vaultX,
-        markerZ: heist.vaultZ,
-        briefing: isStealth ? heist.stealthDesc : heist.assaultDesc,
-        choices: [],
-      };
+    const finaleMission: StoryMission = {
+      id: `heist_finale:${heist.id}`,
+      stageNumber: 5,
+      chapterNumber: 99,
+      title: `GRAND HEIST: ${heist.title}`,
+      giverName: 'Trio Protagonis Jakarta',
+      giverRole: isStealth
+        ? 'Operasi Siluman Siber'
+        : 'Serbuan Taktis Lapis Baja',
+      locationName: heist.targetLocation,
+      markerX: heist.vaultX,
+      markerZ: heist.vaultZ,
+      briefing: isStealth ? heist.stealthDesc : heist.assaultDesc,
+      choices: [],
+    };
 
-      const finaleChoice: StoryChoiceOption = {
-        id: `choice_finale_${heist.id}`,
-        label: isStealth ? 'Infiltrasi Siber Brankas' : 'Serbuan Penuh Brankas',
-        faction: isStealth ? 'sindikat' : 'jalanan',
-        description: isStealth
-          ? `Bobol sistem keamanan ${heist.targetLocation} dan bawa kabur hasil bersih ${formatRupiah(breakdown.netPlayerTakeRp)}!`
-          : `Gempur penjaga brankas ${heist.targetLocation} dan rebut hasil bersih ${formatRupiah(breakdown.netPlayerTakeRp)}!`,
-        objectiveType: isStealth ? 'heist_escape' : 'combat_wave',
-        targetX: isStealth ? heist.escapeX : heist.vaultX,
-        targetZ: isStealth ? heist.escapeZ : heist.vaultZ,
-        objectiveTargetCount: isStealth ? 2 : 5,
-        rewardRp: breakdown.netPlayerTakeRp,
-        reputationDelta: { rakyat: 12, jalanan: 18, sindikat: 15 },
-        wantedDelta: isStealth ? 2 : 4,
-        nextMissionId: 'm1_bayangan_monas',
-        outcomeNarrative: `GRAND HEIST SUKSES! Trio Jakarta membawa pulang ${formatRupiah(breakdown.netPlayerTakeRp)}. Saham ${heist.victimStock} anjlok & saham ${heist.targetStockRival} meroket di Bursa BAJSA!`,
-      };
+    const finaleChoice: StoryChoiceOption = {
+      id: `choice_finale_${heist.id}`,
+      label: isStealth ? 'Infiltrasi Siber Brankas' : 'Serbuan Penuh Brankas',
+      faction: isStealth ? 'sindikat' : 'jalanan',
+      description: isStealth
+        ? `Bobol sistem keamanan ${heist.targetLocation} dan bawa kabur hasil bersih ${formatRupiah(breakdown.netPlayerTakeRp)}!`
+        : `Gempur penjaga brankas ${heist.targetLocation} dan rebut hasil bersih ${formatRupiah(breakdown.netPlayerTakeRp)}!`,
+      objectiveType: isStealth ? 'heist_escape' : 'combat_wave',
+      targetX: isStealth ? heist.escapeX : heist.vaultX,
+      targetZ: isStealth ? heist.escapeZ : heist.vaultZ,
+      objectiveTargetCount: isStealth ? 2 : 5,
+      rewardRp: breakdown.netPlayerTakeRp,
+      reputationDelta: { rakyat: 12, jalanan: 18, sindikat: 15 },
+      wantedDelta: isStealth ? 2 : 4,
+      nextMissionId: 'm1_bayangan_monas',
+      outcomeNarrative: `GRAND HEIST SUKSES! Trio Jakarta membawa pulang ${formatRupiah(breakdown.netPlayerTakeRp)}. Saham ${heist.victimStock} anjlok & saham ${heist.targetStockRival} meroket di Bursa BAJSA!`,
+    };
 
-      setActiveMission(finaleMission);
-      setActiveChoice(finaleChoice);
-      setPlayerState((prev) => ({
-        ...prev,
-        wantedLevel: Math.min(5, prev.wantedLevel + (isStealth ? 1 : 3)),
-      }));
-      controllerRef.current?.startMissionObjective(finaleMission, finaleChoice);
-      soundEngine.playMissionFanfare();
-    },
-    [playerState.activeHeistPlan]
-  );
+    gameStore.setState((prev) => ({
+      activeMission: finaleMission,
+      activeChoice: finaleChoice,
+      playerState: {
+        ...prev.playerState,
+        wantedLevel: Math.min(
+          5,
+          prev.playerState.wantedLevel + (isStealth ? 1 : 3)
+        ),
+      },
+    }));
+    controllerRef.current?.startMissionObjective(finaleMission, finaleChoice);
+    soundEngine.playMissionFanfare();
+  }, []);
 
-  // Night Street Race Launcher
   const handleStartStreetRace = useCallback((raceId: string) => {
     const race = STREET_RACES.find((r) => r.id === raceId) || STREET_RACES[0];
     const startPt = race.checkpoints[0] || [0, -26];
@@ -815,26 +718,28 @@ export default function App() {
 
     controllerRef.current?.teleportPlayerTo(startPt[0], startPt[1]);
     controllerRef.current?.spawnVehicleNearPlayer('supercar');
-    setActiveMission(raceMission);
-    setActiveChoice(raceChoice);
+    gameStore.setState({
+      activeMission: raceMission,
+      activeChoice: raceChoice,
+    });
     controllerRef.current?.startMissionObjective(raceMission, raceChoice);
     soundEngine.playNitroBoost();
   }, []);
 
   const handleCompleteActiveObjective = useCallback(() => {
-    if (!activeMission || !activeChoice) return;
-    const mission = activeMission;
-    const choice = activeChoice;
+    const { activeMission: mission, activeChoice: choice } = gameStore.getState();
+    if (!mission || !choice) return;
 
-    setLastOutcomeText(choice.outcomeNarrative);
-    setActiveMission(null);
-    setActiveChoice(null);
+    gameStore.setState({
+      lastOutcomeText: choice.outcomeNarrative,
+      activeMission: null,
+      activeChoice: null,
+    });
 
-    // Check if this is a Grand Heist Setup, Grand Heist Finale, or Street Race
     if (mission.id.startsWith('heist_setup:')) {
       const heistId = mission.id.replace('heist_setup:', '') as HeistId;
       soundEngine.playMissionFanfare();
-      setPlayerState((prev) => ({
+      gameStore.updatePlayerState((prev) => ({
         ...prev,
         rupiah: prev.rupiah + choice.rewardRp,
         score: prev.score + 450,
@@ -851,7 +756,7 @@ export default function App() {
       const heistSpec =
         GRAND_HEISTS.find((h) => h.id === heistId) || GRAND_HEISTS[0];
       soundEngine.playCashRegister();
-      setPlayerState((prev) => {
+      gameStore.updatePlayerState((prev) => {
         const afterImpact = triggerStockMarketImpact(
           prev,
           heistSpec.victimStock,
@@ -875,7 +780,7 @@ export default function App() {
 
     if (mission.id.startsWith('street_race:')) {
       soundEngine.playCashRegister();
-      setPlayerState((prev) => {
+      gameStore.updatePlayerState((prev) => {
         const nextScore = prev.score + 800;
         return {
           ...prev,
@@ -887,49 +792,53 @@ export default function App() {
       return;
     }
 
-    // Standard Story Mission Completion + Stock Market Reaction
-    setPlayerState((prev) => {
-      const updated = completeMissionReward(prev, mission.id, choice);
-      const stockAdjusted =
-        choice.faction === 'sindikat'
-          ? triggerStockMarketImpact(updated, 'BNBL', 'KMYR')
-          : choice.faction === 'jalanan'
-          ? triggerStockMarketImpact(updated, 'SCBD', 'GATO')
-          : triggerStockMarketImpact(updated, 'HALM', 'PRIO');
+    const updated = completeMissionReward(
+      gameStore.getState().playerState,
+      mission.id,
+      choice
+    );
+    const stockAdjusted =
+      choice.faction === 'sindikat'
+        ? triggerStockMarketImpact(updated, 'BNBL', 'KMYR')
+        : choice.faction === 'jalanan'
+        ? triggerStockMarketImpact(updated, 'SCBD', 'GATO')
+        : triggerStockMarketImpact(updated, 'HALM', 'PRIO');
 
-      // If Chapter 15 (final Fase 5 mission) completed, trigger Victory!
-      if (
-        choice.nextMissionId === null ||
-        stockAdjusted.completedMissions.length >= 15
-      ) {
-        setEndSnapshot(stockAdjusted);
-        setOutcomeMode('victory');
-        document.body.dataset.state = 'gameover';
-        setGameState('gameover');
-      }
-      return stockAdjusted;
-    });
-  }, [activeMission, activeChoice]);
+    if (
+      choice.nextMissionId === null ||
+      stockAdjusted.completedMissions.length >= 15
+    ) {
+      document.body.dataset.state = 'gameover';
+      gameStore.setState({
+        playerState: stockAdjusted,
+        endSnapshot: stockAdjusted,
+        outcomeMode: 'victory',
+        gameState: 'gameover',
+      });
+    } else {
+      gameStore.setState({ playerState: stockAdjusted });
+    }
+  }, []);
 
   const handlePlayerDamage = useCallback((dmg: number) => {
-    setPlayerState((prev) => {
-      const { nextState, isDefeated } = applyDamageToPlayer(prev, dmg);
-      if (isDefeated) {
-        soundEngine.playDefeatSting();
-        setEndSnapshot(nextState);
-        setOutcomeMode('defeat');
-        window.setTimeout(() => {
-          document.body.dataset.state = 'gameover';
-          setGameState('gameover');
-        }, 420);
-      }
-      return nextState;
-    });
+    const { nextState, isDefeated } = applyDamageToPlayer(
+      gameStore.getState().playerState,
+      dmg
+    );
+    gameStore.setState({ playerState: nextState });
+    if (isDefeated) {
+      soundEngine.playDefeatSting();
+      gameStore.setState({ endSnapshot: nextState, outcomeMode: 'defeat' });
+      window.setTimeout(() => {
+        document.body.dataset.state = 'gameover';
+        gameStore.setState({ gameState: 'gameover' });
+      }, 420);
+    }
   }, []);
 
   const handleEnemyDefeated = useCallback(
     (rewardRp: number, scoreDelta: number) => {
-      setPlayerState((prev) => {
+      gameStore.updatePlayerState((prev) => {
         const nextScore = prev.score + scoreDelta;
         return {
           ...prev,
@@ -943,34 +852,24 @@ export default function App() {
   );
 
   const handleConsumeAmmo = useCallback((): boolean => {
-    let success = false;
-    setPlayerState((prev) => {
-      const w = prev.activeWeapon;
-      const spec = WEAPONS[w];
-      if (spec.isMelee) {
-        success = true;
-        return prev;
-      }
-      const currentAmmo = prev.ammo[w] || 0;
-      if (currentAmmo < spec.ammoCost) {
-        success = false;
-        return prev;
-      }
-      success = true;
-      return {
+    const prev = gameStore.getState().playerState;
+    const w = prev.activeWeapon;
+    const spec = WEAPONS[w];
+    if (spec.isMelee) return true;
+    const currentAmmo = prev.ammo[w] || 0;
+    if (currentAmmo < spec.ammoCost) return false;
+    gameStore.setState({
+      playerState: {
         ...prev,
-        ammo: {
-          ...prev.ammo,
-          [w]: currentAmmo - spec.ammoCost,
-        },
-      };
+        ammo: { ...prev.ammo, [w]: currentAmmo - spec.ammoCost },
+      },
     });
-    return success;
+    return true;
   }, []);
 
   const handleBuyOrEquipWeapon = useCallback((wId: WeaponId) => {
     const spec = WEAPONS[wId];
-    setPlayerState((prev) => {
+    gameStore.updatePlayerState((prev) => {
       const unlocked = prev.unlockedWeapons.includes(wId);
       if (unlocked) {
         if (!spec.isMelee && prev.rupiah >= 40000) {
@@ -979,10 +878,7 @@ export default function App() {
             ...prev,
             rupiah: prev.rupiah - 40000,
             activeWeapon: wId,
-            ammo: {
-              ...prev.ammo,
-              [wId]: spec.maxAmmo,
-            },
+            ammo: { ...prev.ammo, [wId]: spec.maxAmmo },
           };
         }
         return { ...prev, activeWeapon: wId };
@@ -994,10 +890,7 @@ export default function App() {
           rupiah: prev.rupiah - spec.price,
           unlockedWeapons: [...prev.unlockedWeapons, wId],
           activeWeapon: wId,
-          ammo: {
-            ...prev.ammo,
-            [wId]: spec.maxAmmo,
-          },
+          ammo: { ...prev.ammo, [wId]: spec.maxAmmo },
         };
       }
       return prev;
@@ -1006,7 +899,7 @@ export default function App() {
 
   const handleBuyArmorOrMedkit = useCallback(
     (item: 'medkit' | 'armor' | 'bribe') => {
-      setPlayerState((prev) => {
+      gameStore.updatePlayerState((prev) => {
         if (item === 'medkit' && prev.rupiah >= 50000) {
           soundEngine.playPickup();
           return { ...prev, rupiah: prev.rupiah - 50000, hp: prev.maxHp };
@@ -1031,51 +924,43 @@ export default function App() {
   );
 
   const handleBuyProperty = useCallback((propId: string) => {
-    setPlayerState((prev) => {
+    gameStore.updatePlayerState((prev) => {
       const res = purchaseProperty(prev, propId);
-      if (res.purchased) {
-        soundEngine.playMissionFanfare();
-      }
+      if (res.purchased) soundEngine.playMissionFanfare();
       return res.nextState;
     });
   }, []);
 
   const handleRecruitCrew = useCallback(() => {
-    setPlayerState((prev) => {
+    gameStore.updatePlayerState((prev) => {
       const res = recruitCrewMember(prev);
-      if (res.recruited) {
-        soundEngine.playMissionFanfare();
-      }
+      if (res.recruited) soundEngine.playMissionFanfare();
       return res.nextState;
     });
   }, []);
 
   const handleChangeRadio = useCallback((station: RadioStationId) => {
     soundEngine.playPickup();
-    setPlayerState((prev) => ({ ...prev, radioStation: station }));
+    gameStore.updatePlayerState((prev) => ({ ...prev, radioStation: station }));
   }, []);
 
   const handleChangeOutfit = useCallback((outfitId: OutfitId) => {
     soundEngine.playPickup();
-    setPlayerState((prev) => ({ ...prev, outfitId }));
+    gameStore.updatePlayerState((prev) => ({ ...prev, outfitId }));
   }, []);
 
   const handleUpgradeVehicle = useCallback(() => {
-    setPlayerState((prev) => {
+    gameStore.updatePlayerState((prev) => {
       const res = upgradeVehicleGarage(prev);
-      if (res.upgraded) {
-        soundEngine.playMissionFanfare();
-      }
+      if (res.upgraded) soundEngine.playMissionFanfare();
       return res.nextState;
     });
   }, []);
 
   const handleUpgradeDrone = useCallback(() => {
-    setPlayerState((prev) => {
+    gameStore.updatePlayerState((prev) => {
       const res = upgradeDroneTech(prev);
-      if (res.upgraded) {
-        soundEngine.playMissionFanfare();
-      }
+      if (res.upgraded) soundEngine.playMissionFanfare();
       return res.nextState;
     });
   }, []);
@@ -1083,76 +968,74 @@ export default function App() {
   const handleFastTravel = useCallback((districtId: string) => {
     const target = JAKARTA_DISTRICTS.find((d) => d.id === districtId);
     if (!target) return;
-    setPlayerState((prev) => ({ ...prev, currentInterior: 'exterior' }));
+    gameStore.setState((prev) => ({
+      playerState: { ...prev.playerState, currentInterior: 'exterior' },
+      lastOutcomeText: `Teleportasi MRT & Helipad berhasil menuju ${target.name}!`,
+    }));
     controllerRef.current?.teleportPlayerTo(
       target.centerX + 8,
       target.centerZ + 10
     );
-    setLastOutcomeText(
-      `Teleportasi MRT & Helipad berhasil menuju ${target.name}!`
-    );
   }, []);
 
-  const handleCompleteSideHustle = useCallback(
-    (rewardRp: number, _label: string) => {
-      soundEngine.playPickup();
-      setPlayerState((prev) => {
-        const nextScore = prev.score + 120;
-        return {
-          ...prev,
-          rupiah: prev.rupiah + rewardRp,
-          score: nextScore,
-          bestScore: Math.max(prev.bestScore, nextScore),
-          reputation: {
-            ...prev.reputation,
-            rakyat: Math.min(100, prev.reputation.rakyat + 4),
-            jalanan: Math.min(100, prev.reputation.jalanan + 3),
-          },
-        };
-      });
-    },
-    []
-  );
+  const handleCompleteSideHustle = useCallback((rewardRp: number) => {
+    soundEngine.playPickup();
+    gameStore.updatePlayerState((prev) => {
+      const nextScore = prev.score + 120;
+      return {
+        ...prev,
+        rupiah: prev.rupiah + rewardRp,
+        score: nextScore,
+        bestScore: Math.max(prev.bestScore, nextScore),
+        reputation: {
+          ...prev.reputation,
+          rakyat: Math.min(100, prev.reputation.rakyat + 4),
+          jalanan: Math.min(100, prev.reputation.jalanan + 3),
+        },
+      };
+    });
+  }, []);
 
-  // Stock Market Buy & Sell Handlers
   const handleBuyStock = useCallback((ticker: StockSymbol, shares: number) => {
-    setPlayerState((prev) => {
+    gameStore.updatePlayerState((prev) => {
       const res = buyStockShares(prev, ticker, shares);
-      if (res.bought) {
-        soundEngine.playCashRegister();
-      }
+      if (res.bought) soundEngine.playCashRegister();
       return res.nextState;
     });
   }, []);
 
-  const handleSellStock = useCallback(
-    (ticker: StockSymbol, shares: number) => {
-      setPlayerState((prev) => {
-        const res = sellStockShares(prev, ticker, shares);
-        if (res.sold) {
-          soundEngine.playCashRegister();
-        }
-        return res.nextState;
-      });
-    },
-    []
-  );
+  const handleSellStock = useCallback((ticker: StockSymbol, shares: number) => {
+    gameStore.updatePlayerState((prev) => {
+      const res = sellStockShares(prev, ticker, shares);
+      if (res.sold) soundEngine.playCashRegister();
+      return res.nextState;
+    });
+  }, []);
 
-  // Enter / Exit Building Interior Handler
   const handleEnterOrExitInterior = useCallback(
     (target?: EnterableInteriorSpec | null) => {
       soundEngine.playPickup();
-      setPlayerState((prev) => {
-        if (prev.currentInterior !== 'exterior') {
-          return { ...prev, currentInterior: 'exterior' };
-        }
-        if (!target) return prev;
-        if (target.id === 'heist_penthouse') {
-          setHeistBoardOpen(true);
-        } else if (target.id === 'customs_garage') {
-          setCustomsGarageOpen(true);
-        }
-        return { ...prev, currentInterior: target.id };
+      const prev = gameStore.getState().playerState;
+      if (prev.currentInterior !== 'exterior') {
+        gameStore.setState({
+          playerState: { ...prev, currentInterior: 'exterior' },
+          warungModalOpen: false,
+        });
+        return;
+      }
+      if (!target) return;
+      gameStore.setState({
+        playerState: { ...prev, currentInterior: target.id },
+        heistBoardOpen:
+          target.id === 'heist_penthouse'
+            ? true
+            : gameStore.getState().heistBoardOpen,
+        customsGarageOpen:
+          target.id === 'customs_garage'
+            ? true
+            : gameStore.getState().customsGarageOpen,
+        warungModalOpen:
+          target.id === 'warung' ? true : gameStore.getState().warungModalOpen,
       });
     },
     []
@@ -1160,27 +1043,52 @@ export default function App() {
 
   const handleEnterInteriorById = useCallback((interiorId: InteriorZoneId) => {
     soundEngine.playPickup();
-    setPlayerState((prev) => ({
-      ...prev,
-      currentInterior: interiorId,
+    gameStore.setState((prev) => ({
+      playerState: { ...prev.playerState, currentInterior: interiorId },
+      heistBoardOpen:
+        interiorId === 'heist_penthouse' ? true : prev.heistBoardOpen,
+      customsGarageOpen:
+        interiorId === 'customs_garage' ? true : prev.customsGarageOpen,
+      warungModalOpen: interiorId === 'warung' ? true : prev.warungModalOpen,
     }));
-    if (interiorId === 'heist_penthouse') {
-      setHeistBoardOpen(true);
-    } else if (interiorId === 'customs_garage') {
-      setCustomsGarageOpen(true);
-    }
   }, []);
 
-  // Police Pursuit Line-of-Sight Evade Timer Handler
+  const handleOpenWarung = useCallback(() => {
+    soundEngine.playPickup();
+    gameStore.setState((prev) => ({
+      playerState: {
+        ...prev.playerState,
+        currentInterior: 'warung',
+      },
+      warungModalOpen: true,
+      phoneOpen: false,
+      wheelMode: null,
+      heistBoardOpen: false,
+      customsGarageOpen: false,
+    }));
+  }, []);
+
+  const handleConsumeWarungSnack = useCallback(
+    (snackId: WarungSnackId, quality: WarungServeQuality) => {
+      const curState = gameStore.getState().playerState;
+      const res = consumeWarungSnack(curState, snackId, quality);
+      if (res.consumed) {
+        soundEngine.playCashRegister();
+        const snack = WARUNG_SNACKS.find((s) => s.id === snackId);
+        gameStore.setState({
+          playerState: res.nextState,
+          lastOutcomeText: `Sajian Warung: ${snack?.name || 'Jajanan'} (+${res.hpRecovered} HP · +${res.staminaAddedSec}d Buff Stamina)`,
+        });
+      }
+      return res;
+    },
+    []
+  );
+
   const handleWantedEvadeUpdate = useCallback(
     (isEvading: boolean, dt: number) => {
-      setPlayerState((prev) => {
-        if (prev.wantedLevel <= 0) {
-          return prev.wantedEvadeTimer !== 0
-            ? { ...prev, wantedEvadeTimer: 0 }
-            : prev;
-        }
-        if (!isEvading) {
+      gameStore.updatePlayerState((prev) => {
+        if (prev.wantedLevel <= 0 || !isEvading) {
           return prev.wantedEvadeTimer !== 0
             ? { ...prev, wantedEvadeTimer: 0 }
             : prev;
@@ -1190,55 +1098,44 @@ export default function App() {
         const nextTimer = currentTimer - dt;
         if (nextTimer <= 0) {
           soundEngine.playPickup();
-          return {
-            ...prev,
-            wantedLevel: 0,
-            wantedEvadeTimer: 0,
-          };
+          return { ...prev, wantedLevel: 0, wantedEvadeTimer: 0 };
         }
-        return {
-          ...prev,
-          wantedEvadeTimer: nextTimer,
-        };
+        return { ...prev, wantedEvadeTimer: nextTimer };
       });
     },
     []
   );
 
-  // Vehicle Customization Handlers (Los Santos Customs 360 Garage)
   const handleSelectPaint = useCallback((paintId: string, price: number) => {
-    setPlayerState((prev) => {
+    gameStore.updatePlayerState((prev) => {
       if (prev.rupiah < price) return prev;
       soundEngine.playPickup();
       return {
         ...prev,
         rupiah: prev.rupiah - price,
-        vehicleCustoms: {
-          ...prev.vehicleCustoms,
-          paintId,
-        },
+        vehicleCustoms: { ...prev.vehicleCustoms, paintId },
       };
     });
   }, []);
 
   const handleSelectUnderglow = useCallback((glowId: string, price: number) => {
-    setPlayerState((prev) => {
+    gameStore.updatePlayerState((prev) => {
       if (prev.rupiah < price) return prev;
       soundEngine.playPickup();
       return {
         ...prev,
         rupiah: prev.rupiah - price,
-        vehicleCustoms: {
-          ...prev.vehicleCustoms,
-          underglowId: glowId,
-        },
+        vehicleCustoms: { ...prev.vehicleCustoms, underglowId: glowId },
       };
     });
   }, []);
 
   const handleUpgradeArmorPlating = useCallback(() => {
-    setPlayerState((prev) => {
-      if (prev.vehicleCustoms.armorPlatingLevel >= 3 || prev.rupiah < 200000) {
+    gameStore.updatePlayerState((prev) => {
+      if (
+        prev.vehicleCustoms.armorPlatingLevel >= 3 ||
+        prev.rupiah < 200000
+      ) {
         return prev;
       }
       soundEngine.playMissionFanfare();
@@ -1258,7 +1155,7 @@ export default function App() {
   }, []);
 
   const handleRepairAndClearWanted = useCallback(() => {
-    setPlayerState((prev) => {
+    gameStore.updatePlayerState((prev) => {
       if (prev.rupiah < 75000) return prev;
       soundEngine.playCashRegister();
       return {
@@ -1293,25 +1190,34 @@ export default function App() {
         wheelSlowMo={wheelMode !== null}
         customsShowcaseOpen={customsGarageOpen}
         tpsAiming={tpsAiming}
-        radarCanvasRef={radarCanvasRef}
         controllerRef={controllerRef}
         onUpdateHud={(payload) => {
-          setDistrict(payload.district);
-          setDrivingVehicle(payload.drivingVehicle);
-          setVehicleSpeedKmh(payload.vehicleSpeedKmh);
-          setAircraftAltitude(payload.aircraftAltitude);
-          setNearbyVehicle(payload.nearbyVehicle);
-          setNearbyMission(payload.nearbyMission);
-          setNearbyInterior(payload.nearbyInterior);
-          setObjectiveProgress(payload.objectiveProgress);
-          setSkySwitchPhase(payload.skySwitchPhase);
+          const cur = gameStore.getState();
+          const changed =
+            cur.district.id !== payload.district.id ||
+            cur.drivingVehicle !== payload.drivingVehicle ||
+            cur.vehicleSpeedKmh !== payload.vehicleSpeedKmh ||
+            cur.aircraftAltitude !== payload.aircraftAltitude ||
+            cur.nearbyVehicle !== payload.nearbyVehicle ||
+            cur.nearbyMission?.id !== payload.nearbyMission?.id ||
+            cur.nearbyInterior?.id !== payload.nearbyInterior?.id ||
+            cur.objectiveProgress !== payload.objectiveProgress ||
+            cur.skySwitchPhase?.stage !== payload.skySwitchPhase?.stage ||
+            cur.skySwitchPhase?.active !== payload.skySwitchPhase?.active;
+          if (changed) {
+            gameStore.setState(payload);
+          }
         }}
         onPlayerDamage={handlePlayerDamage}
         onEnemyDefeated={handleEnemyDefeated}
         onConsumeAmmo={handleConsumeAmmo}
-        onOpenMissionDialog={(mission) => setDialogueMission(mission)}
+        onOpenMissionDialog={(mission) =>
+          gameStore.setState({ dialogueMission: mission })
+        }
         onCompleteActiveObjective={handleCompleteActiveObjective}
-        onToggleTpsAim={() => setTpsAiming((prev) => !prev)}
+        onToggleTpsAim={() =>
+          gameStore.setState((prev) => ({ tpsAiming: !prev.tpsAiming }))
+        }
         onEnterOrExitInterior={handleEnterOrExitInterior}
         onWantedEvadeUpdate={handleWantedEvadeUpdate}
       />
@@ -1322,14 +1228,18 @@ export default function App() {
           selectedOrigin={origin}
           selectedStage={selectedStage}
           savedGame={savedGame}
-          onSelectOrigin={(o) => {
-            setOrigin(o);
-            setPlayerState(buildInitialStateForStage(o, selectedStage));
-          }}
-          onSelectStage={(s) => {
-            setSelectedStage(s);
-            setPlayerState(buildInitialStateForStage(origin, s));
-          }}
+          onSelectOrigin={(o) =>
+            gameStore.setState({
+              origin: o,
+              playerState: buildInitialStateForStage(o, selectedStage),
+            })
+          }
+          onSelectStage={(s) =>
+            gameStore.setState({
+              selectedStage: s,
+              playerState: buildInitialStateForStage(origin, s),
+            })
+          }
           onContinueGame={handleContinueGame}
           onStartGame={(e) => {
             e.currentTarget.blur();
@@ -1360,41 +1270,45 @@ export default function App() {
           tpsAiming={tpsAiming}
           lastOutcomeText={lastOutcomeText}
           skySwitchPhase={skySwitchPhase}
-          radarCanvasRef={radarCanvasRef}
           onSelectWeapon={(w) =>
-            setPlayerState((prev) => ({ ...prev, activeWeapon: w }))
+            gameStore.updatePlayerState((prev) => ({ ...prev, activeWeapon: w }))
           }
-          onTogglePhone={() => setPhoneOpen((p) => !p)}
+          onTogglePhone={() =>
+            gameStore.setState((prev) => ({ phoneOpen: !prev.phoneOpen }))
+          }
           onToggleVehicle={() => controllerRef.current?.toggleEnterExitVehicle()}
+          onHonk={() => controllerRef.current?.triggerHorn()}
           onToggleFokus={handleToggleFokus}
           onToggleDrone={handleToggleDrone}
-          onOpenMissionDialog={(m) => setDialogueMission(m)}
+          onOpenMissionDialog={(m) => gameStore.setState({ dialogueMission: m })}
           onEnterOrExitInterior={() =>
             handleEnterOrExitInterior(nearbyInterior)
           }
           onOpenWeaponWheel={() =>
-            setWheelMode((prev) => (prev === 'weapon' ? null : 'weapon'))
+            gameStore.setState((prev) => ({
+              wheelMode: prev.wheelMode === 'weapon' ? null : 'weapon',
+            }))
           }
           onOpenCharacterWheel={() =>
-            setWheelMode((prev) => (prev === 'character' ? null : 'character'))
+            gameStore.setState((prev) => ({
+              wheelMode: prev.wheelMode === 'character' ? null : 'character',
+            }))
           }
           onSwitchProtagonist={handleSwitchProtagonist}
-          onOpenHeistBoard={() => setHeistBoardOpen(true)}
-          onOpenCustomsGarage={() => setCustomsGarageOpen(true)}
-          onToggleTpsAim={() => setTpsAiming((prev) => !prev)}
+          onOpenHeistBoard={() => gameStore.setState({ heistBoardOpen: true })}
+          onOpenCustomsGarage={() =>
+            gameStore.setState({ customsGarageOpen: true })
+          }
+          onOpenWarung={handleOpenWarung}
+          onToggleTpsAim={() =>
+            gameStore.setState((prev) => ({ tpsAiming: !prev.tpsAiming }))
+          }
           onCycleWeather={cycleWeather}
-          onToggleMute={() => {
-            soundEngine.muted = !soundEngine.muted;
-            if (soundEngine.muted) {
-              soundEngine.stopEngineAudio(true);
-              soundEngine.stopAmbientSoundscape(true);
-            }
-            setMuted(soundEngine.muted);
-          }}
+          onToggleMute={() => gameStore.toggleMute()}
           onPause={() => {
             persistCurrentSave();
             document.body.dataset.state = 'paused';
-            setGameState('paused');
+            gameStore.setState({ gameState: 'paused' });
           }}
           onRestart={() => startNewGame(origin, selectedStage)}
         />
@@ -1406,27 +1320,30 @@ export default function App() {
           mode={wheelMode}
           playerState={playerState}
           onSelectWeapon={(w) =>
-            setPlayerState((prev) => ({ ...prev, activeWeapon: w }))
+            gameStore.updatePlayerState((prev) => ({ ...prev, activeWeapon: w }))
           }
           onSwitchProtagonist={handleSwitchProtagonist}
-          onClose={() => setWheelMode(null)}
+          onClose={() => gameStore.setState({ wheelMode: null })}
         />
       )}
 
-      {/* GTA V GRAND HEIST TACTICAL PLANNING BOARD MODAL */}
+      {/* GRAND HEIST TACTICAL PLANNING BOARD */}
       {gameState === 'playing' && heistBoardOpen && (
         <HeistPlanningModal
           playerState={playerState}
           onUpdatePlan={(plan) =>
-            setPlayerState((prev) => ({ ...prev, activeHeistPlan: plan }))
+            gameStore.updatePlayerState((prev) => ({
+              ...prev,
+              activeHeistPlan: plan,
+            }))
           }
           onLaunchHeistSetup={handleLaunchHeistSetup}
           onLaunchHeistFinale={handleLaunchHeistFinale}
-          onClose={() => setHeistBoardOpen(false)}
+          onClose={() => gameStore.setState({ heistBoardOpen: false })}
         />
       )}
 
-      {/* LOS SANTOS CUSTOMS 360° VEHICLE CUSTOMIZATION GARAGE MODAL */}
+      {/* LOS SANTOS CUSTOMS 360° VEHICLE CUSTOMIZATION GARAGE */}
       {gameState === 'playing' && customsGarageOpen && (
         <CustomsGarageModal
           playerState={playerState}
@@ -1435,37 +1352,58 @@ export default function App() {
           onUpgradeEngine={handleUpgradeVehicle}
           onUpgradeArmorPlating={handleUpgradeArmorPlating}
           onRepairAndClearWanted={handleRepairAndClearWanted}
-          onClose={() => setCustomsGarageOpen(false)}
+          onClose={() => gameStore.setState({ customsGarageOpen: false })}
         />
       )}
 
-      {/* INTERACTIVE BRANCHING STORY DIALOGUE MODAL */}
+      {/* WARUNG KOPI & JAJANAN NUSANTARA INTERACTIVE MINI-GAME */}
+      {gameState === 'playing' && warungModalOpen && (
+        <WarungSnackModal
+          playerState={playerState}
+          onConsumeSnack={handleConsumeWarungSnack}
+          onCloseModal={() => gameStore.setState({ warungModalOpen: false })}
+          onExitWarung={() => {
+            soundEngine.playPickup();
+            gameStore.setState((prev) => ({
+              warungModalOpen: false,
+              playerState: {
+                ...prev.playerState,
+                currentInterior: 'exterior',
+              },
+            }));
+          }}
+        />
+      )}
+
+      {/* INTERACTIVE BRANCHING STORY DIALOGUE + NPC AI */}
       {gameState === 'playing' && dialogueMission && (
         <StoryDialogueModal
           mission={dialogueMission}
           onSelectChoice={handleSelectChoice}
-          onClose={() => setDialogueMission(null)}
+          onClose={() => gameStore.setState({ dialogueMission: null })}
         />
       )}
 
-      {/* NABILOPHONE OS 6.0 IN-GAME SMARTPHONE OVERLAY */}
+      {/* NABILOPHONE OS 6.0 SMARTPHONE OVERLAY */}
       {gameState === 'playing' && phoneOpen && !dialogueMission && (
         <NabiloPhoneModal
           playerState={playerState}
           activeMission={activeMission}
           lastOutcomeText={lastOutcomeText}
           weatherMode={weatherMode}
-          onClose={() => setPhoneOpen(false)}
-          onTriggerMissionDialog={(m) => setDialogueMission(m)}
+          onClose={() => gameStore.setState({ phoneOpen: false })}
+          onTriggerMissionDialog={(m) =>
+            gameStore.setState({ dialogueMission: m })
+          }
           onSpawnVehicle={(type) =>
             controllerRef.current?.spawnVehicleNearPlayer(type)
           }
           onBuyOrEquipWeapon={handleBuyOrEquipWeapon}
           onBuyArmorOrMedkit={handleBuyArmorOrMedkit}
           onBuyProperty={handleBuyProperty}
-          onCompleteSideHustle={handleCompleteSideHustle}
+          onCompleteSideHustle={(rp) => handleCompleteSideHustle(rp)}
           onChangeWeather={(w) => {
-            setWeatherMode(w);
+            gameStore.setState({ weatherMode: w });
             soundEngine.playPickup();
           }}
           onRecruitCrew={handleRecruitCrew}
@@ -1477,8 +1415,10 @@ export default function App() {
           onBuyStock={handleBuyStock}
           onSellStock={handleSellStock}
           onSwitchProtagonist={handleSwitchProtagonist}
-          onOpenHeistBoard={() => setHeistBoardOpen(true)}
-          onOpenCustomsGarage={() => setCustomsGarageOpen(true)}
+          onOpenHeistBoard={() => gameStore.setState({ heistBoardOpen: true })}
+          onOpenCustomsGarage={() =>
+            gameStore.setState({ customsGarageOpen: true })
+          }
           onEnterInterior={handleEnterInteriorById}
           onStartStreetRace={handleStartStreetRace}
         />
@@ -1494,7 +1434,7 @@ export default function App() {
           muted={muted}
           onResume={() => {
             document.body.dataset.state = 'playing';
-            setGameState('playing');
+            gameStore.setState({ gameState: 'playing' });
           }}
           onRestart={(e) => {
             e.currentTarget.blur();
@@ -1502,27 +1442,26 @@ export default function App() {
           }}
           onReturnTitle={() => {
             persistCurrentSave();
-            setSavedGame(loadSavedGame());
             document.body.dataset.state = 'title';
-            setGameState('title');
+            gameStore.setState({
+              savedGame: loadSavedGame(),
+              gameState: 'title',
+            });
           }}
           onFastTravel={handleFastTravel}
-          onTriggerMissionDialog={(m) => setDialogueMission(m)}
+          onTriggerMissionDialog={(m) =>
+            gameStore.setState({ dialogueMission: m })
+          }
           onChangeWeather={(w) => {
-            setWeatherMode(w);
+            gameStore.setState({ weatherMode: w });
             soundEngine.playPickup();
           }}
           onChangeRadio={handleChangeRadio}
-          onToggleMute={() => {
-            soundEngine.muted = !soundEngine.muted;
-            if (soundEngine.muted) {
-              soundEngine.stopEngineAudio(true);
-              soundEngine.stopAmbientSoundscape(true);
-            }
-            setMuted(soundEngine.muted);
-          }}
-          onOpenHeistBoard={() => setHeistBoardOpen(true)}
-          onOpenCustomsGarage={() => setCustomsGarageOpen(true)}
+          onToggleMute={() => gameStore.toggleMute()}
+          onOpenHeistBoard={() => gameStore.setState({ heistBoardOpen: true })}
+          onOpenCustomsGarage={() =>
+            gameStore.setState({ customsGarageOpen: true })
+          }
         />
       )}
     </div>
