@@ -15,6 +15,8 @@ import {
   StoryMission,
   VEHICLE_SPECS,
   WARUNG_STALL_LOCATIONS,
+  checkPlayerDetourProgress,
+  evaluateRoadEventImpactAt,
   getEffectiveWeaponSpec,
   getGroundElevationAt,
   getPlayerStaminaSpeedMultiplier,
@@ -1248,17 +1250,94 @@ export class PlayerController {
     }
     this.beaconGroup.rotation.y += dt * 1.4;
 
-    // Update Custom GPS Waypoint 3D Beacon & auto-clear on arrival
+    // Update Custom GPS Waypoint 3D Beacon & Detour / Contract progression
     const storeSnap = gameStore.getState();
     const wp = storeSnap.customWaypoint;
     const activeContract = storeSnap.activeContract;
+    const activeRoadEvent = storeSnap.worldClockEventState.activeEvent;
+
+    if (
+      isPlaying &&
+      activeRoadEvent &&
+      !activeRoadEvent.detourCompleted &&
+      pState.currentInterior === 'exterior'
+    ) {
+      const detourCheck = checkPlayerDetourProgress(
+        activeRoadEvent,
+        this.playerPhys.x,
+        this.playerPhys.z
+      );
+      if (detourCheck.reachedWaypoint && detourCheck.updatedEvent) {
+        const upEv = detourCheck.updatedEvent;
+        if (detourCheck.completedDetour) {
+          soundEngine.playMissionFanfare();
+          this.spawnParticles(
+            this.playerPhys.x,
+            this.playerPhys.y + 1.5,
+            this.playerPhys.z,
+            24,
+            0x22c55e,
+            9
+          );
+          gameStore.recordCashTransaction(
+            `Bonus Rute Alternatif: ${upEv.spec.corridorName}`,
+            65000,
+            'misi'
+          );
+          gameStore.updatePlayerState((prev) => ({
+            ...prev,
+            rupiah: prev.rupiah + 65000,
+            score: prev.score + 250,
+            bestScore: Math.max(prev.bestScore, prev.score + 250),
+          }));
+          gameStore.setState((prev) => ({
+            worldClockEventState: {
+              ...prev.worldClockEventState,
+              activeEvent: upEv,
+            },
+            customWaypoint:
+              prev.customWaypoint?.category === 'detour'
+                ? null
+                : prev.customWaypoint,
+            lastOutcomeText: `Rute Alternatif Tuntas! Berhasil memutar menghindari ${upEv.spec.title} (+Rp 65.000)`,
+          }));
+        } else if (detourCheck.nextWaypoint) {
+          soundEngine.playPickup();
+          const nextPt = detourCheck.nextWaypoint;
+          this.spawnParticles(
+            this.playerPhys.x,
+            this.playerPhys.y + 1.4,
+            this.playerPhys.z,
+            16,
+            0x38bdf8,
+            7
+          );
+          gameStore.setState((prev) => ({
+            worldClockEventState: {
+              ...prev.worldClockEventState,
+              activeEvent: upEv,
+            },
+            customWaypoint:
+              prev.customWaypoint?.category === 'detour' || !prev.customWaypoint
+                ? {
+                    x: nextPt[0],
+                    z: nextPt[1],
+                    label: `Rute Alternatif (${upEv.detourStageIndex + 1}/${upEv.spec.detourWaypoints.length}): ${upEv.spec.detourLabel}`,
+                    category: 'detour',
+                  }
+                : prev.customWaypoint,
+          }));
+        }
+      }
+    }
+
     if (wp && pState.currentInterior === 'exterior') {
       const wpY = getGroundElevationAt(wp.x, wp.z);
       this.waypointBeaconGroup.position.set(wp.x, wpY, wp.z);
       this.waypointBeaconGroup.visible = true;
       this.waypointBeaconGroup.rotation.y -= dt * 1.8;
 
-      if (isPlaying) {
+      if (isPlaying && wp.category !== 'detour') {
         const distWp = Math.hypot(
           this.playerPhys.x - wp.x,
           this.playerPhys.z - wp.z
@@ -1693,6 +1772,35 @@ export class PlayerController {
       }
       activeVehicle.x = col.x;
       activeVehicle.z = col.z;
+
+      // Active World Clock Road Event (Road Construction / Traffic Jam) physical barrier & slowdown
+      const roadEventImpact = evaluateRoadEventImpactAt(
+        storeState.worldClockEventState.activeEvent,
+        activeVehicle.x,
+        activeVehicle.z,
+        activeVehicle.y
+      );
+      if (roadEventImpact.inZone) {
+        activeVehicle.speed *= Math.pow(
+          roadEventImpact.speedMultiplier,
+          simDt * 3.2
+        );
+        if (roadEventImpact.blockedBarrierCollide) {
+          activeVehicle.x = roadEventImpact.pushX;
+          activeVehicle.z = roadEventImpact.pushZ;
+          activeVehicle.speed *= -0.38;
+          this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.26);
+          this.spawnParticles(
+            activeVehicle.x,
+            activeVehicle.y + 0.75,
+            activeVehicle.z,
+            10,
+            0xf97316,
+            7
+          );
+          soundEngine.playPropCrash(0);
+        }
+      }
 
       // Ground vehicle-to-vehicle physical collision pushback & momentum transfer
       if (!vSpec.isAircraft || activeVehicle.y < 2.2) {

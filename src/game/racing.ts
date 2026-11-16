@@ -1,4 +1,5 @@
 import type {
+  ActiveWorldRoadEvent,
   BuildingFootprint,
   RoadsideSpawnLayout,
   SidewalkBounds,
@@ -17,6 +18,9 @@ import type {
   VehicleSpec,
   VehicleType,
   VehicleUnderglowSpec,
+  WorldClockEventTickerState,
+  WorldRoadEventKind,
+  WorldRoadEventSpec,
 } from './types';
 import { ENTERABLE_INTERIORS } from './heists';
 import { CITY_BUILDINGS, MAIN_BOULEVARD_SIDEWALK_SLABS } from './world/bounds';
@@ -729,6 +733,422 @@ export function isStoppedAtTrafficSignal(
   return false;
 }
 
+export const WORLD_ROAD_EVENT_CATALOG: WorldRoadEventSpec[] = [
+  {
+    id: 'evt_construction_sudirman_utara',
+    kind: 'road_construction',
+    title: 'Proyek Galian Pipa & Beton Sudirman Utara',
+    corridorName: 'Jl. Jend. Sudirman Utara (Thamrin)',
+    description:
+      'Galian utilitas bawah tanah menutup lajur utama Sudirman Utara. Barikade beton memaksa pengendara memutar.',
+    detourLabel: 'Putar via Lingkar Barat Tanah Abang',
+    x: 0,
+    z: -48,
+    radius: 7.5,
+    heading: 0,
+    detourWaypoints: [
+      [-32, -32],
+      [-32, -60],
+      [0, -68],
+    ],
+    detourTargetX: -32,
+    detourTargetZ: -32,
+  },
+  {
+    id: 'evt_jam_sudirman_selatan',
+    kind: 'traffic_jam',
+    title: 'Kemacetan Mendadak & Bus Mogok Blok M',
+    corridorName: 'Jl. Jend. Sudirman Selatan (Blok M)',
+    description:
+      'Antrean padat akibat angkutan umum mogok melintang di koridor selatan menuju Senayan & Blok M.',
+    detourLabel: 'Putar via Sabuk Timur Kemayoran - Senayan',
+    x: 0,
+    z: 48,
+    radius: 8.0,
+    heading: 0,
+    detourWaypoints: [
+      [32, 32],
+      [32, 60],
+      [0, 68],
+    ],
+    detourTargetX: 32,
+    detourTargetZ: 32,
+  },
+  {
+    id: 'evt_construction_merdeka_barat',
+    kind: 'road_construction',
+    title: 'Perbaikan Aspal & Barikade Medan Merdeka Barat',
+    corridorName: 'Jl. Medan Merdeka Barat (Harmoni)',
+    description:
+      'Pengaspalan ulang dan alat berat menutup koridor barat Monas menuju Tanah Abang.',
+    detourLabel: 'Putar via Lingkar Utara SCBD & Kota Tua',
+    x: -48,
+    z: 2.5,
+    radius: 7.5,
+    heading: Math.PI / 2,
+    detourWaypoints: [
+      [-32, -32],
+      [-60, -32],
+      [-68, 2.5],
+    ],
+    detourTargetX: -32,
+    detourTargetZ: -32,
+  },
+  {
+    id: 'evt_jam_merdeka_timur',
+    kind: 'traffic_jam',
+    title: 'Antrean Padat & Truk Kontainer Melintang',
+    corridorName: 'Jl. Medan Merdeka Timur (Kemayoran)',
+    description:
+      'Penumpukan kendaraan di simpang timur menghambat laju menuju Kemayoran dan Tanjung Priok.',
+    detourLabel: 'Putar via Lingkar Selatan Monas',
+    x: 48,
+    z: 2.5,
+    radius: 8.0,
+    heading: Math.PI / 2,
+    detourWaypoints: [
+      [32, 32],
+      [60, 32],
+      [68, 2.5],
+    ],
+    detourTargetX: 32,
+    detourTargetZ: 32,
+  },
+  {
+    id: 'evt_construction_lingkar_barat',
+    kind: 'road_construction',
+    title: 'Penutupan Lajur Konstruksi Jembatan Semanggi Barat',
+    corridorName: 'Lingkar Barat Monas - SCBD',
+    description:
+      'Pemasangan girder baja menutup lajur lingkar barat. Gunakan boulevard utama Monas sebagai jalur alternatif.',
+    detourLabel: 'Putar via Boulevard Tengah Monas',
+    x: -32,
+    z: -14,
+    radius: 7.2,
+    heading: 0,
+    detourWaypoints: [
+      [0, 0],
+      [0, -32],
+      [-32, -32],
+    ],
+    detourTargetX: 0,
+    detourTargetZ: -32,
+  },
+  {
+    id: 'evt_jam_lingkar_timur',
+    kind: 'traffic_jam',
+    title: 'Kemacetan Jam Sibuk Simpang Lingkar Timur',
+    corridorName: 'Lingkar Timur Monas - Pasar Baru',
+    description:
+      'Titik temu arus komuter menyebabkan kemacetan beruntun di jalur Lingkar Timur.',
+    detourLabel: 'Putar via Jalur Protokol Tengah Monas',
+    x: 32,
+    z: 14,
+    radius: 7.8,
+    heading: 0,
+    detourWaypoints: [
+      [0, 0],
+      [0, 32],
+      [32, 32],
+    ],
+    detourTargetX: 0,
+    detourTargetZ: 32,
+  },
+];
+
+export function createInitialWorldClockEventState(
+  startWithActiveEvent: boolean = true
+): WorldClockEventTickerState {
+  if (!startWithActiveEvent) {
+    return {
+      activeEvent: null,
+      cooldownSec: 12,
+      totalEventsTriggered: 0,
+      lastEventId: null,
+    };
+  }
+  const initialSpec = WORLD_ROAD_EVENT_CATALOG[0];
+  return {
+    activeEvent: {
+      spec: initialSpec,
+      startedAtMinute: 1050,
+      remainingSec: 65,
+      totalDurationSec: 65,
+      detourStageIndex: 0,
+      detourCompleted: false,
+    },
+    cooldownSec: 18,
+    totalEventsTriggered: 1,
+    lastEventId: initialSpec.id,
+  };
+}
+
+export function isJakartaRushHour(worldTimeMinutes: number): boolean {
+  const norm = ((Math.floor(worldTimeMinutes) % 1440) + 1440) % 1440;
+  // Morning rush (06:30 - 09:45 WIB) or Evening rush (16:15 - 20:15 WIB)
+  return (norm >= 390 && norm <= 585) || (norm >= 975 && norm <= 1215);
+}
+
+export function triggerManualWorldRoadEvent(
+  state: WorldClockEventTickerState,
+  worldTimeMinutes: number,
+  preferredKind?: WorldRoadEventKind,
+  rngValue: number = Math.random()
+): {
+  nextState: WorldClockEventTickerState;
+  triggeredEvent: ActiveWorldRoadEvent;
+} {
+  const candidates = WORLD_ROAD_EVENT_CATALOG.filter((item) => {
+    if (preferredKind && item.kind !== preferredKind) return false;
+    return item.id !== state.lastEventId;
+  });
+  const pool =
+    candidates.length > 0
+      ? candidates
+      : preferredKind
+      ? WORLD_ROAD_EVENT_CATALOG.filter((i) => i.kind === preferredKind)
+      : WORLD_ROAD_EVENT_CATALOG;
+
+  const clampedRng = Math.max(0, Math.min(0.999999, rngValue));
+  const chosenSpec = pool[Math.floor(clampedRng * pool.length)] || WORLD_ROAD_EVENT_CATALOG[0];
+  const durationSec = chosenSpec.kind === 'road_construction' ? 65 : 50;
+
+  const triggeredEvent: ActiveWorldRoadEvent = {
+    spec: chosenSpec,
+    startedAtMinute: ((Math.floor(worldTimeMinutes) % 1440) + 1440) % 1440,
+    remainingSec: durationSec,
+    totalDurationSec: durationSec,
+    detourStageIndex: 0,
+    detourCompleted: false,
+  };
+
+  const nextState: WorldClockEventTickerState = {
+    activeEvent: triggeredEvent,
+    cooldownSec: 18,
+    totalEventsTriggered: state.totalEventsTriggered + 1,
+    lastEventId: chosenSpec.id,
+  };
+
+  return { nextState, triggeredEvent };
+}
+
+export function stepWorldClockEventTicker(
+  state: WorldClockEventTickerState,
+  worldTimeMinutes: number,
+  dtSec: number = 1,
+  rngValue: number = Math.random()
+): {
+  nextState: WorldClockEventTickerState;
+  triggeredEvent: ActiveWorldRoadEvent | null;
+  expiredEvent: ActiveWorldRoadEvent | null;
+} {
+  if (dtSec <= 0) {
+    return { nextState: state, triggeredEvent: null, expiredEvent: null };
+  }
+
+  if (state.activeEvent) {
+    const rem = state.activeEvent.remainingSec - dtSec;
+    if (rem <= 0) {
+      return {
+        nextState: {
+          ...state,
+          activeEvent: null,
+          cooldownSec: 14,
+        },
+        triggeredEvent: null,
+        expiredEvent: state.activeEvent,
+      };
+    }
+    return {
+      nextState: {
+        ...state,
+        activeEvent: {
+          ...state.activeEvent,
+          remainingSec: rem,
+        },
+      },
+      triggeredEvent: null,
+      expiredEvent: null,
+    };
+  }
+
+  const nextCooldown = Math.max(0, state.cooldownSec - dtSec);
+  if (nextCooldown > 0) {
+    return {
+      nextState: {
+        ...state,
+        cooldownSec: nextCooldown,
+      },
+      triggeredEvent: null,
+      expiredEvent: null,
+    };
+  }
+
+  const rushHour = isJakartaRushHour(worldTimeMinutes);
+  const triggerThreshold = rushHour ? 0.36 : 0.22;
+  if (rngValue < triggerThreshold) {
+    const normSelector = triggerThreshold > 0 ? rngValue / triggerThreshold : 0;
+    const { nextState, triggeredEvent } = triggerManualWorldRoadEvent(
+      state,
+      worldTimeMinutes,
+      undefined,
+      normSelector
+    );
+    return {
+      nextState,
+      triggeredEvent,
+      expiredEvent: null,
+    };
+  }
+
+  return {
+    nextState: {
+      ...state,
+      cooldownSec: 4,
+    },
+    triggeredEvent: null,
+    expiredEvent: null,
+  };
+}
+
+export function evaluateRoadEventImpactAt(
+  event: ActiveWorldRoadEvent | null | undefined,
+  x: number,
+  z: number,
+  y: number = 0
+): {
+  inZone: boolean;
+  speedMultiplier: number;
+  blockedBarrierCollide: boolean;
+  pushX: number;
+  pushZ: number;
+} {
+  if (!event || y > 2.2) {
+    return {
+      inZone: false,
+      speedMultiplier: 1.0,
+      blockedBarrierCollide: false,
+      pushX: x,
+      pushZ: z,
+    };
+  }
+
+  const dx = x - event.spec.x;
+  const dz = z - event.spec.z;
+  const dist = Math.hypot(dx, dz);
+  const outerRadius = event.spec.radius;
+
+  if (dist > outerRadius) {
+    return {
+      inZone: false,
+      speedMultiplier: 1.0,
+      blockedBarrierCollide: false,
+      pushX: x,
+      pushZ: z,
+    };
+  }
+
+  const innerBarrierRadius =
+    event.spec.kind === 'road_construction'
+      ? outerRadius * 0.56
+      : outerRadius * 0.42;
+
+  if (dist < innerBarrierRadius) {
+    const safeDist = dist > 0.001 ? dist : 1;
+    const nx = dist > 0.001 ? dx / safeDist : Math.sin(event.spec.heading);
+    const nz = dist > 0.001 ? dz / safeDist : Math.cos(event.spec.heading);
+    return {
+      inZone: true,
+      speedMultiplier: event.spec.kind === 'road_construction' ? 0.2 : 0.28,
+      blockedBarrierCollide: true,
+      pushX: event.spec.x + nx * (innerBarrierRadius + 0.35),
+      pushZ: event.spec.z + nz * (innerBarrierRadius + 0.35),
+    };
+  }
+
+  return {
+    inZone: true,
+    speedMultiplier: event.spec.kind === 'road_construction' ? 0.38 : 0.32,
+    blockedBarrierCollide: false,
+    pushX: x,
+    pushZ: z,
+  };
+}
+
+export function checkPlayerDetourProgress(
+  event: ActiveWorldRoadEvent | null | undefined,
+  playerX: number,
+  playerZ: number
+): {
+  updatedEvent: ActiveWorldRoadEvent | null;
+  reachedWaypoint: boolean;
+  completedDetour: boolean;
+  nextWaypoint: [number, number] | null;
+} {
+  if (!event || event.detourCompleted) {
+    return {
+      updatedEvent: event ?? null,
+      reachedWaypoint: false,
+      completedDetour: false,
+      nextWaypoint: null,
+    };
+  }
+
+  const waypoints = event.spec.detourWaypoints;
+  const currentIdx = Math.min(event.detourStageIndex, waypoints.length - 1);
+  const targetPt = waypoints[currentIdx];
+  if (!targetPt) {
+    return {
+      updatedEvent: event,
+      reachedWaypoint: false,
+      completedDetour: false,
+      nextWaypoint: null,
+    };
+  }
+
+  const dist = Math.hypot(playerX - targetPt[0], playerZ - targetPt[1]);
+  if (dist > 10.5) {
+    return {
+      updatedEvent: event,
+      reachedWaypoint: false,
+      completedDetour: false,
+      nextWaypoint: targetPt,
+    };
+  }
+
+  const nextIdx = currentIdx + 1;
+  if (nextIdx >= waypoints.length) {
+    const completedEvent: ActiveWorldRoadEvent = {
+      ...event,
+      detourStageIndex: waypoints.length,
+      detourCompleted: true,
+    };
+    return {
+      updatedEvent: completedEvent,
+      reachedWaypoint: true,
+      completedDetour: true,
+      nextWaypoint: null,
+    };
+  }
+
+  const nextPt = waypoints[nextIdx];
+  const updatedEvent: ActiveWorldRoadEvent = {
+    ...event,
+    detourStageIndex: nextIdx,
+    spec: {
+      ...event.spec,
+      detourTargetX: nextPt[0],
+      detourTargetZ: nextPt[1],
+    },
+  };
+  return {
+    updatedEvent,
+    reachedWaypoint: true,
+    completedDetour: false,
+    nextWaypoint: nextPt,
+  };
+}
+
 export function stepTrafficVehicleInPlace(
   vehicle: TrafficAISteppable,
   route: TrafficWaypoint[],
@@ -739,6 +1159,7 @@ export function stepTrafficVehicleInPlace(
     hornTriggered?: boolean;
     signalPhase?: TrafficSignalPhase;
     buildingGrid?: SpatialHashGrid<BuildingFootprint>;
+    activeRoadEvent?: ActiveWorldRoadEvent | null;
   }
 ): void {
   if (route.length === 0 || dt <= 0) return;
@@ -794,11 +1215,42 @@ export function stepTrafficVehicleInPlace(
   let targetHeading =
     ndx * ndx + ndz * ndz > 0.0001 ? Math.atan2(ndx, ndz) : vehicle.heading;
 
+  // Check active road event (traffic jam / road construction) ahead of ground AI vehicles
+  let effectiveAheadDist = aheadObstacleDist;
+  let roadEventSpeedCap: number | null = null;
+  if (options?.activeRoadEvent && vehicle.layer === 'ground') {
+    const ev = options.activeRoadEvent.spec;
+    const dxE = ev.x - vehicle.x;
+    const dzE = ev.z - vehicle.z;
+    const distE = Math.hypot(dxE, dzE);
+    if (distE < ev.radius + 14) {
+      const sinH = Math.sin(vehicle.heading);
+      const cosH = Math.cos(vehicle.heading);
+      const fwdDot = dxE * sinH + dzE * cosH;
+      const latDist = Math.abs(dxE * cosH - dzE * sinH);
+      if (fwdDot > -2.5 && latDist < ev.radius * 0.95) {
+        if (ev.kind === 'road_construction') {
+          effectiveAheadDist = Math.min(
+            effectiveAheadDist,
+            Math.max(0, distE - ev.radius * 0.55)
+          );
+          roadEventSpeedCap = vehicle.vehicleType === 'ojek' ? 3.5 : 0;
+        } else {
+          // Traffic jam: severe crawl
+          roadEventSpeedCap =
+            vehicle.vehicleType === 'ojek'
+              ? vehicle.preferredSpeed * 0.45
+              : vehicle.preferredSpeed * 0.18;
+        }
+      }
+    }
+  }
+
   // Ojol nimble lane-splitting when traffic ahead slows down or horn/wanted is active
   if (vehicle.vehicleType === 'ojek') {
     const yielding =
       (vehicle.hornReactionTimer ?? 0) > 0 || (options?.playerWantedLevel ?? 0) >= 2;
-    const weaving = aheadObstacleDist < 12.0;
+    const weaving = effectiveAheadDist < 12.0 || roadEventSpeedCap !== null;
     const desiredOffset = yielding ? 0.52 : weaving ? -0.34 : 0;
     const curOffset = vehicle.weaveOffset ?? 0;
     vehicle.weaveOffset = curOffset + (desiredOffset - curOffset) * Math.min(1, dt * 6);
@@ -819,6 +1271,9 @@ export function stepTrafficVehicleInPlace(
   }
   if (vehicle.vehicleType === 'ojek' && (vehicle.hornReactionTimer ?? 0) > 0) {
     targetSpeed *= 1.25;
+  }
+  if (roadEventSpeedCap !== null) {
+    targetSpeed = Math.min(targetSpeed, roadEventSpeedCap);
   }
 
   if (vehicle.stopTimer > 0) {
@@ -843,10 +1298,10 @@ export function stepTrafficVehicleInPlace(
 
   // Ojol can filter closer than four-wheeled vehicles
   const hardStopDist = vehicle.vehicleType === 'ojek' ? 3.2 : 5.4;
-  if (aheadObstacleDist < hardStopDist) {
+  if (effectiveAheadDist < hardStopDist) {
     targetSpeed = 0;
-  } else if (aheadObstacleDist < 13.5) {
-    const gapFactor = (aheadObstacleDist - hardStopDist) / (13.5 - hardStopDist);
+  } else if (effectiveAheadDist < 13.5) {
+    const gapFactor = (effectiveAheadDist - hardStopDist) / (13.5 - hardStopDist);
     targetSpeed = Math.min(targetSpeed, vehicle.preferredSpeed * gapFactor);
   }
 
@@ -889,6 +1344,7 @@ export function stepTrafficVehicleAI(
     hornTriggered?: boolean;
     signalPhase?: TrafficSignalPhase;
     buildingGrid?: SpatialHashGrid<BuildingFootprint>;
+    activeRoadEvent?: ActiveWorldRoadEvent | null;
   }
 ): TrafficAISteppable {
   const next: TrafficAISteppable = { ...state };

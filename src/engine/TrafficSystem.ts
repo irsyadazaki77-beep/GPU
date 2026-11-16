@@ -24,7 +24,8 @@ import {
   buildIndonesianVehicleMesh,
   buildPolicePursuitHeliWithSpotlight,
 } from '../game/world/geometryBuilders';
-import type { RadarVehicleBlip } from '../state/gameStore';
+import { gameStore, type RadarVehicleBlip } from '../state/gameStore';
+import { spatialAudio } from './spatialAudio';
 
 export interface VehicleEntity extends TrafficAISteppable {
   id: string;
@@ -50,6 +51,10 @@ export class TrafficSystem {
   private readonly scene: THREE.Scene;
   private readonly buildingGrid: SpatialHashGrid<BuildingFootprint>;
   private readonly roadblockGroup: THREE.Group;
+  private readonly roadEventGroup: THREE.Group;
+  private readonly constructionSubGroup: THREE.Group;
+  private readonly trafficJamSubGroup: THREE.Group;
+  private readonly eventBeaconMat: THREE.MeshStandardMaterial;
   private roadblockActive = false;
   private roadblockX = 0;
   private roadblockZ = -42;
@@ -216,6 +221,108 @@ export class TrafficSystem {
     }
     this.roadblockGroup.visible = false;
     scene.add(this.roadblockGroup);
+
+    // Dynamic World Clock Road Event 3D Group (Road Construction & Traffic Jam Obstacles)
+    this.roadEventGroup = new THREE.Group();
+    this.constructionSubGroup = new THREE.Group();
+    this.trafficJamSubGroup = new THREE.Group();
+    this.eventBeaconMat = new THREE.MeshStandardMaterial({
+      color: 0xf59e0b,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 2.2,
+      roughness: 0.25,
+    });
+
+    const trenchMat = new THREE.MeshStandardMaterial({
+      color: 0x1e293b,
+      roughness: 0.92,
+      metalness: 0.08,
+    });
+    const orangeMat = new THREE.MeshStandardMaterial({
+      color: 0xea580c,
+      roughness: 0.55,
+      metalness: 0.15,
+    });
+    const whiteMat = new THREE.MeshStandardMaterial({
+      color: 0xf8fafc,
+      roughness: 0.45,
+      metalness: 0.1,
+    });
+
+    // 1) Road Construction Sub-Group: Trench, Striped Barricades, Traffic Cones & Flashing Beacons
+    const trenchSlab = new THREE.Mesh(
+      new THREE.BoxGeometry(6.8, 0.08, 4.2),
+      trenchMat
+    );
+    trenchSlab.position.set(0, 0.04, 0);
+    this.constructionSubGroup.add(trenchSlab);
+
+    for (const bx of [-2.8, 0, 2.8]) {
+      for (const bz of [-2.4, 2.4]) {
+        const barBase = new THREE.Mesh(
+          new THREE.BoxGeometry(2.2, 0.95, 0.48),
+          orangeMat
+        );
+        barBase.position.set(bx, 0.48, bz);
+        this.constructionSubGroup.add(barBase);
+
+        const barStripe = new THREE.Mesh(
+          new THREE.BoxGeometry(2.05, 0.26, 0.52),
+          whiteMat
+        );
+        barStripe.position.set(bx, 0.68, bz);
+        this.constructionSubGroup.add(barStripe);
+
+        const beacon = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.14, 0.16, 0.24, 10),
+          this.eventBeaconMat
+        );
+        beacon.position.set(bx, 1.08, bz);
+        this.constructionSubGroup.add(beacon);
+      }
+    }
+
+    const coneGeo = new THREE.ConeGeometry(0.28, 0.78, 10);
+    for (const [cx, cz] of [
+      [-4.2, -3.5],
+      [4.2, -3.5],
+      [-4.2, 3.5],
+      [4.2, 3.5],
+      [-4.5, 0],
+      [4.5, 0],
+    ]) {
+      const cone = new THREE.Mesh(coneGeo, orangeMat);
+      cone.position.set(cx, 0.39, cz);
+      this.constructionSubGroup.add(cone);
+    }
+
+    // 2) Traffic Jam Sub-Group: Stalled Angkot & Sedan + Hazard Triangle Beacons
+    const stalledAngkot = buildIndonesianVehicleMesh('angkot');
+    stalledAngkot.position.set(-1.6, 0, -1.2);
+    stalledAngkot.rotation.y = 0.42;
+    this.trafficJamSubGroup.add(stalledAngkot);
+
+    const stalledSedan = buildIndonesianVehicleMesh('sedan');
+    stalledSedan.position.set(1.8, 0, 1.3);
+    stalledSedan.rotation.y = -0.52;
+    this.trafficJamSubGroup.add(stalledSedan);
+
+    for (const [tx, tz] of [
+      [-2.6, -4.2],
+      [2.6, 4.2],
+      [0, 0],
+    ]) {
+      const hazardTri = new THREE.Mesh(
+        new THREE.ConeGeometry(0.34, 0.65, 4),
+        this.eventBeaconMat
+      );
+      hazardTri.position.set(tx, 0.35, tz);
+      this.trafficJamSubGroup.add(hazardTri);
+    }
+
+    this.roadEventGroup.add(this.constructionSubGroup, this.trafficJamSubGroup);
+    this.roadEventGroup.visible = false;
+    scene.add(this.roadEventGroup);
   }
 
   public notifyHorn(px: number, pz: number): void {
@@ -384,6 +491,30 @@ export class TrafficSystem {
       this.policeHeliMesh.visible = false;
       this.chopperSpotLight.intensity = 0;
     }
+
+    // Sync World Clock Road Event 3D Obstacle Group
+    const activeRoadEvent =
+      gameStore.getState().worldClockEventState.activeEvent;
+    if (
+      activeRoadEvent &&
+      pState.currentInterior === 'exterior' &&
+      isPlaying
+    ) {
+      this.roadEventGroup.visible = true;
+      this.roadEventGroup.position.set(
+        activeRoadEvent.spec.x,
+        0,
+        activeRoadEvent.spec.z
+      );
+      this.roadEventGroup.rotation.y = activeRoadEvent.spec.heading;
+      const isConstruction = activeRoadEvent.spec.kind === 'road_construction';
+      this.constructionSubGroup.visible = isConstruction;
+      this.trafficJamSubGroup.visible = !isConstruction;
+      this.eventBeaconMat.emissiveIntensity =
+        Math.floor(nowMs / 220) % 2 === 0 ? 2.8 : 0.45;
+    } else {
+      this.roadEventGroup.visible = false;
+    }
   }
 
   public stepTrafficAI(
@@ -532,12 +663,26 @@ export class TrafficSystem {
             hornTriggered && Math.hypot(v.x - playerX, v.z - playerZ) < 30,
           signalPhase,
           buildingGrid: this.buildingGrid,
+          activeRoadEvent:
+            gameStore.getState().worldClockEventState.activeEvent,
         });
         v.y = v.layer === 'elevated' ? getGroundElevationAt(v.x, v.z) : 0;
       }
 
       v.mesh.position.set(v.x, v.y, v.z);
-      v.mesh.rotation.y = v.heading;
+      v.mesh.rotation.y = v.heading + (v.isDrifting ? v.driftAngle * 0.25 : 0);
+      if (v.type !== 'heli' && v.type !== 'vtol_jet') {
+        v.mesh.rotation.x = v.pitchAngle || 0;
+        v.mesh.rotation.z = v.rollAngle || 0;
+      }
+
+      if (hornTriggered && Math.hypot(v.x - playerX, v.z - playerZ) < 26) {
+        if (v.type === 'transjakarta') {
+          spatialAudio.playTransJakartaHorn3D(v.x, v.y, v.z);
+        } else if (v.type === 'ojek') {
+          spatialAudio.playOjolHorn3D(v.x, v.y, v.z);
+        }
+      }
     }
 
     // Active Vehicle Headlights & Cabin Acoustic Muffling
@@ -593,10 +738,17 @@ export class TrafficSystem {
           nearestPolice.y + 2.1,
           nearestPolice.z
         );
-        this.sirenLight.color.setHex(
-          Math.floor(nowMs / 115) % 2 === 0 ? 0xef4444 : 0x3b82f6
-        );
+        const sirenRedPhase = Math.floor(nowMs / 115) % 2 === 0;
+        this.sirenLight.color.setHex(sirenRedPhase ? 0xef4444 : 0x3b82f6);
         this.sirenLight.intensity = 4.2;
+        if (Math.floor(nowMs / 320) !== Math.floor((nowMs - simDt * 1000) / 320)) {
+          spatialAudio.playPoliceSiren3D(
+            nearestPolice.x,
+            nearestPolice.y,
+            nearestPolice.z,
+            sirenRedPhase
+          );
+        }
       } else {
         this.sirenLight.intensity = 0;
       }
@@ -653,5 +805,6 @@ export class TrafficSystem {
     }
     disposeGroup(this.policeHeliMesh);
     disposeGroup(this.roadblockGroup);
+    disposeGroup(this.roadEventGroup);
   }
 }

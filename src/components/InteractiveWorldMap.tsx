@@ -75,6 +75,8 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
   const claimedBounties = useGameStore((s) => s.claimedBounties);
   const worldTimeMinutes = useGameStore((s) => s.worldTimeMinutes);
   const autoTimeCycle = useGameStore((s) => s.autoTimeCycle);
+  const worldClockEventState = useGameStore((s) => s.worldClockEventState);
+  const activeRoadEvent = worldClockEventState.activeEvent;
 
   const [filter, setFilter] = useState<MapFilterCategory>('all');
   const [zoom, setZoom] = useState<number>(1.35);
@@ -397,9 +399,54 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
         ctx.fill();
       }
 
-      // 10. Custom GPS Waypoint Line & Pin
+      // 10. Custom GPS Waypoint Line & Pin + Active Road Event Hazard & Detour
       const pCanvasX = originX + playerX * scale;
       const pCanvasY = originY + playerZ * scale;
+
+      if (activeRoadEvent) {
+        const ev = activeRoadEvent.spec;
+        const ex = originX + ev.x * scale;
+        const ez = originY + ev.z * scale;
+        const isConst = ev.kind === 'road_construction';
+
+        if (ev.detourWaypoints.length > 0 && !activeRoadEvent.detourCompleted) {
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 2.2;
+          ctx.setLineDash([5, 4]);
+          ctx.beginPath();
+          ctx.moveTo(pCanvasX, pCanvasY);
+          for (
+            let wi = activeRoadEvent.detourStageIndex;
+            wi < ev.detourWaypoints.length;
+            wi++
+          ) {
+            const pt = ev.detourWaypoints[wi];
+            ctx.lineTo(originX + pt[0] * scale, originY + pt[1] * scale);
+          }
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        ctx.fillStyle = isConst
+          ? 'rgba(249, 115, 22, 0.24)'
+          : 'rgba(239, 68, 68, 0.24)';
+        ctx.strokeStyle = isConst ? '#f97316' : '#ef4444';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(ex, ez, ev.radius * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = isConst ? '#f97316' : '#ef4444';
+        ctx.beginPath();
+        ctx.arc(ex, ez, 7.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#090c12';
+        ctx.font = 'bold 9px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('!', ex, ez + 0.5);
+      }
 
       if (customWaypoint) {
         const wx = originX + customWaypoint.x * scale;
@@ -459,6 +506,7 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
     visiblePois,
     selectedPoi,
     customWaypoint,
+    activeRoadEvent,
     playerState.activeProtagonist,
     playerState.protagonistRoster,
     staticLayout,
@@ -646,48 +694,97 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
           )}
         </div>
 
-        {/* 24-Hour Real-Time Jakarta Clock & Turf Summary Strip */}
-        <div className="aaa-glass rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 border border-white/10">
-          <div className="flex items-center gap-3">
-            <span className="font-mono-num text-sm font-extrabold text-[#fef08a]">
-              {formatJakartaClock(worldTimeMinutes)} WIB
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={1439}
-              step={15}
-              value={worldTimeMinutes}
-              aria-label="Pengatur Waktu 24 Jam Jakarta"
-              onChange={(e) => {
-                const mins = Number(e.target.value);
-                gameStore.setState((prev) => ({
-                  worldTimeMinutes: mins,
-                  weatherMode: resolveWeatherFromWorldClock(
-                    mins,
-                    prev.weatherMode === 'hujan'
-                  ),
-                }));
-              }}
-              className="w-32 sm:w-44 accent-[#f59e0b] cursor-pointer"
-            />
-            <button
-              type="button"
-              onClick={() => gameStore.toggleAutoTimeCycle()}
-              className={`px-2.5 py-1 rounded text-[11px] font-mono-num font-bold cursor-pointer ${
-                autoTimeCycle
-                  ? 'bg-[#22c55e]/20 text-[#22c55e]'
-                  : 'bg-white/10 text-[#94a3b8]'
-              }`}
-            >
-              {autoTimeCycle ? 'Siklus 24J Aktif' : 'Waktu Dikunci'}
-            </button>
+        {/* 24-Hour Real-Time Jakarta Clock, World Event Ticker & Turf Summary Strip */}
+        <div className="aaa-glass rounded-xl px-4 py-2.5 flex flex-col gap-2 border border-white/10">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="font-mono-num text-sm font-extrabold text-[#fef08a]">
+                {formatJakartaClock(worldTimeMinutes)} WIB
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={1439}
+                step={15}
+                value={worldTimeMinutes}
+                aria-label="Pengatur Waktu 24 Jam Jakarta"
+                onChange={(e) => {
+                  const mins = Number(e.target.value);
+                  gameStore.setState((prev) => ({
+                    worldTimeMinutes: mins,
+                    weatherMode: resolveWeatherFromWorldClock(
+                      mins,
+                      prev.weatherMode === 'hujan'
+                    ),
+                  }));
+                }}
+                className="w-32 sm:w-44 accent-[#f59e0b] cursor-pointer"
+              />
+              <button
+                type="button"
+                onClick={() => gameStore.toggleAutoTimeCycle()}
+                className={`px-2.5 py-1 rounded text-[11px] font-mono-num font-bold cursor-pointer ${
+                  autoTimeCycle
+                    ? 'bg-[#22c55e]/20 text-[#22c55e]'
+                    : 'bg-white/10 text-[#94a3b8]'
+                }`}
+              >
+                {autoTimeCycle ? 'Siklus 24J Aktif' : 'Waktu Dikunci'}
+              </button>
+            </div>
+            <div className="text-xs font-mono-num text-[#cbd5e1]">
+              Dividen Teritori Kru:{' '}
+              <span className="text-[#22c55e] font-bold">
+                +{formatRupiah(calculateTurfWarsIncome(playerState))}/4d
+              </span>
+            </div>
           </div>
-          <div className="text-xs font-mono-num text-[#cbd5e1]">
-            Dividen Teritori Kru:{' '}
-            <span className="text-[#22c55e] font-bold">
-              +{formatRupiah(calculateTurfWarsIncome(playerState))}/4d
-            </span>
+
+          {/* World Clock Traffic Jam / Road Construction Ticker Control Row */}
+          <div className="pt-2 border-t border-white/10 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="min-w-0 flex items-center gap-2">
+              <span
+                className={`px-1.5 py-0.5 rounded font-mono-num text-[10px] font-bold ${
+                  activeRoadEvent?.spec.kind === 'road_construction'
+                    ? 'bg-[#f97316]/20 text-[#fb923c]'
+                    : activeRoadEvent
+                    ? 'bg-[#ef4444]/20 text-[#f87171]'
+                    : 'bg-white/10 text-[#94a3b8]'
+                }`}
+              >
+                {activeRoadEvent
+                  ? activeRoadEvent.spec.kind === 'road_construction'
+                    ? 'PROYEK JALAN'
+                    : 'MACET MENDADAK'
+                  : 'LALU LINTAS LANCAR'}
+              </span>
+              <span className="text-[#e2e8f0] font-medium truncate">
+                {activeRoadEvent
+                  ? `${activeRoadEvent.spec.title} (${activeRoadEvent.spec.detourLabel})`
+                  : 'Tidak ada penutupan jalan aktif saat ini'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {activeRoadEvent && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    gameStore.activateRoadEventDetourGps();
+                    onResumeGame?.();
+                  }}
+                  className="px-2.5 py-1 rounded bg-[#38bdf8] hover:bg-[#7dd3fc] text-[#090c12] text-[11px] font-bold cursor-pointer transition-colors"
+                >
+                  GPS Rute Alternatif
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => gameStore.triggerNextWorldRoadEvent()}
+                className="px-2.5 py-1 rounded bg-[#f59e0b]/20 hover:bg-[#f59e0b] text-[#f59e0b] hover:text-[#090c12] text-[11px] font-bold cursor-pointer transition-colors"
+              >
+                Simulasi Insiden Jalan
+              </button>
+            </div>
           </div>
         </div>
       </div>

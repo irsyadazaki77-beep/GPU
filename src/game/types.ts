@@ -617,6 +617,15 @@ export interface NpcDynamicSideQuest {
   repGain: number;
 }
 
+export interface WorldContextSnapshot {
+  activeProtagonist: 'Nabilo' | 'Raka' | 'Kirana' | ProtagonistId;
+  currentDistrict: string;
+  wantedLevel: number;
+  factionStandings: Record<FactionId, number>;
+  ownedTurfCount: number;
+  recentEvents: string[];
+}
+
 export interface NpcDialogueRequest {
   npcName: string;
   npcRole: string;
@@ -626,6 +635,7 @@ export interface NpcDialogueRequest {
   origin: OriginArchetype;
   wantedLevel: number;
   reputation: Record<FactionId, number>;
+  worldContext?: WorldContextSnapshot;
 }
 
 export interface NpcDialogueResponse {
@@ -633,6 +643,7 @@ export interface NpcDialogueResponse {
   tone: string;
   source: 'gemini' | 'fallback';
   sideQuest?: NpcDynamicSideQuest;
+  worldMemorySummary?: string;
 }
 
 export type TouchControlsMode = 'auto' | 'on' | 'off';
@@ -644,7 +655,42 @@ export type WaypointCategory =
   | 'heist'
   | 'race'
   | 'property'
-  | 'bounty';
+  | 'bounty'
+  | 'detour';
+
+export type WorldRoadEventKind = 'traffic_jam' | 'road_construction';
+
+export interface WorldRoadEventSpec {
+  id: string;
+  kind: WorldRoadEventKind;
+  title: string;
+  corridorName: string;
+  description: string;
+  detourLabel: string;
+  x: number;
+  z: number;
+  radius: number;
+  heading: number;
+  detourWaypoints: [number, number][];
+  detourTargetX: number;
+  detourTargetZ: number;
+}
+
+export interface ActiveWorldRoadEvent {
+  spec: WorldRoadEventSpec;
+  startedAtMinute: number;
+  remainingSec: number;
+  totalDurationSec: number;
+  detourStageIndex: number;
+  detourCompleted: boolean;
+}
+
+export interface WorldClockEventTickerState {
+  activeEvent: ActiveWorldRoadEvent | null;
+  cooldownSec: number;
+  totalEventsTriggered: number;
+  lastEventId: string | null;
+}
 
 export interface CustomWaypointState {
   x: number;
@@ -746,6 +792,35 @@ export interface NpcVoiceResponse {
   mimeType: string;
   voiceName: string;
   source: 'gemini_tts' | 'fallback';
+  cacheHit?: boolean;
 }
+
+export type MultiplayerRoomMode = 'free_roam' | 'street_race' | 'coop_heist';
+
+export interface NetPeerSnapshot {
+  peerId: string;
+  displayName: string;
+  protagonist: ProtagonistId;
+  x: number;
+  y: number;
+  z: number;
+  heading: number;
+  speed: number;
+  vehicleType: VehicleType | null;
+  updatedAt: number;
+}
+
+export interface EnginePerformanceTelemetry {
+  fps: number;
+  drawCalls: number;
+  triangles: number;
+  activeRigidBodies: number;
+  networkPingMs: number;
+  connectedPeers: number;
+  roomId: string;
+  roomMode: MultiplayerRoomMode;
+  simWorkerActive: boolean;
+}
+
 
 

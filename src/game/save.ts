@@ -393,3 +393,49 @@ export function parseImportedSaveJson(rawJson: string): SavedGameSnapshot | null
   }
 }
 
+export async function syncSaveToCloud(
+  slotId: SaveSlotId,
+  snapshot?: SavedGameSnapshot | null
+): Promise<boolean> {
+  const payload = snapshot ?? loadSavedGame(slotId);
+  if (!payload || typeof fetch !== 'function') return false;
+  try {
+    const res = await fetch(`/api/saves/${slotId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { snapshot?: SavedGameSnapshot };
+    if (data?.snapshot) {
+      saveGameSnapshot(data.snapshot, slotId);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchSaveFromCloud(
+  slotId: SaveSlotId
+): Promise<SavedGameSnapshot | null> {
+  if (typeof fetch !== 'function') return null;
+  try {
+    const res = await fetch(`/api/saves/${slotId}`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      exists?: boolean;
+      snapshot?: unknown;
+    };
+    if (!data?.exists || !data.snapshot) return null;
+    const migrated = migrateSavedGame(data.snapshot);
+    if (migrated) {
+      saveGameSnapshot(migrated, slotId);
+    }
+    return migrated;
+  } catch {
+    return null;
+  }
+}
+
+

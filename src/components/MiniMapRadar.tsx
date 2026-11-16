@@ -232,6 +232,55 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
         ctx.fill();
       }
 
+      // 9b-2. Active World Clock Road Event (Traffic Jam / Construction Hazard & Detour Path)
+      const activeRoadEvent = store.worldClockEventState.activeEvent;
+      if (activeRoadEvent) {
+        const ev = activeRoadEvent.spec;
+        const ex = cx + (ev.x - px) * zoom;
+        const ez = cy + (ev.z - pz) * zoom;
+        const isConst = ev.kind === 'road_construction';
+
+        // Dashed Detour Route around blockage
+        if (ev.detourWaypoints.length > 0 && !activeRoadEvent.detourCompleted) {
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)';
+          ctx.lineWidth = 1.8;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          for (
+            let wi = activeRoadEvent.detourStageIndex;
+            wi < ev.detourWaypoints.length;
+            wi++
+          ) {
+            const dpt = ev.detourWaypoints[wi];
+            ctx.lineTo(cx + (dpt[0] - px) * zoom, cy + (dpt[1] - pz) * zoom);
+          }
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        // Hazard Zone Ring & Marker
+        ctx.fillStyle = isConst
+          ? 'rgba(249, 115, 22, 0.28)'
+          : 'rgba(239, 68, 68, 0.28)';
+        ctx.strokeStyle = isConst ? '#f97316' : '#ef4444';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(ex, ez, ev.radius * zoom * 0.9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = isConst ? '#f97316' : '#ef4444';
+        ctx.beginPath();
+        ctx.arc(ex, ez, 4.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#090c12';
+        ctx.font = 'bold 8px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('!', ex, ez + 0.5);
+      }
+
       // 9c. Custom GPS Waypoint Pin & Dashed Purple Route
       const wp = store.customWaypoint;
       if (wp) {

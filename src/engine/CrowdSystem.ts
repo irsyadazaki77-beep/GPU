@@ -4,29 +4,15 @@ import {
   MAIN_BOULEVARD_SIDEWALK_SLABS,
   SpatialHashGrid,
   TrafficSignalPhase,
-  resolveCircleAABBCollision,
-  stepSidewalkPatrol,
 } from '../game/rules';
 import type { SidewalkRect } from '../game/world/textures';
+import {
+  PedestrianAiAgent,
+  stepPedestrianAgentInPlace,
+  triggerCrowdFleeImpulse,
+} from './crowdAi';
 
-interface PedestrianAgent {
-  x: number;
-  z: number;
-  axis: 'ns' | 'ew';
-  dir: 1 | -1;
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-  speed: number;
-  phase: number;
-  panicTimer: number;
-  panicVx: number;
-  panicVz: number;
-  torsoColor: number;
-}
-
-const MAX_PEDESTRIANS = 44;
+const MAX_PEDESTRIANS = 52;
 
 const BATIK_SHIRT_COLORS = [
   0xe11d48, // merah marun
@@ -41,7 +27,7 @@ const BATIK_SHIRT_COLORS = [
 export class CrowdSystem {
   public readonly group = new THREE.Group();
 
-  private readonly agents: PedestrianAgent[] = [];
+  private readonly agents: PedestrianAiAgent[] = [];
   private readonly buildingGrid?: SpatialHashGrid<BuildingFootprint>;
   private readonly torsoMesh: THREE.InstancedMesh;
   private readonly headMesh: THREE.InstancedMesh;
@@ -73,9 +59,13 @@ export class CrowdSystem {
       const fracB = ((i * 53) % 7) / 6;
 
       const sx =
-        rect.minX + padX + Math.max(0, spanX - padX * 2) * (axis === 'ns' ? fracB : fracA);
+        rect.minX +
+        padX +
+        Math.max(0, spanX - padX * 2) * (axis === 'ns' ? fracB : fracA);
       const sz =
-        rect.minZ + padZ + Math.max(0, spanZ - padZ * 2) * (axis === 'ns' ? fracA : fracB);
+        rect.minZ +
+        padZ +
+        Math.max(0, spanZ - padZ * 2) * (axis === 'ns' ? fracA : fracB);
 
       this.agents.push({
         x: sx,
@@ -88,9 +78,13 @@ export class CrowdSystem {
         maxZ: rect.maxZ,
         speed: 1.45 + (i % 5) * 0.18,
         phase: i * 0.85,
+        state: 'WALKING',
         panicTimer: 0,
         panicVx: 0,
         panicVz: 0,
+        crowdTimer: 0,
+        crowdAnchorX: sx,
+        crowdAnchorZ: sz,
         torsoColor: BATIK_SHIRT_COLORS[i % BATIK_SHIRT_COLORS.length],
       });
     }
@@ -100,8 +94,13 @@ export class CrowdSystem {
       color: 0xffffff,
       roughness: 0.76,
     });
-    this.torsoMesh = new THREE.InstancedMesh(torsoGeo, torsoMat, MAX_PEDESTRIANS);
+    this.torsoMesh = new THREE.InstancedMesh(
+      torsoGeo,
+      torsoMat,
+      MAX_PEDESTRIANS
+    );
     this.torsoMesh.castShadow = true;
+    this.torsoMesh.frustumCulled = false;
     this.group.add(this.torsoMesh);
 
     const headGeo = new THREE.SphereGeometry(0.16, 8, 8);
@@ -110,6 +109,7 @@ export class CrowdSystem {
       roughness: 0.65,
     });
     this.headMesh = new THREE.InstancedMesh(headGeo, headMat, MAX_PEDESTRIANS);
+    this.headMesh.frustumCulled = false;
     this.group.add(this.headMesh);
 
     const legGeo = new THREE.BoxGeometry(0.15, 0.52, 0.16);
@@ -119,7 +119,13 @@ export class CrowdSystem {
       roughness: 0.85,
     });
     this.leftLegMesh = new THREE.InstancedMesh(legGeo, legMat, MAX_PEDESTRIANS);
-    this.rightLegMesh = new THREE.InstancedMesh(legGeo, legMat, MAX_PEDESTRIANS);
+    this.rightLegMesh = new THREE.InstancedMesh(
+      legGeo,
+      legMat,
+      MAX_PEDESTRIANS
+    );
+    this.leftLegMesh.frustumCulled = false;
+    this.rightLegMesh.frustumCulled = false;
     this.group.add(this.leftLegMesh, this.rightLegMesh);
 
     const umbrellaGeo = new THREE.ConeGeometry(0.62, 0.22, 8);
@@ -134,12 +140,15 @@ export class CrowdSystem {
       MAX_PEDESTRIANS
     );
     this.umbrellaMesh.visible = false;
+    this.umbrellaMesh.frustumCulled = false;
     this.group.add(this.umbrellaMesh);
 
     for (let i = 0; i < MAX_PEDESTRIANS; i++) {
       this._color.setHex(this.agents[i].torsoColor);
       this.torsoMesh.setColorAt(i, this._color);
-      this._color.setHex(i % 3 === 0 ? 0xf59e0b : i % 3 === 1 ? 0x38bdf8 : 0xef4444);
+      this._color.setHex(
+        i % 3 === 0 ? 0xf59e0b : i % 3 === 1 ? 0x38bdf8 : 0xef4444
+      );
       this.umbrellaMesh.setColorAt(i, this._color);
     }
     if (this.torsoMesh.instanceColor) {
@@ -152,18 +161,16 @@ export class CrowdSystem {
     scene.add(this.group);
   }
 
-  public triggerPanicNear(worldX: number, worldZ: number, radius: number = 22): void {
-    for (const ag of this.agents) {
-      const dx = ag.x - worldX;
-      const dz = ag.z - worldZ;
-      const dist = Math.hypot(dx, dz);
-      if (dist < radius) {
-        const inv = 1 / (dist || 1);
-        ag.panicTimer = 4.2;
-        ag.panicVx = dx * inv * 4.4;
-        ag.panicVz = dz * inv * 4.4;
-      }
-    }
+  public triggerPanicNear(
+    worldX: number,
+    worldZ: number,
+    radius: number = 22
+  ): void {
+    triggerCrowdFleeImpulse(this.agents, worldX, worldZ, radius, 4.2);
+  }
+
+  public getAgents(): readonly PedestrianAiAgent[] {
+    return this.agents;
   }
 
   public step(
@@ -176,7 +183,7 @@ export class CrowdSystem {
     playerZ: number
   ): void {
     const activeCount = Math.max(
-      10,
+      12,
       Math.min(MAX_PEDESTRIANS, Math.round(MAX_PEDESTRIANS * crowdRatio))
     );
     const showUmbrellas = wetnessFactor > 0.38;
@@ -189,84 +196,18 @@ export class CrowdSystem {
     this.umbrellaMesh.count = showUmbrellas ? activeCount : 0;
 
     const dummy = this._dummy;
+    const stepCtx = {
+      dt,
+      signalPhase,
+      wantedLevel,
+      playerX,
+      playerZ,
+      buildingGrid: this.buildingGrid,
+    };
 
     for (let i = 0; i < activeCount; i++) {
       const ag = this.agents[i];
-
-      if (wantedLevel >= 2) {
-        const dP = Math.hypot(ag.x - playerX, ag.z - playerZ);
-        if (dP < 14 && ag.panicTimer <= 0) {
-          ag.panicTimer = 3.0;
-          ag.panicVx = ((ag.x - playerX) / (dP || 1)) * 4.2;
-          ag.panicVz = ((ag.z - playerZ) / (dP || 1)) * 4.2;
-        }
-      }
-
-      let facing = 0;
-      let moving = true;
-
-      if (ag.panicTimer > 0) {
-        ag.panicTimer -= dt;
-        const col = resolveCircleAABBCollision(
-          ag.x + ag.panicVx * dt,
-          ag.z + ag.panicVz * dt,
-          0.4,
-          undefined,
-          this.buildingGrid
-        );
-        ag.x = col.x;
-        ag.z = col.z;
-        facing = Math.atan2(ag.panicVx, ag.panicVz);
-        ag.phase += dt * 11.5;
-      } else {
-        // Pause politely near curb intersections when avenue light is green for cars
-        const nearCurbEnd =
-          ag.axis === 'ns'
-            ? ag.z - ag.minZ < 1.2 || ag.maxZ - ag.z < 1.2
-            : ag.x - ag.minX < 1.2 || ag.maxX - ag.x < 1.2;
-        const waitForLight =
-          nearCurbEnd &&
-          ((ag.axis === 'ns' && signalPhase === 'ns_green') ||
-            (ag.axis === 'ew' && signalPhase === 'ew_green'));
-
-        if (waitForLight) {
-          moving = false;
-          facing =
-            ag.axis === 'ns'
-              ? ag.dir > 0
-                ? 0
-                : Math.PI
-              : ag.dir > 0
-                ? Math.PI / 2
-                : -Math.PI / 2;
-        } else {
-          const next = stepSidewalkPatrol(
-            ag.x,
-            ag.z,
-            ag.dir,
-            ag.speed,
-            dt,
-            ag.minX,
-            ag.maxX,
-            ag.minZ,
-            ag.maxZ,
-            ag.axis,
-            0.5
-          );
-          ag.x = next.x;
-          ag.z = next.z;
-          ag.dir = next.dir;
-          facing =
-            ag.axis === 'ns'
-              ? ag.dir > 0
-                ? 0
-                : Math.PI
-              : ag.dir > 0
-                ? Math.PI / 2
-                : -Math.PI / 2;
-          ag.phase += dt * 5.2;
-        }
-      }
+      const { facing, moving } = stepPedestrianAgentInPlace(ag, stepCtx);
 
       const swing = moving ? Math.sin(ag.phase) * 0.45 : 0;
       const baseY = 0.14;

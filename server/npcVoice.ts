@@ -4,9 +4,64 @@ import { sanitizeDialogueInput } from './npcDialogue';
 
 const GEMINI_TTS_MODEL = 'gemini-3.8-flash-lite-tts';
 const MAX_TEXT_LENGTH = 260;
-const MAX_VOICE_CACHE_SIZE = 40;
+export const MAX_VOICE_CACHE_SIZE = 48;
 
-const voiceCache = new Map<string, NpcVoiceResponse>();
+const voiceLruCache = new Map<string, NpcVoiceResponse>();
+
+function fnv1aHash(str: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+export function buildVoiceCacheKey(
+  voicePersona: string,
+  tone: string | undefined,
+  rawText: string
+): string {
+  const normalizedText = sanitizeDialogueInput(rawText)
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  const normalizedTone = (tone || 'default').toLowerCase().trim();
+  return `v_${voicePersona}_${fnv1aHash(`${voicePersona}|${normalizedTone}|${normalizedText}`)}`;
+}
+
+export function getVoiceCacheEntry(key: string): NpcVoiceResponse | undefined {
+  const existing = voiceLruCache.get(key);
+  if (!existing) return undefined;
+  // Promote to most-recently-used (MRU)
+  voiceLruCache.delete(key);
+  voiceLruCache.set(key, { ...existing, cacheHit: true });
+  return voiceLruCache.get(key);
+}
+
+export function putVoiceCacheEntry(
+  key: string,
+  value: NpcVoiceResponse,
+  maxEntries: number = MAX_VOICE_CACHE_SIZE
+): void {
+  if (voiceLruCache.has(key)) {
+    voiceLruCache.delete(key);
+  } else if (voiceLruCache.size >= maxEntries) {
+    const lruKey = voiceLruCache.keys().next().value;
+    if (lruKey !== undefined) {
+      voiceLruCache.delete(lruKey);
+    }
+  }
+  voiceLruCache.set(key, value);
+}
+
+export function getVoiceCacheSize(): number {
+  return voiceLruCache.size;
+}
+
+export function clearVoiceCache(): void {
+  voiceLruCache.clear();
+}
 
 function hasUsableApiKey(apiKey: string | undefined): apiKey is string {
   if (!apiKey) return false;
@@ -25,7 +80,8 @@ export function resolveJakartaNpcVoiceName(speakerName: string): string {
     lower.includes('sari') ||
     lower.includes('ibu') ||
     lower.includes('dewi') ||
-    lower.includes('ratna')
+    lower.includes('ratna') ||
+    lower.includes('karin')
   ) {
     return 'Kore';
   }
@@ -63,11 +119,12 @@ export async function generateNpcVoice(
       mimeType: 'audio/wav',
       voiceName,
       source: 'fallback',
+      cacheHit: false,
     };
   }
 
-  const cacheKey = `${voiceName}|${rawReq.tone || ''}|${cleanText}`;
-  const cached = voiceCache.get(cacheKey);
+  const cacheKey = buildVoiceCacheKey(voiceName, rawReq.tone, cleanText);
+  const cached = getVoiceCacheEntry(cacheKey);
   if (cached) {
     return cached;
   }
@@ -78,6 +135,7 @@ export async function generateNpcVoice(
       mimeType: 'audio/wav',
       voiceName,
       source: 'fallback',
+      cacheHit: false,
     };
   }
 
@@ -130,6 +188,7 @@ export async function generateNpcVoice(
         mimeType: 'audio/wav',
         voiceName,
         source: 'fallback',
+        cacheHit: false,
       };
     }
 
@@ -138,14 +197,10 @@ export async function generateNpcVoice(
       mimeType,
       voiceName,
       source: 'gemini_tts',
+      cacheHit: false,
     };
 
-    if (voiceCache.size >= MAX_VOICE_CACHE_SIZE) {
-      const oldestKey = voiceCache.keys().next().value;
-      if (oldestKey) voiceCache.delete(oldestKey);
-    }
-    voiceCache.set(cacheKey, result);
-
+    putVoiceCacheEntry(cacheKey, result);
     return result;
   } catch {
     return {
@@ -153,6 +208,7 @@ export async function generateNpcVoice(
       mimeType: 'audio/wav',
       voiceName,
       source: 'fallback',
+      cacheHit: false,
     };
   }
 }

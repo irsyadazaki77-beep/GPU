@@ -29,6 +29,7 @@ import {
   calculateTurfWarsIncome,
   completeMissionReward,
   consumeWarungSnack,
+  formatJakartaClock,
   formatRupiah,
   purchaseProperty,
   recruitCrewMember,
@@ -38,6 +39,7 @@ import {
   stepFokusAbility,
   stepStockMarketTick,
   stepWarungStaminaBuff,
+  stepWorldClockEventTicker,
   triggerStockMarketImpact,
   upgradeDroneTech,
   upgradeVehicleGarage,
@@ -65,6 +67,7 @@ import {
   SavedGameSnapshot,
   loadSavedGame,
   saveGameSnapshot,
+  syncSaveToCloud,
 } from './game/save';
 import {
   buildInitialStateForStage,
@@ -234,7 +237,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, [gameState]);
 
-  // Real-Time 24-Hour Jakarta Clock & Active Street Contract Countdown (1s)
+  // Real-Time 24-Hour Jakarta Clock, Road Event Ticker & Active Street Contract Countdown (1s)
   useEffect(() => {
     if (gameState !== 'playing') return;
     const interval = window.setInterval(() => {
@@ -263,12 +266,39 @@ export default function App() {
           }
         }
 
+        const eventStep = stepWorldClockEventTicker(
+          prev.worldClockEventState,
+          nextMinutes,
+          1
+        );
+        if (eventStep.triggeredEvent) {
+          const ev = eventStep.triggeredEvent;
+          nextOutcome = `Info Lalu Lintas (${formatJakartaClock(nextMinutes)}): ${ev.spec.title} — ${ev.spec.detourLabel}`;
+          if (!nextWaypoint && !prev.activeMission && !nextContract) {
+            const firstPt = ev.spec.detourWaypoints[0] || [
+              ev.spec.detourTargetX,
+              ev.spec.detourTargetZ,
+            ];
+            nextWaypoint = {
+              x: firstPt[0],
+              z: firstPt[1],
+              label: `Rute Alternatif (1/${ev.spec.detourWaypoints.length}): ${ev.spec.detourLabel}`,
+              category: 'detour',
+            };
+          }
+        } else if (eventStep.expiredEvent) {
+          if (nextWaypoint?.category === 'detour') {
+            nextWaypoint = null;
+          }
+        }
+
         return {
           worldTimeMinutes: nextMinutes,
           weatherMode: nextWeather,
           activeContract: nextContract,
           customWaypoint: nextWaypoint,
           lastOutcomeText: nextOutcome,
+          worldClockEventState: eventStep.nextState,
         };
       });
     }, 1000);
@@ -335,6 +365,13 @@ export default function App() {
     } as SavedGameSnapshot;
     saveGameSnapshot(snapshot, cur.activeSaveSlot);
     gameStore.setState({ savedGame: snapshot });
+    void syncSaveToCloud(cur.activeSaveSlot, snapshot).then((ok) => {
+      if (ok) {
+        gameStore.setState({
+          cloudSyncStatus: `Slot ${cur.activeSaveSlot} Cloud v3 ✓`,
+        });
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -595,6 +632,9 @@ export default function App() {
       } else if (e.code === 'KeyU') {
         e.preventDefault();
         gameStore.setState((prev) => ({ zenHudMode: !prev.zenHudMode }));
+      } else if (e.code === 'F3') {
+        e.preventDefault();
+        gameStore.togglePerfOverlay();
       } else if (e.code === 'KeyY') {
         e.preventDefault();
         gameStore.setState((prev) => ({

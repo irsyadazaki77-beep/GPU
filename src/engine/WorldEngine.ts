@@ -22,13 +22,18 @@ import { engineTelemetryRef, gameStore } from '../state/gameStore';
 import { CityRenderer } from './CityRenderer';
 import { CrowdSystem } from './CrowdSystem';
 import { DestructiblePropsSystem } from './DestructiblePropsSystem';
+import { MultiplayerClientSync } from './netSync';
+import { JakartaPhysicsWorld } from './physicsWorld';
 import { PlayerController } from './PlayerController';
 import {
   PostProcessingPipeline,
   ResolvedQualityTier,
 } from './PostProcessingPipeline';
+import { SimWorkerClient } from './simWorkerClient';
+import { spatialAudio } from './spatialAudio';
 import { TrafficSystem } from './TrafficSystem';
 import { WeatherLightingSystem } from './WeatherLightingSystem';
+import type { MultiplayerRoomMode } from '../game/types';
 
 export interface WorldControllerHandle {
   spawnVehicleNearPlayer: (type: VehicleType) => void;
@@ -50,6 +55,7 @@ export interface WorldControllerHandle {
   stopCutsceneFraming: () => void;
   getPlayerPosition: () => { x: number; z: number };
   captureSnapshotDataUrl: () => string;
+  switchMultiplayerRoom?: (roomId: string, mode: MultiplayerRoomMode) => void;
 }
 
 export interface WorldHudPayload {
@@ -105,6 +111,9 @@ export class WorldEngine {
   private readonly trafficSystem: TrafficSystem;
   private readonly destructibleProps: DestructiblePropsSystem;
   private readonly crowdSystem: CrowdSystem;
+  private readonly physicsWorld: JakartaPhysicsWorld;
+  private readonly netSync: MultiplayerClientSync;
+  private readonly simWorker: SimWorkerClient;
   private readonly postProcessing: PostProcessingPipeline;
   private readonly playerController: PlayerController;
   private readonly resizeObserver: ResizeObserver;
@@ -115,6 +124,7 @@ export class WorldEngine {
   private disposed = false;
   private lastTime = performance.now();
   private hudSyncAccumulator = 0;
+  private rollingFps = 60;
   private readonly _camRight = new THREE.Vector3();
 
   constructor(container: HTMLElement, initialProps: WorldEngineProps) {
@@ -187,6 +197,15 @@ export class WorldEngine {
       this.cityRenderer.getSidewalkRects(),
       this.cityRenderer.buildingGrid
     );
+    this.physicsWorld = new JakartaPhysicsWorld(
+      undefined,
+      this.cityRenderer.buildingGrid
+    );
+    void this.physicsWorld.init();
+    this.netSync = new MultiplayerClientSync(this.scene);
+    this.netSync.connect('jakarta_pusat', 'free_roam');
+    this.simWorker = new SimWorkerClient(this.trafficSystem.vehicles.length);
+
     this.postProcessing = new PostProcessingPipeline(
       this.renderer,
       this.scene,
@@ -301,6 +320,9 @@ export class WorldEngine {
         x: this.playerController.playerPhys.x,
         z: this.playerController.playerPhys.z,
       }),
+      switchMultiplayerRoom: (roomId, mode) => {
+        this.netSync.switchRoom(roomId, mode);
+      },
       captureSnapshotDataUrl: () => {
         const s = gameStore.getState();
         this.postProcessing.render(
@@ -365,8 +387,11 @@ export class WorldEngine {
   private tick = (): void => {
     if (this.disposed) return;
     const now = performance.now();
-    const dt = clampDt((now - this.lastTime) / 1000);
+    const rawDtSec = Math.max(0.001, (now - this.lastTime) / 1000);
+    const dt = clampDt(rawDtSec);
     this.lastTime = now;
+    const instFps = Math.min(120, 1 / rawDtSec);
+    this.rollingFps = this.rollingFps * 0.9 + instFps * 0.1;
 
     const pState = this.props.playerState;
     const currentGameState = this.props.gameState;
@@ -419,9 +444,51 @@ export class WorldEngine {
       );
 
       this.cityRenderer.setTrafficSignalPhase(stepRes.signalPhase);
+      this._camRight.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      spatialAudio.syncCameraListener({
+        x: this.camera.position.x,
+        y: this.camera.position.y,
+        z: this.camera.position.z,
+        forwardX: this._camRight.x,
+        forwardY: this._camRight.y,
+        forwardZ: this._camRight.z,
+        upX: 0,
+        upY: 1,
+        upZ: 0,
+      });
+
+      // Fixed-Timestep Rapier3D Physics & Pairwise Vehicle Impulses (dt = 1/60)
+      const physStep = this.physicsWorld.stepFixed(
+        dt,
+        this.trafficSystem.vehicles,
+        phys.drivingVehicleId
+      );
+      if (physStep.playerCollisionImpact > 0.35) {
+        soundEngine.playPropCrash(0);
+        this.crowdSystem.triggerPanicNear(phys.x, phys.z, 18);
+      }
+
+      // Offload spatial radar & LOD distance calculations to Web Worker
+      this.simWorker.stepBatch(
+        this.trafficSystem.vehicles,
+        phys.x,
+        phys.z,
+        dt
+      );
+
+      // Step 20Hz -> 60fps Co-Op Multiplayer Interpolation
+      const activeVeh = stepRes.activeVehicle;
+      this.netSync.step(dt, {
+        protagonist: pState.activeProtagonist,
+        x: phys.x,
+        y: phys.y,
+        z: phys.z,
+        heading: activeVeh ? activeVeh.heading : phys.facing,
+        speed: activeVeh ? activeVeh.speed : 0,
+        vehicleType: activeVeh ? activeVeh.type : null,
+      });
 
       this._camRight.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
-      const activeVeh = stepRes.activeVehicle;
       const vehSpec = activeVeh ? VEHICLE_SPECS[activeVeh.type] : null;
       speedRatio =
         activeVeh && vehSpec
@@ -459,6 +526,18 @@ export class WorldEngine {
       engineTelemetryRef.activeChoice = this.props.activeChoice;
       this.trafficSystem.writeRadarSnapshot(engineTelemetryRef.vehicles);
       this.playerController.writeRadarEnemies(engineTelemetryRef.enemies);
+
+      const netInfo = this.netSync.getTelemetry();
+      engineTelemetryRef.perf.fps = Math.round(this.rollingFps);
+      engineTelemetryRef.perf.drawCalls = this.renderer.info.render.calls;
+      engineTelemetryRef.perf.triangles = this.renderer.info.render.triangles;
+      engineTelemetryRef.perf.activeRigidBodies =
+        this.physicsWorld.getActiveRigidBodyCount();
+      engineTelemetryRef.perf.networkPingMs = netInfo.networkPingMs;
+      engineTelemetryRef.perf.connectedPeers = netInfo.connectedPeers;
+      engineTelemetryRef.perf.roomId = netInfo.roomId;
+      engineTelemetryRef.perf.roomMode = netInfo.roomMode;
+      engineTelemetryRef.perf.simWorkerActive = this.simWorker.isWorkerActive();
 
       this.hudSyncAccumulator += dt;
       if (this.hudSyncAccumulator >= 0.1) {
@@ -544,6 +623,9 @@ export class WorldEngine {
     this.resizeObserver.disconnect();
     window.removeEventListener('resize', this.handleResize);
 
+    this.netSync.dispose();
+    this.simWorker.dispose();
+    this.physicsWorld.dispose();
     this.playerController.dispose();
     this.destructibleProps.dispose();
     this.crowdSystem.dispose();

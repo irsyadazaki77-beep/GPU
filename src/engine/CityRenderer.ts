@@ -20,6 +20,7 @@ import {
   createAsphaltRoadTexture,
   createAsphaltRoughnessTexture,
 } from '../game/world/geometryBuilders';
+import { buildThreeTierBuildingLOD } from './lodBuilder';
 
 function disposeObjectTree(root: THREE.Object3D): void {
   const disposedGeos = new Set<THREE.BufferGeometry>();
@@ -249,10 +250,11 @@ if (uWetness > 0.04) {
     this.rootGroup.add(buildWarungStall(14, -22, 0));
     this.rootGroup.add(buildJakartaIconicLandmarks());
 
-    // 4. Buildings + Instanced Rooftop Aviation Beacons (reduces draw calls)
+    // 4. Buildings (3-Tier THREE.LOD: 0m High, 72m Mid, 135m Low Proxy) + Instanced Rooftop Aviation Beacons
     const beaconPositions: { x: number; y: number; z: number; color: number }[] = [];
     for (const b of CITY_BUILDINGS) {
-      this.rootGroup.add(buildJakartaBuilding(b, maxAnisotropy));
+      const highDetail = buildJakartaBuilding(b, maxAnisotropy);
+      this.rootGroup.add(buildThreeTierBuildingLOD(b, highDetail));
       if (b.style === 'skyscraper' && b.height >= 16) {
         beaconPositions.push({
           x: b.x,

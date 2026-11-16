@@ -29,7 +29,12 @@ import {
   VehicleType,
   WeaponId,
   WeatherMode,
+  WorldClockEventTickerState,
+  WorldRoadEventKind,
   createInitialPlayerState,
+  createInitialWorldClockEventState,
+  formatJakartaClock,
+  triggerManualWorldRoadEvent,
 } from '../game/rules';
 import {
   DEFAULT_AUDIO_VOLUMES,
@@ -146,6 +151,17 @@ export interface EngineTelemetrySnapshot {
   enemies: RadarEnemyBlip[];
   nearbyMission: StoryMission | null;
   activeChoice: StoryChoiceOption | null;
+  perf: {
+    fps: number;
+    drawCalls: number;
+    triangles: number;
+    activeRigidBodies: number;
+    networkPingMs: number;
+    connectedPeers: number;
+    roomId: string;
+    roomMode: 'free_roam' | 'street_race' | 'coop_heist';
+    simWorkerActive: boolean;
+  };
 }
 
 /**
@@ -162,6 +178,17 @@ export const engineTelemetryRef: EngineTelemetrySnapshot = {
   enemies: [],
   nearbyMission: STORY_MISSIONS[12],
   activeChoice: null,
+  perf: {
+    fps: 60,
+    drawCalls: 42,
+    triangles: 18400,
+    activeRigidBodies: 26,
+    networkPingMs: 0,
+    connectedPeers: 0,
+    roomId: 'jakarta_pusat',
+    roomMode: 'free_roam',
+    simWorkerActive: true,
+  },
 };
 
 /**
@@ -278,6 +305,9 @@ export interface GameStoreSnapshot {
   cashLedger: CashLedgerEntry[];
   claimedBounties: string[];
   gamepadActive: boolean;
+  worldClockEventState: WorldClockEventTickerState;
+  perfOverlayOpen: boolean;
+  cloudSyncStatus: string | null;
 }
 
 export function buildInitialStateForStage(
@@ -435,6 +465,9 @@ let state: GameStoreSnapshot = {
   cashLedger: INITIAL_CASH_LEDGER,
   claimedBounties: [],
   gamepadActive: false,
+  worldClockEventState: createInitialWorldClockEventState(true),
+  perfOverlayOpen: false,
+  cloudSyncStatus: null,
 };
 
 const listeners = new Set<() => void>();
@@ -460,6 +493,12 @@ export const gameStore = {
   ) => {
     const patch = typeof updater === 'function' ? updater(state) : updater;
     state = { ...state, ...patch };
+    emitChange();
+  },
+
+  togglePerfOverlay: () => {
+    soundEngine.playPickup();
+    state = { ...state, perfOverlayOpen: !state.perfOverlayOpen };
     emitChange();
   },
 
@@ -499,6 +538,56 @@ export const gameStore = {
 
   toggleAutoTimeCycle: () => {
     state = { ...state, autoTimeCycle: !state.autoTimeCycle };
+    emitChange();
+  },
+
+  activateRoadEventDetourGps: () => {
+    const activeEvent = state.worldClockEventState.activeEvent;
+    if (!activeEvent) return;
+    soundEngine.playPickup();
+    const wpIndex = Math.min(
+      activeEvent.detourStageIndex,
+      activeEvent.spec.detourWaypoints.length - 1
+    );
+    const pt = activeEvent.spec.detourWaypoints[wpIndex] || [
+      activeEvent.spec.detourTargetX,
+      activeEvent.spec.detourTargetZ,
+    ];
+    state = {
+      ...state,
+      customWaypoint: {
+        x: pt[0],
+        z: pt[1],
+        label: `Rute Alternatif (${wpIndex + 1}/${activeEvent.spec.detourWaypoints.length}): ${activeEvent.spec.detourLabel}`,
+        category: 'detour',
+      },
+      lastOutcomeText: `GPS Rute Alternatif Aktif: ${activeEvent.spec.detourLabel} — Hindari ${activeEvent.spec.corridorName}!`,
+    };
+    emitChange();
+  },
+
+  triggerNextWorldRoadEvent: (preferredKind?: WorldRoadEventKind) => {
+    soundEngine.playPickup();
+    const { nextState, triggeredEvent } = triggerManualWorldRoadEvent(
+      state.worldClockEventState,
+      state.worldTimeMinutes,
+      preferredKind
+    );
+    const firstPt = triggeredEvent.spec.detourWaypoints[0] || [
+      triggeredEvent.spec.detourTargetX,
+      triggeredEvent.spec.detourTargetZ,
+    ];
+    state = {
+      ...state,
+      worldClockEventState: nextState,
+      customWaypoint: {
+        x: firstPt[0],
+        z: firstPt[1],
+        label: `Rute Alternatif (1/${triggeredEvent.spec.detourWaypoints.length}): ${triggeredEvent.spec.detourLabel}`,
+        category: 'detour',
+      },
+      lastOutcomeText: `Info Lalu Lintas (${formatJakartaClock(state.worldTimeMinutes)}): ${triggeredEvent.spec.title} — ${triggeredEvent.spec.detourLabel}`,
+    };
     emitChange();
   },
 

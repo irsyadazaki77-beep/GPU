@@ -4,6 +4,7 @@ import {
   NpcDialogueResponse,
   StoryChoiceOption,
   StoryMission,
+  WorldContextSnapshot,
   formatRupiah,
 } from '../game/rules';
 import { speakDialogueLine, stopVoicePlayback } from '../game/voiceClient';
@@ -36,8 +37,10 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
   onClose,
 }) => {
   const origin = useGameStore((s) => s.origin);
-  const wantedLevel = useGameStore((s) => s.playerState.wantedLevel);
-  const reputation = useGameStore((s) => s.playerState.reputation);
+  const playerState = useGameStore((s) => s.playerState);
+  const currentDistrict = useGameStore((s) => s.district.name);
+  const cashLedger = useGameStore((s) => s.cashLedger);
+  const lastOutcomeText = useGameStore((s) => s.lastOutcomeText);
   const completedDynamicQuests = useGameStore((s) => s.completedDynamicQuests);
   const voiceActingEnabled = useGameStore(
     (s) => s.gameSettings.voiceActingEnabled
@@ -52,6 +55,45 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
     null
   );
   const [voiceActive, setVoiceActive] = useState(false);
+  const [streamedReplyText, setStreamedReplyText] = useState('');
+  const [subtitleStreaming, setSubtitleStreaming] = useState(false);
+
+  const wantedLevel = playerState.wantedLevel;
+  const reputation = playerState.reputation;
+
+  // Progressive synchronized subtitle streaming when a new NPC reply arrives
+  useEffect(() => {
+    if (!dialogueRes?.reply) {
+      setStreamedReplyText('');
+      setSubtitleStreaming(false);
+      return;
+    }
+
+    const fullText = dialogueRes.reply;
+    const words = fullText.split(' ');
+    if (words.length <= 2) {
+      setStreamedReplyText(fullText);
+      setSubtitleStreaming(false);
+      return;
+    }
+
+    let cursor = 2;
+    setStreamedReplyText(words.slice(0, cursor).join(' '));
+    setSubtitleStreaming(true);
+
+    const interval = window.setInterval(() => {
+      cursor += 2;
+      if (cursor >= words.length) {
+        setStreamedReplyText(fullText);
+        setSubtitleStreaming(false);
+        clearInterval(interval);
+      } else {
+        setStreamedReplyText(words.slice(0, cursor).join(' ') + ' …');
+      }
+    }, 65);
+
+    return () => clearInterval(interval);
+  }, [dialogueRes]);
 
   useEffect(() => {
     if (voiceActingEnabled && !muted) {
@@ -69,7 +111,46 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
     return () => {
       stopVoicePlayback();
     };
-  }, [mission.id, mission.briefing, mission.giverName, voiceActingEnabled, muted, masterVol]);
+  }, [
+    mission.id,
+    mission.briefing,
+    mission.giverName,
+    voiceActingEnabled,
+    muted,
+    masterVol,
+  ]);
+
+  const buildWorldContext = (): WorldContextSnapshot => {
+    const protoMap: Record<typeof playerState.activeProtagonist, 'Nabilo' | 'Raka' | 'Kirana'> = {
+      nabilo: 'Nabilo',
+      raka: 'Raka',
+      kirana: 'Kirana',
+    };
+    const turfEntries = Object.values(playerState.districtTurf || {});
+    const ownedTurfCount = turfEntries.filter(
+      (t) => t && t.owner === 'player'
+    ).length;
+
+    const events: string[] = [];
+    if (lastOutcomeText) {
+      events.push(lastOutcomeText);
+    }
+    for (const tx of cashLedger) {
+      if (events.length >= 3) break;
+      if (!events.includes(tx.label)) {
+        events.push(tx.label);
+      }
+    }
+
+    return {
+      activeProtagonist: protoMap[playerState.activeProtagonist] || 'Nabilo',
+      currentDistrict: currentDistrict || mission.locationName,
+      wantedLevel,
+      factionStandings: reputation,
+      ownedTurfCount,
+      recentEvents: events.slice(0, 3),
+    };
+  };
 
   const requestNpcDialogue = async (question: string) => {
     const trimmed = question.trim();
@@ -86,6 +167,7 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
       origin,
       wantedLevel,
       reputation,
+      worldContext: buildWorldContext(),
     };
 
     try {
@@ -165,12 +247,34 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
             <button
               type="button"
               onClick={() => {
-                if (voiceActive) {
+                const nextVoiceEnabled = !voiceActingEnabled;
+                gameStore.setGameSettings({
+                  voiceActingEnabled: nextVoiceEnabled,
+                });
+                if (!nextVoiceEnabled) {
                   stopVoicePlayback();
                   setVoiceActive(false);
+                }
+              }}
+              className="px-2.5 py-1.5 rounded-lg bg-white/8 hover:bg-white/15 text-xs font-medium text-[#cbd5e1] cursor-pointer whitespace-nowrap"
+            >
+              {voiceActingEnabled ? 'Suara: Aktif' : 'Suara: Bisu'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (voiceActive || subtitleStreaming) {
+                  stopVoicePlayback();
+                  setVoiceActive(false);
+                  if (dialogueRes?.reply) {
+                    setStreamedReplyText(dialogueRes.reply);
+                    setSubtitleStreaming(false);
+                  }
                 } else {
                   setVoiceActive(true);
-                  const line = dialogueRes ? dialogueRes.reply : mission.briefing;
+                  const line = dialogueRes
+                    ? dialogueRes.reply
+                    : mission.briefing;
                   void speakDialogueLine(
                     {
                       text: line,
@@ -184,7 +288,9 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
               }}
               className="px-3 py-1.5 rounded-lg bg-[#38bdf8]/15 hover:bg-[#38bdf8]/25 text-xs font-medium text-[#7dd3fc] cursor-pointer whitespace-nowrap"
             >
-              {voiceActive ? 'Hentikan Suara' : 'Putar Suara Brief'}
+              {voiceActive || subtitleStreaming
+                ? 'Lewati Suara'
+                : 'Putar Suara Brief'}
             </button>
             <button
               type="button"
@@ -204,7 +310,7 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
           {mission.briefing}
         </p>
 
-        {/* Interactive Jakarta Informant AI Dialogue + Dynamic Side-Quest */}
+        {/* Interactive Jakarta Informant AI Dialogue + Dynamic World Memory + Side-Quest */}
         <div className="mt-5 rounded-xl border border-[#38bdf8]/25 bg-[#09111d]/75 p-4 flex flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-[#38bdf8]">
@@ -217,6 +323,12 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
               </span>
             )}
           </div>
+
+          {dialogueRes?.worldMemorySummary && (
+            <div className="text-[11px] font-mono-num text-[#7dd3fc] bg-[#38bdf8]/10 rounded px-2.5 py-1 truncate">
+              Memori Dunia: {dialogueRes.worldMemorySummary}
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-1.5">
             {QUICK_PROMPTS.map((q) => (
@@ -254,14 +366,12 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
             </button>
           </form>
 
-          {aiError && (
-            <p className="text-xs text-[#f87171]">{aiError}</p>
-          )}
+          {aiError && <p className="text-xs text-[#f87171]">{aiError}</p>}
 
           {dialogueRes && (
             <div className="rounded-lg bg-white/[0.04] border border-white/10 p-3 flex flex-col gap-2.5">
               <p className="text-xs md:text-sm text-[#e2e8f0] leading-relaxed">
-                “{dialogueRes.reply}”
+                “{streamedReplyText || dialogueRes.reply}”
               </p>
 
               {dialogueRes.sideQuest && (
@@ -274,7 +384,8 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
                       <span
                         className="font-mono-num text-[11px] whitespace-nowrap shrink-0"
                         style={{
-                          color: FACTION_LABELS[dialogueRes.sideQuest.faction].color,
+                          color:
+                            FACTION_LABELS[dialogueRes.sideQuest.faction].color,
                         }}
                       >
                         +{formatRupiah(dialogueRes.sideQuest.rewardRp)}

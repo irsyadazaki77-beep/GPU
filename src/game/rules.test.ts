@@ -55,6 +55,13 @@ import {
   formatJakartaClock,
   resolveWeatherFromWorldClock,
   RADIO_STATIONS,
+  WORLD_ROAD_EVENT_CATALOG,
+  createInitialWorldClockEventState,
+  isJakartaRushHour,
+  triggerManualWorldRoadEvent,
+  stepWorldClockEventTicker,
+  evaluateRoadEventImpactAt,
+  checkPlayerDetourProgress,
 } from './rules';
 import {
   SAVE_VERSION,
@@ -664,3 +671,263 @@ test('Character skills, weapon attachments, 13-district turf wars, police bribe,
   assert.ok(imported);
   assert.equal(imported?.origin, 'teknisi_glodok');
 });
+
+test('World clock road event ticker triggers traffic jams and road construction events, blocks/slows traffic, and tracks detour completion', () => {
+  assert.equal(WORLD_ROAD_EVENT_CATALOG.length >= 6, true);
+  assert.equal(
+    WORLD_ROAD_EVENT_CATALOG.some((e) => e.kind === 'road_construction'),
+    true
+  );
+  assert.equal(
+    WORLD_ROAD_EVENT_CATALOG.some((e) => e.kind === 'traffic_jam'),
+    true
+  );
+
+  // Rush hour detection (08:00 WIB = 480, 17:30 WIB = 1050 vs 13:00 WIB = 780)
+  assert.equal(isJakartaRushHour(480), true);
+  assert.equal(isJakartaRushHour(1050), true);
+  assert.equal(isJakartaRushHour(780), false);
+
+  // Ticker countdown and expiration
+  const initWithEvent = createInitialWorldClockEventState(true);
+  assert.ok(initWithEvent.activeEvent);
+  const step1 = stepWorldClockEventTicker(initWithEvent, 1052, 10);
+  assert.equal(
+    step1.nextState.activeEvent?.remainingSec,
+    initWithEvent.activeEvent!.remainingSec - 10
+  );
+
+  // Expire active event
+  const expiredStep = stepWorldClockEventTicker(
+    step1.nextState,
+    1060,
+    100
+  );
+  assert.equal(expiredStep.nextState.activeEvent, null);
+  assert.ok(expiredStep.expiredEvent);
+  assert.ok(expiredStep.nextState.cooldownSec > 0);
+
+  // Step through cooldown and trigger new event deterministically
+  const readyState = { ...expiredStep.nextState, cooldownSec: 1 };
+  const triggeredStep = stepWorldClockEventTicker(readyState, 1065, 1, 0.1);
+  assert.ok(triggeredStep.triggeredEvent);
+  assert.ok(triggeredStep.nextState.activeEvent);
+  assert.notEqual(
+    triggeredStep.triggeredEvent?.spec.id,
+    initWithEvent.activeEvent?.spec.id
+  );
+
+  // Manual trigger by preferred kind
+  const manualJam = triggerManualWorldRoadEvent(
+    triggeredStep.nextState,
+    1070,
+    'traffic_jam',
+    0.2
+  );
+  assert.equal(manualJam.triggeredEvent.spec.kind, 'traffic_jam');
+
+  // Evaluate physical roadblock & slowdown impact at event center vs outside vs elevated
+  const constructionEvt = triggerManualWorldRoadEvent(
+    manualJam.nextState,
+    1075,
+    'road_construction',
+    0.0
+  ).triggeredEvent;
+  const centerImpact = evaluateRoadEventImpactAt(
+    constructionEvt,
+    constructionEvt.spec.x + 0.5,
+    constructionEvt.spec.z + 0.5,
+    0
+  );
+  assert.equal(centerImpact.inZone, true);
+  assert.equal(centerImpact.blockedBarrierCollide, true);
+  assert.equal(centerImpact.speedMultiplier < 0.4, true);
+
+  // Elevated Tol Layang or aircraft bypasses ground road construction
+  const elevatedImpact = evaluateRoadEventImpactAt(
+    constructionEvt,
+    constructionEvt.spec.x,
+    constructionEvt.spec.z,
+    5.5
+  );
+  assert.equal(elevatedImpact.inZone, false);
+
+  // AI traffic vehicle slows/stops when approaching active road construction
+  const aiSedan: TrafficAISteppable = {
+    x: constructionEvt.spec.x,
+    z: constructionEvt.spec.z + 8.5,
+    heading: Math.PI,
+    speed: 12,
+    waypointIndex: 1,
+    stopTimer: 0,
+    preferredSpeed: 12,
+    layer: 'ground',
+    vehicleType: 'sedan',
+  };
+  const route = [
+    { x: constructionEvt.spec.x, z: constructionEvt.spec.z + 20 },
+    { x: constructionEvt.spec.x, z: constructionEvt.spec.z - 20 },
+  ];
+  const steppedSedan = stepTrafficVehicleAI(aiSedan, route, 99, 0.5, {
+    activeRoadEvent: constructionEvt,
+  });
+  assert.equal(steppedSedan.speed < aiSedan.speed, true);
+
+  // Multi-waypoint Detour progression
+  let detourEvt = constructionEvt;
+  const wps = detourEvt.spec.detourWaypoints;
+  assert.equal(wps.length >= 2, true);
+  for (let i = 0; i < wps.length; i++) {
+    const [wx, wz] = wps[i];
+    const prog = checkPlayerDetourProgress(detourEvt, wx + 1, wz - 1);
+    assert.equal(prog.reachedWaypoint, true);
+    detourEvt = prog.updatedEvent!;
+    if (i < wps.length - 1) {
+      assert.equal(prog.completedDetour, false);
+    } else {
+      assert.equal(prog.completedDetour, true);
+      assert.equal(detourEvt.detourCompleted, true);
+    }
+  }
+});
+
+test('Phase 2 & Phase 4: Physics suspension/drift, Crowd AI state machine, HRTF Spatial Audio, Co-Op NetSync interpolation, and SimWorker batching', async () => {
+  const { computeDriftAndSuspensionStep } = await import('../engine/physicsWorld');
+  const { evaluatePedestrianAiState } = await import('../engine/crowdAi');
+  const { computeSpatialPanAndAttenuation } = await import('../engine/spatialAudio');
+  const { interpolateRemotePeerPose } = await import('../engine/netSync');
+  const { computeSimBatchInPlace } = await import('../engine/sim.worker');
+  const { MultiplayerRoomHub } = await import('../../server/multiplayer');
+
+  // 1. Suspension & drift curve
+  const driftRes = computeDriftAndSuspensionStep(
+    12,
+    18,
+    0.85,
+    true,
+    0,
+    0,
+    0.05
+  );
+  assert.ok(driftRes.slipRatio > 0.5);
+  assert.ok(driftRes.pitchAngle < 0); // accelerating nose-up pitch
+  assert.ok(driftRes.rollAngle > 0); // cornering body roll
+
+  // 2. Pedestrian AI state machine (WALKING, CROSSING_AT_GREEN, FLEEING, CROWDING)
+  const basePed = {
+    x: 0,
+    z: 0,
+    axis: 'ns' as const,
+    dir: 1 as const,
+    minX: -1,
+    maxX: 1,
+    minZ: -10,
+    maxZ: 10,
+    speed: 1.5,
+    phase: 0,
+    state: 'WALKING' as const,
+    panicTimer: 0,
+    panicVx: 0,
+    panicVz: 0,
+    crowdTimer: 0,
+    crowdAnchorX: 0,
+    crowdAnchorZ: 0,
+    torsoColor: 0xffffff,
+  };
+  assert.equal(
+    evaluatePedestrianAiState(basePed, {
+      dt: 0.05,
+      signalPhase: 'ns_green',
+      wantedLevel: 4,
+      playerX: 5,
+      playerZ: 5,
+    }),
+    'FLEEING'
+  );
+  assert.equal(
+    evaluatePedestrianAiState(
+      { ...basePed, z: 9.5 },
+      {
+        dt: 0.05,
+        signalPhase: 'ew_green',
+        wantedLevel: 0,
+        playerX: 80,
+        playerZ: 80,
+      }
+    ),
+    'CROSSING_AT_GREEN'
+  );
+  assert.equal(
+    evaluatePedestrianAiState(
+      { ...basePed, crowdTimer: 1.5 },
+      {
+        dt: 0.05,
+        signalPhase: 'ns_amber',
+        wantedLevel: 0,
+        playerX: 80,
+        playerZ: 80,
+      }
+    ),
+    'CROWDING'
+  );
+
+  // 3. 3D Spatial Audio HRTF panning & inverse-distance attenuation
+  const rightSource = computeSpatialPanAndAttenuation(
+    {
+      x: 0,
+      y: 0,
+      z: 0,
+      forwardX: 0,
+      forwardY: 0,
+      forwardZ: -1,
+      upX: 0,
+      upY: 1,
+      upZ: 0,
+    },
+    { x: 12, y: 0, z: 0 },
+    6,
+    60
+  );
+  assert.ok(rightSource.pan > 0.8);
+  assert.ok(rightSource.attenuation < 1 && rightSource.attenuation > 0.3);
+
+  // 4. 20Hz -> 60fps Remote Peer Pose Interpolation
+  const interp = interpolateRemotePeerPose(
+    { x: 0, y: 0, z: 0, heading: 0 },
+    {
+      peerId: 'p2',
+      displayName: 'Raka',
+      protagonist: 'raka',
+      x: 10,
+      y: 0,
+      z: -10,
+      heading: Math.PI / 2,
+      speed: 14,
+      vehicleType: 'supercar',
+      updatedAt: Date.now(),
+    },
+    0.016,
+    0.025
+  );
+  assert.ok(interp.x > 0 && interp.x < 10);
+  assert.ok(interp.z < 0 && interp.z > -10);
+
+  // 5. Multiplayer Room Hub (8-player room cap & state sync)
+  const hub = new MultiplayerRoomHub();
+  const join1 = hub.joinOrSelectRoom(
+    'room_scbd',
+    'street_race',
+    'peer_1',
+    'Nabilo'
+  );
+  assert.equal(join1.roomId, 'room_scbd');
+  assert.equal(hub.getRoomPeers('room_scbd').length, 1);
+
+  // 6. Web Worker Transferable Float32Array batch simulation
+  const inBuf = new Float32Array([3, 4, Math.PI / 2, 10]);
+  const outBuf = new Float32Array(4);
+  computeSimBatchInPlace(inBuf, outBuf, 0, 0, 0.1);
+  assert.ok(Math.abs(outBuf[1] - 5) < 0.01); // distToPlayer = hypot(3, 4) = 5
+  assert.ok(Math.abs(outBuf[2] - 4) < 0.01); // nextX = 3 + sin(PI/2)*10*0.1 = 4
+});
+

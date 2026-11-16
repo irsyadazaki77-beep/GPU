@@ -171,6 +171,24 @@ export const GameHud: React.FC<GameHudProps> = ({
   const driftScore = useGameStore((s) => s.driftScore);
   const driftMultiplier = useGameStore((s) => s.driftMultiplier);
   const activeContract = useGameStore((s) => s.activeContract);
+  const worldClockEventState = useGameStore((s) => s.worldClockEventState);
+  const perfOverlayOpen = useGameStore((s) => s.perfOverlayOpen);
+  const cloudSyncStatus = useGameStore((s) => s.cloudSyncStatus);
+  const activeSaveSlot = useGameStore((s) => s.activeSaveSlot);
+  const activeRoadEvent = worldClockEventState.activeEvent;
+
+  const [perfSnap, setPerfSnap] = useState(() => ({
+    ...engineTelemetryRef.perf,
+  }));
+
+  useEffect(() => {
+    if (!perfOverlayOpen) return;
+    setPerfSnap({ ...engineTelemetryRef.perf });
+    const id = window.setInterval(() => {
+      setPerfSnap({ ...engineTelemetryRef.perf });
+    }, 250);
+    return () => clearInterval(id);
+  }, [perfOverlayOpen]);
 
   const currentWeaponSpec = getEffectiveWeaponSpec(
     playerState.activeWeapon,
@@ -517,7 +535,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                   ·
                 </span>
                 <span className="font-mono-num text-[11px] font-bold text-[#fef08a] whitespace-nowrap shrink-0">
-                  {formatJakartaClock(worldTimeMinutes)} WIB
+                  {formatJakartaClock(worldTimeMinutes)}
                 </span>
                 <span aria-hidden="true" className="hidden sm:inline text-[#f59e0b] shrink-0">
                   ·
@@ -569,15 +587,112 @@ export const GameHud: React.FC<GameHudProps> = ({
             </div>
           )}
 
+          {/* World Clock Ticker Event: Traffic Jam / Road Construction & Detour Tracker */}
+          {activeRoadEvent && (
+            <div
+              data-testid="world-clock-road-event-banner"
+              className={`aaa-glass-subtle rounded-lg border-l-2 ${
+                activeRoadEvent.spec.kind === 'road_construction'
+                  ? 'border-l-[#f97316]'
+                  : 'border-l-[#ef4444]'
+              } px-3 py-2 flex flex-col gap-1 pointer-events-auto animate-aaa-up max-w-xs shadow-lg`}
+            >
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <svg
+                    viewBox="0 0 24 24"
+                    className={`w-3.5 h-3.5 shrink-0 ${
+                      activeRoadEvent.spec.kind === 'road_construction'
+                        ? 'text-[#f97316]'
+                        : 'text-[#ef4444]'
+                    }`}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                  >
+                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  <span
+                    className={`font-bold truncate ${
+                      activeRoadEvent.spec.kind === 'road_construction'
+                        ? 'text-[#fb923c]'
+                        : 'text-[#f87171]'
+                    }`}
+                  >
+                    {activeRoadEvent.spec.kind === 'road_construction'
+                      ? 'PROYEK JALAN'
+                      : 'MACET MENDADAK'}
+                  </span>
+                </div>
+                <span className="font-mono-num text-[11px] font-bold text-[#fef08a] shrink-0">
+                  {Math.ceil(activeRoadEvent.remainingSec)}d
+                </span>
+              </div>
+              <div className="text-xs font-semibold text-[#f4f1ea] truncate">
+                {activeRoadEvent.spec.title}
+              </div>
+              <div className="text-[11px] text-[#38bdf8] truncate">
+                Jalur Alternatif: {activeRoadEvent.spec.detourLabel}
+                {!activeRoadEvent.detourCompleted &&
+                  ` (${Math.min(
+                    activeRoadEvent.detourStageIndex + 1,
+                    activeRoadEvent.spec.detourWaypoints.length
+                  )}/${activeRoadEvent.spec.detourWaypoints.length})`}
+              </div>
+              <div className="flex items-center gap-1.5 pt-1">
+                <button
+                  type="button"
+                  data-testid="activate-road-event-detour-btn"
+                  onClick={() => gameStore.activateRoadEventDetourGps()}
+                  className="flex-1 py-1 px-2 rounded bg-[#38bdf8]/20 hover:bg-[#38bdf8] text-[#38bdf8] hover:text-[#090c12] text-[10px] font-mono-num font-bold cursor-pointer transition-colors truncate"
+                >
+                  {activeRoadEvent.detourCompleted
+                    ? 'Rute Alternatif Tuntas ✓'
+                    : 'Pasang GPS Rute Alternatif'}
+                </button>
+                <button
+                  type="button"
+                  data-testid="trigger-next-road-event-btn"
+                  onClick={() => gameStore.triggerNextWorldRoadEvent()}
+                  title="Simulasi Insiden Jam Dunia Berikutnya"
+                  className="py-1 px-2 rounded bg-white/8 hover:bg-white/15 text-[#cbd5e1] hover:text-white text-[10px] font-mono-num cursor-pointer transition-colors shrink-0"
+                >
+                  Berikutnya
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Custom GPS Waypoint Tracker Pill */}
           {customWaypoint && waypointDistanceM !== null && (
-            <div className="aaa-glass-subtle rounded-lg border-l-2 border-l-[#c084fc] px-3 py-1.5 flex items-center justify-between gap-2 pointer-events-auto animate-aaa-up max-w-xs">
+            <div
+              data-testid="custom-gps-waypoint-pill"
+              className={`aaa-glass-subtle rounded-lg border-l-2 ${
+                customWaypoint.category === 'detour'
+                  ? 'border-l-[#38bdf8]'
+                  : 'border-l-[#c084fc]'
+              } px-3 py-1.5 flex items-center justify-between gap-2 pointer-events-auto animate-aaa-up max-w-xs`}
+            >
               <div className="min-w-0 flex items-center gap-2 text-xs">
-                <span className="w-2 h-2 rounded-full bg-[#c084fc] shrink-0" />
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    customWaypoint.category === 'detour'
+                      ? 'bg-[#38bdf8]'
+                      : 'bg-[#c084fc]'
+                  }`}
+                />
                 <span className="font-semibold text-[#f4f1ea] truncate">
                   {customWaypoint.label}
                 </span>
-                <span className="font-mono-num text-[#c084fc] font-bold shrink-0">
+                <span
+                  className={`font-mono-num font-bold shrink-0 ${
+                    customWaypoint.category === 'detour'
+                      ? 'text-[#38bdf8]'
+                      : 'text-[#c084fc]'
+                  }`}
+                >
                   {waypointDistanceM}m
                 </span>
               </div>
@@ -725,6 +840,19 @@ export const GameHud: React.FC<GameHudProps> = ({
             )}
             <button
               type="button"
+              onClick={() => gameStore.togglePerfOverlay()}
+              data-testid="toggle-perf-overlay-btn"
+              title="Overlay Telemetri 60FPS, Rapier3D & Co-Op Multiplayer [F3]"
+              className={`px-2 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-[11px] font-mono-num transition-colors cursor-pointer whitespace-nowrap ${
+                perfOverlayOpen
+                  ? 'text-[#22c55e] border border-[#22c55e]/50'
+                  : 'text-[#94a3b8] hover:text-white'
+              }`}
+            >
+              [F3]
+            </button>
+            <button
+              type="button"
               onClick={() => gameStore.setState({ zenHudMode: true })}
               title="Mode Layar Bersih / Zen HUD [U]"
               className="hidden sm:flex px-2 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-[11px] font-mono-num text-[#94a3b8] hover:text-white transition-colors cursor-pointer whitespace-nowrap"
@@ -769,6 +897,60 @@ export const GameHud: React.FC<GameHudProps> = ({
               <span className="font-mono-num text-[11px]">Esc</span>
             </button>
           </div>
+
+          {/* Phase 4: 60FPS Engine, Rapier3D Physics, Co-Op WS & Cloud Save v3 Telemetry Overlay [F3] */}
+          {perfOverlayOpen && (
+            <div
+              data-testid="engine-perf-overlay"
+              className="aaa-glass-subtle rounded-lg border border-[#38bdf8]/40 px-3 py-2 mt-1 w-64 text-[11px] font-mono-num text-[#e2e8f0] shadow-2xl animate-aaa-up"
+            >
+              <div className="flex items-center justify-between border-b border-white/10 pb-1 mb-1.5">
+                <span className="font-bold text-[#38bdf8] uppercase tracking-wider">
+                  GPU Engine · Rapier3D
+                </span>
+                <span className="text-[#22c55e] font-bold">
+                  {perfSnap.fps} FPS
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+                <div className="flex justify-between">
+                  <span className="text-[#94a3b8]">Draw Calls:</span>
+                  <span className="font-bold text-[#f4f1ea]">
+                    {perfSnap.drawCalls}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#94a3b8]">RigidBodies:</span>
+                  <span className="font-bold text-[#f59e0b]">
+                    {perfSnap.activeRigidBodies}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#94a3b8]">WS Ping:</span>
+                  <span className="font-bold text-[#38bdf8]">
+                    {perfSnap.networkPingMs} ms
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#94a3b8]">Co-Op Lobby:</span>
+                  <span className="font-bold text-[#22c55e]">
+                    {perfSnap.connectedPeers + 1}/8
+                  </span>
+                </div>
+              </div>
+              <div className="mt-1.5 pt-1 border-t border-white/10 flex items-center justify-between text-[10px] text-[#94a3b8]">
+                <span>
+                  LOD 3-Tier · Worker:{' '}
+                  <strong className="text-[#22c55e]">
+                    {perfSnap.simWorkerActive ? 'ON' : 'SYNC'}
+                  </strong>
+                </span>
+                <span className="text-[#fef08a]">
+                  {cloudSyncStatus || `Slot ${activeSaveSlot} v3`}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       )}

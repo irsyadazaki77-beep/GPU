@@ -769,6 +769,112 @@ class SoundEngine {
     }
   }
 
+  public syncSpatialListenerPose(pose: {
+    x: number;
+    y: number;
+    z: number;
+    forwardX: number;
+    forwardY: number;
+    forwardZ: number;
+    upX: number;
+    upY: number;
+    upZ: number;
+  }): void {
+    if (!this.ctx || this.muted) return;
+    try {
+      const listener = this.ctx.listener;
+      const now = this.ctx.currentTime;
+      if (listener.positionX && listener.forwardX && listener.upX) {
+        listener.positionX.setValueAtTime(pose.x, now);
+        listener.positionY.setValueAtTime(pose.y, now);
+        listener.positionZ.setValueAtTime(pose.z, now);
+        listener.forwardX.setValueAtTime(pose.forwardX, now);
+        listener.forwardY.setValueAtTime(pose.forwardY, now);
+        listener.forwardZ.setValueAtTime(pose.forwardZ, now);
+        listener.upX.setValueAtTime(pose.upX, now);
+        listener.upY.setValueAtTime(pose.upY, now);
+        listener.upZ.setValueAtTime(pose.upZ, now);
+      } else if (typeof listener.setPosition === 'function') {
+        listener.setPosition(pose.x, pose.y, pose.z);
+        listener.setOrientation(
+          pose.forwardX,
+          pose.forwardY,
+          pose.forwardZ,
+          pose.upX,
+          pose.upY,
+          pose.upZ
+        );
+      }
+    } catch {
+      // Ignore Web Audio listener update errors
+    }
+  }
+
+  public playHrtf3DTone(opts: {
+    x: number;
+    y: number;
+    z: number;
+    freq: number;
+    duration: number;
+    type: OscillatorType;
+    volume: number;
+    pitchSlide: number;
+    refDistance?: number;
+    maxDistance?: number;
+    channel?: AudioChannel;
+  }): void {
+    const channel = opts.channel ?? 'sfx';
+    const chMult = this.getChannelGain(channel);
+    if (chMult <= 0.001) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = opts.type;
+      osc.frequency.setValueAtTime(opts.freq, now);
+      if (opts.pitchSlide !== 1.0) {
+        osc.frequency.exponentialRampToValueAtTime(
+          Math.max(30, opts.freq * opts.pitchSlide),
+          now + opts.duration
+        );
+      }
+
+      const scaledVol = Math.max(0.001, opts.volume * chMult);
+      gain.gain.setValueAtTime(scaledVol, now);
+      gain.gain.exponentialRampToValueAtTime(0.0008, now + opts.duration);
+
+      if (typeof ctx.createPanner === 'function') {
+        const panner = ctx.createPanner();
+        panner.panningModel = 'HRTF';
+        panner.distanceModel = 'inverse';
+        panner.refDistance = opts.refDistance ?? 6;
+        panner.maxDistance = opts.maxDistance ?? 68;
+        panner.rolloffFactor = 1.35;
+        if (panner.positionX) {
+          panner.positionX.setValueAtTime(opts.x, now);
+          panner.positionY.setValueAtTime(opts.y, now);
+          panner.positionZ.setValueAtTime(opts.z, now);
+        } else {
+          panner.setPosition(opts.x, opts.y, opts.z);
+        }
+        osc.connect(gain);
+        gain.connect(panner);
+        panner.connect(ctx.destination);
+      } else {
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+      }
+
+      osc.start(now);
+      osc.stop(now + opts.duration);
+    } catch {
+      // Ignore Web Audio errors on locked contexts
+    }
+  }
+
   public playSpatialTone(
     freq: number,
     duration: number,

@@ -4,18 +4,145 @@ import type {
   NpcDialogueRequest,
   NpcDialogueResponse,
   NpcDynamicSideQuest,
+  WorldContextSnapshot,
 } from '../src/game/types';
 
 const GEMINI_MODEL = 'gemini-4-hydrogen';
 
 const MAX_PROMPT_LENGTH = 260;
+const RATE_LIMIT_WINDOW_MS = 10_000;
+const RATE_LIMIT_MAX_REQUESTS = 12;
+
+const clientRateBuckets = new Map<string, number[]>();
 
 export function sanitizeDialogueInput(raw: string): string {
-  return raw
+  return String(raw || '')
     .replace(/[\r\n\t]+/g, ' ')
     .replace(/[<>`{}]/g, '')
     .trim()
     .slice(0, MAX_PROMPT_LENGTH);
+}
+
+export function checkNpcDialogueRateLimit(
+  clientKey: string = 'default',
+  nowMs: number = Date.now()
+): { allowed: boolean; remaining: number; retryAfterMs: number } {
+  const key = clientKey.trim() || 'default';
+  const prev = clientRateBuckets.get(key) || [];
+  const active = prev.filter((ts) => nowMs - ts < RATE_LIMIT_WINDOW_MS);
+
+  if (active.length >= RATE_LIMIT_MAX_REQUESTS) {
+    const oldest = active[0] ?? nowMs;
+    const retryAfterMs = Math.max(100, RATE_LIMIT_WINDOW_MS - (nowMs - oldest));
+    clientRateBuckets.set(key, active);
+    return { allowed: false, remaining: 0, retryAfterMs };
+  }
+
+  active.push(nowMs);
+  clientRateBuckets.set(key, active);
+  return {
+    allowed: true,
+    remaining: Math.max(0, RATE_LIMIT_MAX_REQUESTS - active.length),
+    retryAfterMs: 0,
+  };
+}
+
+export function resetNpcDialogueRateLimiter(): void {
+  clientRateBuckets.clear();
+}
+
+export function sanitizeWorldContext(
+  rawCtx: WorldContextSnapshot | undefined,
+  fallbackDistrict: string,
+  fallbackWanted: number,
+  fallbackReputation: Record<FactionId, number>
+): WorldContextSnapshot {
+  if (!rawCtx || typeof rawCtx !== 'object') {
+    return {
+      activeProtagonist: 'Nabilo',
+      currentDistrict: sanitizeDialogueInput(fallbackDistrict) || 'Monas',
+      wantedLevel: Math.max(0, Math.min(5, Math.floor(fallbackWanted || 0))),
+      factionStandings: {
+        jalanan: fallbackReputation?.jalanan ?? 40,
+        sindikat: fallbackReputation?.sindikat ?? 40,
+        rakyat: fallbackReputation?.rakyat ?? 40,
+      },
+      ownedTurfCount: 0,
+      recentEvents: [],
+    };
+  }
+
+  const rawProto = String(rawCtx.activeProtagonist || 'Nabilo').toLowerCase();
+  const activeProtagonist: 'Nabilo' | 'Raka' | 'Kirana' =
+    rawProto === 'raka'
+      ? 'Raka'
+      : rawProto === 'kirana'
+      ? 'Kirana'
+      : 'Nabilo';
+
+  const recentEvents = Array.isArray(rawCtx.recentEvents)
+    ? rawCtx.recentEvents
+        .filter((e): e is string => typeof e === 'string')
+        .map((e) => sanitizeDialogueInput(e).slice(0, 110))
+        .filter((e) => e.length > 0)
+        .slice(0, 3)
+    : [];
+
+  return {
+    activeProtagonist,
+    currentDistrict:
+      sanitizeDialogueInput(rawCtx.currentDistrict || fallbackDistrict).slice(
+        0,
+        64
+      ) || 'Monas',
+    wantedLevel: Math.max(
+      0,
+      Math.min(
+        5,
+        Math.floor(
+          typeof rawCtx.wantedLevel === 'number'
+            ? rawCtx.wantedLevel
+            : fallbackWanted
+        )
+      )
+    ),
+    factionStandings: {
+      jalanan: Math.max(
+        0,
+        Math.min(
+          100,
+          Number(
+            rawCtx.factionStandings?.jalanan ?? fallbackReputation?.jalanan ?? 40
+          )
+        )
+      ),
+      sindikat: Math.max(
+        0,
+        Math.min(
+          100,
+          Number(
+            rawCtx.factionStandings?.sindikat ??
+              fallbackReputation?.sindikat ??
+              40
+          )
+        )
+      ),
+      rakyat: Math.max(
+        0,
+        Math.min(
+          100,
+          Number(
+            rawCtx.factionStandings?.rakyat ?? fallbackReputation?.rakyat ?? 40
+          )
+        )
+      ),
+    },
+    ownedTurfCount: Math.max(
+      0,
+      Math.min(13, Math.floor(Number(rawCtx.ownedTurfCount || 0)))
+    ),
+    recentEvents,
+  };
 }
 
 function stableHash(input: string): number {
@@ -40,25 +167,47 @@ export function buildFallbackNpcDialogue(
   const prompt = sanitizeDialogueInput(rawReq.playerPrompt);
   const lower = prompt.toLowerCase();
   const faction = pickQuestFaction(rawReq);
+  const worldCtx = sanitizeWorldContext(
+    rawReq.worldContext,
+    rawReq.locationName,
+    rawReq.wantedLevel,
+    rawReq.reputation
+  );
+
   const questHash = stableHash(
-    `${rawReq.missionTitle}|${rawReq.npcName}|${prompt}|${rawReq.origin}`
+    `${rawReq.missionTitle}|${rawReq.npcName}|${prompt}|${rawReq.origin}|${worldCtx.activeProtagonist}`
   )
     .toString(36)
     .slice(0, 6);
 
-  const originGreeting =
-    rawReq.origin === 'anak_jalanan'
-      ? 'Anak lapangan kayak lo pasti ngerti denyut aspal Blok M.'
+  const protagonistCallout =
+    worldCtx.activeProtagonist === 'Raka'
+      ? 'Bro Raka, otot jalanan Tanah Abang lo udah kedengeran sampe pos sini.'
+      : worldCtx.activeProtagonist === 'Kirana'
+      ? 'Mbak Kirana, sinyal siber Glodok lo bikin jaringan kamera aparat kedip-kedip.'
+      : rawReq.origin === 'anak_jalanan'
+      ? 'Bang Nabilo, anak lapangan kayak lo pasti ngerti denyut aspal Blok M.'
       : rawReq.origin === 'mantan_kurir'
-      ? 'Eks-kurir kilat punya mata tajam buat celah jalur tikus.'
-      : 'Anak teknisi Glodok selalu selangkah di depan kamera CCTV.';
+      ? 'Bang Nabilo, eks-kurir kilat punya mata tajam buat celah jalur tikus.'
+      : 'Bang Nabilo, teknisi Glodok selalu selangkah di depan kamera CCTV.';
+
+  const recentDeedNote =
+    worldCtx.recentEvents.length > 0
+      ? ` Kabar soal "${worldCtx.recentEvents[0]}" juga udah nyebar di warung kopi ${worldCtx.currentDistrict}${
+          worldCtx.ownedTurfCount > 0
+            ? ` (kru lo sekarang pegang ${worldCtx.ownedTurfCount} distrik)`
+            : ''
+        }.`
+      : worldCtx.ownedTurfCount > 0
+      ? ` Kru lo udah pegang ${worldCtx.ownedTurfCount} distrik di Jakarta, jadi mata-mata lapangan makin respek.`
+      : '';
 
   let reply: string;
   let tone = 'Taktis & Waspada';
 
   if (rawReq.wantedLevel >= 3) {
     tone = 'Tegang (Siaga Polisi)';
-    reply = `${originGreeting} Hati-hati, status buronan bintang ${rawReq.wantedLevel} lo bikin unit patroli merapat ke ${rawReq.locationName}. Lewat jalur halte TransJakarta atau gang sempit biar sensor patroli keputus sebelum eksekusi ${rawReq.missionTitle}.`;
+    reply = `${protagonistCallout} Hati-hati, status buronan bintang ${rawReq.wantedLevel} lo bikin unit patroli merapat ke ${rawReq.locationName}.${recentDeedNote} Lewat jalur halte TransJakarta atau gang sempit biar sensor patroli keputus sebelum eksekusi ${rawReq.missionTitle}.`;
   } else if (
     lower.includes('polisi') ||
     lower.includes('aparat') ||
@@ -66,7 +215,7 @@ export function buildFallbackNpcDialogue(
     lower.includes('wanted')
   ) {
     tone = 'Intel Jalanan';
-    reply = `Dengar info dari pos ojol dekat ${rawReq.locationName}: unit patroli lagi fokus di bundaran Monas dan Sudirman. Kalau bunyiin klakson di persimpangan, driver ojol bakal minggir buka celah buat lo cabut.`;
+    reply = `${protagonistCallout} Dengar info dari pos ojol dekat ${rawReq.locationName}: unit patroli lagi fokus di bundaran Monas dan Sudirman.${recentDeedNote} Kalau bunyiin klakson di persimpangan, driver ojol bakal minggir buka celah buat lo cabut.`;
   } else if (
     lower.includes('kerjaan') ||
     lower.includes('duit') ||
@@ -76,7 +225,7 @@ export function buildFallbackNpcDialogue(
     lower.includes('misi')
   ) {
     tone = 'Peluang Kontrak Cepat';
-    reply = `${originGreeting} Gue ada satu kontrak sampingan kilat sekitar ${rawReq.locationName}: amankan paket logistik sebelum kurir rival nyampe halte berikutnya. Cuan bersih siap cair ke saldo lo.`;
+    reply = `${protagonistCallout}${recentDeedNote} Gue ada satu kontrak sampingan kilat sekitar ${rawReq.locationName}: amankan paket logistik sebelum kurir rival nyampe halte berikutnya.`;
   } else if (
     lower.includes('faksi') ||
     lower.includes('sindikat') ||
@@ -84,9 +233,9 @@ export function buildFallbackNpcDialogue(
     lower.includes('jalanan')
   ) {
     tone = 'Dinamika Faksi Jakarta';
-    reply = `Keseimbangan faksi lagi panas—Jawara Jalanan (${rawReq.reputation.jalanan}%), Eksekutif Sindikat (${rawReq.reputation.sindikat}%), Bela Rakyat (${rawReq.reputation.rakyat}%). Pilihan lo di ${rawReq.missionTitle} bakal langsung ngeguncang bursa BAJSA dan kontrol distrik.`;
+    reply = `${protagonistCallout} Keseimbangan faksi lagi panas—Jawara Jalanan (${rawReq.reputation.jalanan}%), Eksekutif Sindikat (${rawReq.reputation.sindikat}%), Bela Rakyat (${rawReq.reputation.rakyat}%).${recentDeedNote} Pilihan lo di ${rawReq.missionTitle} bakal langsung ngeguncang bursa BAJSA dan kontrol distrik.`;
   } else {
-    reply = `${originGreeting} Untuk urusan "${rawReq.missionTitle}" di ${rawReq.locationName}, jaga jarak aman dari konvoi angkot yang sering ngetem mendadak dan koordinasikan langkah lo bareng informan lokal.`;
+    reply = `${protagonistCallout}${recentDeedNote} Untuk urusan "${rawReq.missionTitle}" di ${rawReq.locationName}, jaga jarak aman dari konvoi angkot yang sering ngetem mendadak dan koordinasikan langkah lo bareng informan lokal.`;
   }
 
   const sideQuest: NpcDynamicSideQuest = {
@@ -97,18 +246,23 @@ export function buildFallbackNpcDialogue(
         : faction === 'rakyat'
         ? `Pengawalan Logistik ${rawReq.locationName}`
         : `Sapuan Kurir Blok ${rawReq.locationName}`,
-    description: `Selesaikan kontak lapangan cepat dari ${rawReq.npcName} di area ${rawReq.locationName}.`,
+    description: `Selesaikan kontak lapangan cepat dari ${rawReq.npcName} untuk ${worldCtx.activeProtagonist} di area ${rawReq.locationName}.`,
     targetDistrict: rawReq.locationName,
-    rewardRp: 85000 + (rawReq.wantedLevel * 15000),
+    rewardRp: 85000 + rawReq.wantedLevel * 15000 + worldCtx.ownedTurfCount * 5000,
     faction,
     repGain: 6,
   };
+
+  const worldMemorySummary = `${worldCtx.activeProtagonist} · ${worldCtx.currentDistrict} · ${worldCtx.ownedTurfCount} Teritori${
+    worldCtx.recentEvents[0] ? ` · Aksi Terakhir: ${worldCtx.recentEvents[0]}` : ''
+  }`;
 
   return {
     reply,
     tone,
     source: 'fallback',
     sideQuest,
+    worldMemorySummary,
   };
 }
 
@@ -127,12 +281,20 @@ export async function generateNpcDialogue(
   apiKey: string | undefined = process.env.GEMINI_API_KEY
 ): Promise<NpcDialogueResponse> {
   const sanitizedPrompt = sanitizeDialogueInput(req.playerPrompt);
+  const worldCtx = sanitizeWorldContext(
+    req.worldContext,
+    req.locationName,
+    req.wantedLevel,
+    req.reputation
+  );
+
   const safeReq: NpcDialogueRequest = {
     ...req,
     playerPrompt:
       sanitizedPrompt.length > 0
         ? sanitizedPrompt
         : 'Bagaimana situasi lapangan dan ada kontrak sampingan?',
+    worldContext: worldCtx,
   };
 
   if (!hasUsableApiKey(apiKey)) {
@@ -151,17 +313,25 @@ export async function generateNpcDialogue(
 
     const systemInstruction = [
       'Kamu adalah penulis naratif untuk game aksi open-world Jakarta "GPU: San Nabilo".',
-      `Perankan NPC bernama ${safeReq.npcName} (${safeReq.npcRole}) di lokasi ${safeReq.locationName}.`,
-      'Gunakan Bahasa Indonesia khas jalanan Jakarta yang hidup, padat, sinematik, dan bebas jargon teknis AI.',
-      'Jawab singkat (maksimal 2-3 kalimat) yang relevan dengan misi aktif, latar belakang pemain, level buronan, dan reputasi faksi.',
+      `Perankan NPC informan bernama ${safeReq.npcName} (${safeReq.npcRole}) di distrik ${worldCtx.currentDistrict} (${safeReq.locationName}).`,
+      `Pemain saat ini mengendalikan protagonis ${worldCtx.activeProtagonist} dengan penguasaan ${worldCtx.ownedTurfCount} distrik Jakarta.`,
+      worldCtx.recentEvents.length > 0
+        ? `Ingat dan komentari secara organik aksi terbaru pemain di Jakarta: ${worldCtx.recentEvents.join(' | ')}.`
+        : 'Beri respons yang menyatu dengan atmosfer jalanan Jakarta.',
+      'Gunakan Bahasa Indonesia khas jalanan Jakarta (lo/gue, slang urban sinematik) yang hidup, padat, dan bebas jargon teknis AI.',
+      'Jawab singkat (maksimal 2-3 kalimat) yang relevan dengan misi aktif, karakter aktif, level buronan, dan reputasi faksi.',
       'Sertakan 1 dynamic sideQuest opsional yang ringkas dan realistis di Jakarta.',
     ].join(' ');
 
     const userContext = JSON.stringify({
       missionTitle: safeReq.missionTitle,
       origin: safeReq.origin,
+      activeProtagonist: worldCtx.activeProtagonist,
+      currentDistrict: worldCtx.currentDistrict,
       wantedLevel: safeReq.wantedLevel,
       reputation: safeReq.reputation,
+      ownedTurfCount: worldCtx.ownedTurfCount,
+      recentEvents: worldCtx.recentEvents,
       playerQuestion: safeReq.playerPrompt,
     });
 
@@ -176,11 +346,13 @@ export async function generateNpcDialogue(
           properties: {
             reply: {
               type: Type.STRING,
-              description: 'Dialog balasan NPC berbahasa Indonesia Jakarta (2-3 kalimat).',
+              description:
+                'Dialog balasan NPC berbahasa Indonesia slang Jakarta (2-3 kalimat) yang menyapa protagonis aktif dan menyinggung aksi terbaru pemain.',
             },
             tone: {
               type: Type.STRING,
-              description: 'Label nada bicara singkat, misal: Taktis & Waspada.',
+              description:
+                'Label nada bicara singkat, misal: Taktis & Waspada.',
             },
             sideQuestTitle: {
               type: Type.STRING,
@@ -238,13 +410,23 @@ export async function generateNpcDialogue(
     const rewardRp =
       typeof parsed.sideQuestRewardRp === 'number' &&
       Number.isFinite(parsed.sideQuestRewardRp)
-        ? Math.max(60000, Math.min(250000, Math.round(parsed.sideQuestRewardRp)))
+        ? Math.max(
+            60000,
+            Math.min(250000, Math.round(parsed.sideQuestRewardRp))
+          )
         : 110000;
+
+    const worldMemorySummary = `${worldCtx.activeProtagonist} · ${worldCtx.currentDistrict} · ${worldCtx.ownedTurfCount} Teritori${
+      worldCtx.recentEvents[0]
+        ? ` · Aksi Terakhir: ${worldCtx.recentEvents[0]}`
+        : ''
+    }`;
 
     return {
       reply: parsed.reply.trim(),
       tone: (parsed.tone || 'Informan Jakarta').trim(),
       source: 'gemini',
+      worldMemorySummary,
       sideQuest: parsed.sideQuestTitle
         ? {
             id: `dq_ai_${questHash}`,
