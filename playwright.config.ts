@@ -35,9 +35,13 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: 'NODE_ENV=production node dist-server/server.js',
+    command: 'node dist-server/server.js',
     url: `${baseUrl}/api/health`,
     reuseExistingServer: true,
     timeout: 30_000,
+    env: {
+      NODE_ENV: 'production',
+      PORT: process.env.PORT || '3000',
+    },
   },
 });

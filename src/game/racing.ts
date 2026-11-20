@@ -1363,13 +1363,34 @@ export function stepTrafficVehicleInPlace(
     targetSpeed = 0;
   }
 
-  // Ojol can filter closer than four-wheeled vehicles
-  const hardStopDist = vehicle.vehicleType === 'ojek' ? 3.2 : 5.4;
+  // Natural GTA-style following distance: Ojol can filter close, cars maintain smooth queue
+  const hardStopDist = vehicle.vehicleType === 'ojek' ? 2.4 : 3.8;
   if (effectiveAheadDist < hardStopDist) {
     targetSpeed = 0;
-  } else if (effectiveAheadDist < 13.5) {
-    const gapFactor = (effectiveAheadDist - hardStopDist) / (13.5 - hardStopDist);
-    targetSpeed = Math.min(targetSpeed, vehicle.preferredSpeed * gapFactor);
+  } else if (effectiveAheadDist < 14.0) {
+    const gapFactor = (effectiveAheadDist - hardStopDist) / (14.0 - hardStopDist);
+    targetSpeed = Math.min(targetSpeed, vehicle.preferredSpeed * (gapFactor * gapFactor));
+  }
+
+  // Anti-gridlock unjam recovery: if stopped for > 8s without stopTimer or red light, advance waypoint
+  const isWaitingSignal =
+    options?.signalPhase &&
+    isStoppedAtTrafficSignal(
+      vehicle.x,
+      vehicle.z,
+      vehicle.heading,
+      vehicle.layer,
+      options.signalPhase
+    );
+  if (vehicle.speed < 0.25 && vehicle.stopTimer <= 0 && !isWaitingSignal) {
+    vehicle.stuckTimer = (vehicle.stuckTimer ?? 0) + dt;
+    if (vehicle.stuckTimer > 8.0) {
+      vehicle.waypointIndex = (wpIdx + 1) % route.length;
+      vehicle.stuckTimer = 0;
+      targetSpeed = Math.min(vehicle.preferredSpeed * 0.45, 4.0);
+    }
+  } else {
+    vehicle.stuckTimer = 0;
   }
 
   const rate = targetSpeed < vehicle.speed ? 16.5 : 8.5;

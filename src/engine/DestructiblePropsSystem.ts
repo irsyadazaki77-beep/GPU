@@ -44,40 +44,41 @@ export class DestructiblePropsSystem {
 
   constructor(scene: THREE.Scene) {
     // 1. Place scatterable Jakarta street cones, wooden crates, Dishub barriers & explosive fuel barrels
+    // strictly along sidewalk perimeters, pedestrian plazas & alleys (100% off active roadways)
     const candidates: { kind: PropKind; x: number; z: number }[] = [];
 
     for (let z = -70; z <= 70; z += 14) {
       if (Math.abs(z) < 20 || Math.abs(Math.abs(z) - 32) < 6) continue;
-      candidates.push({ kind: 'cone', x: -7.1, z });
-      candidates.push({ kind: 'cone', x: 7.1, z: z + 4 });
+      candidates.push({ kind: 'cone', x: -10.5, z });
+      candidates.push({ kind: 'cone', x: 10.5, z: z + 4 });
     }
     for (let x = -66; x <= 66; x += 22) {
       if (Math.abs(x) < 20 || Math.abs(Math.abs(x) - 32) < 6) continue;
-      candidates.push({ kind: 'barrier', x, z: -7.2 });
-      candidates.push({ kind: 'crate', x: x + 3, z: 7.2 });
+      candidates.push({ kind: 'barrier', x, z: -10.5 });
+      candidates.push({ kind: 'crate', x: x + 3, z: 10.5 });
     }
     // Extra crates & explosive red fuel barrels near warungs, Gang Blok M & Tanjung Priok harbor
     const extra: { kind: PropKind; x: number; z: number }[] = [
       { kind: 'crate', x: -13.5, z: 24 },
       { kind: 'crate', x: -14.2, z: 24.9 },
       { kind: 'crate', x: 13.5, z: 21 },
-      { kind: 'barrier', x: -7.2, z: 39 },
-      { kind: 'barrier', x: 7.2, z: -39 },
+      { kind: 'barrier', x: -11.5, z: 39 },
+      { kind: 'barrier', x: 11.5, z: -39 },
       { kind: 'barrel', x: -16.5, z: 18 },
       { kind: 'barrel', x: 16.5, z: -18 },
       { kind: 'barrel', x: -34.5, z: 10 },
       { kind: 'barrel', x: 43.0, z: -64 },
       { kind: 'barrel', x: -24.5, z: -66 },
       { kind: 'barrel', x: 35.0, z: 28 },
-      { kind: 'barrel', x: -8.2, z: -50 },
-      { kind: 'barrel', x: 8.2, z: 50 },
+      { kind: 'barrel', x: -18.5, z: -50 },
+      { kind: 'barrel', x: 18.5, z: 50 },
     ];
     candidates.push(...extra);
 
     for (const c of candidates) {
       if (c.kind !== 'barrel' && this.props.length >= 30) continue;
       if (isNearBuilding(c.x, c.z, 1.3)) continue;
-      if ((c.kind === 'crate' || c.kind === 'barrel') && isOnRoadway(c.x, c.z)) continue;
+      if (isOnRoadway(c.x, c.z)) continue;
       const gY = getGroundElevationAt(c.x, c.z);
       const idx = this.props.length;
       this.props.push({

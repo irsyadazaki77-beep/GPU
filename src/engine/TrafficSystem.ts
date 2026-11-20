@@ -115,7 +115,7 @@ export class TrafficSystem {
     this.sirenLight = new THREE.PointLight(0xef4444, 0, 24, 1.7);
     scene.add(this.sirenLight);
 
-    // Parked protagonist fleet across curb bays & plaza staging pads (clear of crosswalks & sidewalks)
+    // Parked protagonist fleet across dedicated roadside bays & staging pads (100% clear of active driving lanes)
     const parkedVehicles: {
       type: VehicleType;
       x: number;
@@ -123,14 +123,14 @@ export class TrafficSystem {
       heading: number;
     }[] = [
       { type: 'vtol_jet', x: -15.8, z: -15.4, heading: Math.PI * 0.25 },
-      { type: 'bajaj', x: -5.4, z: 30.2, heading: Math.PI },
-      { type: 'ojek', x: 5.4, z: 30.2, heading: Math.PI },
+      { type: 'bajaj', x: -14.5, z: 21.0, heading: Math.PI * 0.5 },
+      { type: 'ojek', x: 14.5, z: 21.0, heading: -Math.PI * 0.5 },
       { type: 'heli', x: 15.2, z: -15.2, heading: -Math.PI * 0.25 },
       { type: 'barracuda', x: -14.8, z: 14.2, heading: -Math.PI * 0.75 },
-      { type: 'supercar', x: 5.4, z: 45.0, heading: Math.PI },
+      { type: 'supercar', x: 11.8, z: 45.0, heading: Math.PI },
       { type: 'supercar', x: 28, z: -26, heading: -Math.PI / 2 },
-      { type: 'angkot', x: -5.4, z: 45.5, heading: Math.PI },
-      { type: 'sedan', x: 5.4, z: -15.0, heading: 0 },
+      { type: 'angkot', x: -11.8, z: 45.5, heading: Math.PI },
+      { type: 'sedan', x: 12.0, z: -15.0, heading: 0 },
       { type: 'speedboat', x: -28, z: -82, heading: 0 },
       // Outer Megapolitan parked fleet (Pondok Indah, Kemang, Kelapa Gading, Marunda Bay)
       { type: 'supercar', x: -146, z: 162, heading: Math.PI * 0.5 },
@@ -995,6 +995,42 @@ export class TrafficSystem {
           spatialAudio.playTransJakartaHorn3D(v.x, v.y, v.z);
         } else if (v.type === 'ojek') {
           spatialAudio.playOjolHorn3D(v.x, v.y, v.z);
+        }
+      }
+    }
+
+    // Soft elastic vehicle-vehicle separation to prevent clipping & intersecting pile-ups
+    for (let i = 0; i < this.vehicles.length; i++) {
+      const vA = this.vehicles[i];
+      if (vA.layer !== 'ground' || !vA.isTraffic) continue;
+      const specA = VEHICLE_SPECS[vA.type];
+      const rA = specA ? specA.radius * 0.72 : 1.5;
+      for (let j = i + 1; j < this.vehicles.length; j++) {
+        const vB = this.vehicles[j];
+        if (vB.layer !== 'ground') continue;
+        if (Math.abs(vA.y - vB.y) > 1.8) continue;
+        const dx = vB.x - vA.x;
+        const dz = vB.z - vA.z;
+        const distSq = dx * dx + dz * dz;
+        const specB = VEHICLE_SPECS[vB.type];
+        const rB = specB ? specB.radius * 0.72 : 1.5;
+        const minDist = rA + rB;
+        if (distSq > 0.0001 && distSq < minDist * minDist) {
+          const dist = Math.sqrt(distSq);
+          const overlap = minDist - dist;
+          const pushFraction = overlap * 0.5 * Math.min(1, simDt * 6);
+          const pushX = (dx / dist) * pushFraction;
+          const pushZ = (dz / dist) * pushFraction;
+          vA.x -= pushX;
+          vA.z -= pushZ;
+          vA.mesh.position.x = vA.x;
+          vA.mesh.position.z = vA.z;
+          if (vB.isTraffic) {
+            vB.x += pushX;
+            vB.z += pushZ;
+            vB.mesh.position.x = vB.x;
+            vB.mesh.position.z = vB.z;
+          }
         }
       }
     }

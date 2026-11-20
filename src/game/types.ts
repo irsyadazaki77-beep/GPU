@@ -601,6 +601,7 @@ export interface TrafficAISteppable {
   ngetemCooldown?: number;
   weaveOffset?: number;
   hornReactionTimer?: number;
+  stuckTimer?: number;
 }
 
 export type AmbientCueId =

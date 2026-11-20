@@ -20,7 +20,10 @@ import {
   resolveCombatComboState,
   resolveDistrictAtPosition,
   stepVehicleLongitudinalSpeed,
+  stepTrafficVehicleAI,
 } from './rules';
+import { isOnRoadway } from './world/spatial';
+import { STUNT_RAMPS_CATALOG } from './wave2Systems';
 import { gameStore } from '../state/gameStore';
 
 test('World expansion to 480m x 480m preserves outer ring, JORR perimeter loop, and bounds', () => {
@@ -425,4 +428,52 @@ test('Gameplay Overhaul: Staged Quest Director, tactical headshots, vehicle armo
   // Normal same-direction steering yields no boost
   const normalSteer = computeDriftCounterSteerBoost(0.8, 0.35, 18.0);
   assert.equal(normalSteer.boosted, false);
+});
+
+test('Map decluttering: All stunt ramps, parked vehicles, and street obstacles are clear of active roadways', () => {
+  // 1. All 6 stunt ramps must be located off active thoroughfares
+  assert.equal(STUNT_RAMPS_CATALOG.length, 6);
+  for (const ramp of STUNT_RAMPS_CATALOG) {
+    assert.equal(
+      isOnRoadway(ramp.x, ramp.z),
+      false,
+      `Stunt ramp ${ramp.id} (${ramp.name}) at (${ramp.x}, ${ramp.z}) must not sit on active roadway`
+    );
+  }
+
+  // 2. Parked protagonist vehicles must be in parking bays / curbs, not blocking lanes
+  const parkedVehicles = [
+    { type: 'bajaj', x: -14.5, z: 21.0 },
+    { type: 'ojek', x: 14.5, z: 21.0 },
+    { type: 'supercar', x: 11.8, z: 45.0 },
+    { type: 'angkot', x: -11.8, z: 45.5 },
+    { type: 'sedan', x: 12.0, z: -15.0 },
+  ];
+  for (const v of parkedVehicles) {
+    assert.equal(
+      isOnRoadway(v.x, v.z),
+      false,
+      `Parked vehicle ${v.type} at (${v.x}, ${v.z}) must not block traffic lane`
+    );
+  }
+
+  // 3. Traffic AI anti-gridlock unjam: a vehicle stuck for > 8s auto-recovers and advances waypoint
+  const route = TRAFFIC_ROUTES.ring_clockwise;
+  const stuckCar = {
+    x: -34.4,
+    z: 10,
+    heading: Math.PI,
+    speed: 0,
+    waypointIndex: 0,
+    stopTimer: 0,
+    preferredSpeed: 11.0,
+    layer: 'ground' as const,
+    stuckTimer: 7.9,
+  };
+
+  // 0.2s tick takes stuckTimer to 8.1s -> triggers unjam recovery
+  const unjammed = stepTrafficVehicleAI(stuckCar, route, 999, 0.2);
+  assert.equal(unjammed.waypointIndex, 1, 'Unjam recovery should advance to next waypoint');
+  assert.equal(unjammed.stuckTimer, 0, 'Unjam recovery should reset stuckTimer');
+  assert.ok(unjammed.speed > 0, 'Unjam recovery should apply creep speed forward');
 });

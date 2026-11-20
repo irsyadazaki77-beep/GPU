@@ -154,9 +154,9 @@ export const STUNT_RAMPS_CATALOG: StuntRampSpec[] = [
     id: 'ramp_sudirman_skyway',
     name: 'Lompatan Langit Sudirman',
     districtName: 'Koridor Sudirman - Thamrin',
-    x: 0,
+    x: -16.5,
     z: -42,
-    heading: Math.PI, // Facing north (-Z)
+    heading: Math.PI, // Facing north (-Z) from plaza deck
     length: 11,
     width: 5.2,
     peakHeight: 3.0,
@@ -167,9 +167,9 @@ export const STUNT_RAMPS_CATALOG: StuntRampSpec[] = [
     id: 'ramp_monas_selatan',
     name: 'Tanjakan Monas Selatan',
     districtName: 'Medan Merdeka & Monas',
-    x: 0,
-    z: 36,
-    heading: 0, // Facing south (+Z)
+    x: 16.5,
+    z: 18,
+    heading: 0, // Facing south (+Z) along Monas green staging apron
     length: 10.5,
     width: 5.2,
     peakHeight: 2.8,
@@ -180,7 +180,7 @@ export const STUNT_RAMPS_CATALOG: StuntRampSpec[] = [
     id: 'ramp_semanggi_tol',
     name: 'Loncatan Simpang Semanggi',
     districtName: 'Kawasan Elit SCBD',
-    x: -32,
+    x: -22.5,
     z: -16,
     heading: Math.PI,
     length: 11.5,
@@ -194,8 +194,8 @@ export const STUNT_RAMPS_CATALOG: StuntRampSpec[] = [
     name: 'Lompatan Kanal Kota Tua',
     districtName: 'Kota Tua & Glodok',
     x: 46,
-    z: 2.5,
-    heading: Math.PI / 2, // Facing east (+X)
+    z: 16.5,
+    heading: Math.PI / 2, // Facing east (+X) over canal promenade
     length: 10.5,
     width: 5.0,
     peakHeight: 2.9,
@@ -207,8 +207,8 @@ export const STUNT_RAMPS_CATALOG: StuntRampSpec[] = [
     name: 'Kicker Pasar Tanah Abang',
     districtName: 'Pasar Tanah Abang',
     x: -46,
-    z: 2.5,
-    heading: -Math.PI / 2, // Facing west (-X)
+    z: 16.5,
+    heading: -Math.PI / 2, // Facing west (-X) through loading dock alleyway
     length: 10.0,
     width: 4.8,
     peakHeight: 2.7,
@@ -219,7 +219,7 @@ export const STUNT_RAMPS_CATALOG: StuntRampSpec[] = [
     id: 'ramp_blok_m_neon',
     name: 'Ramp Neon Melawai Blok M',
     districtName: 'Terminal Blok M & Melawai',
-    x: 32,
+    x: 42.5,
     z: 18,
     heading: 0,
     length: 11.0,
