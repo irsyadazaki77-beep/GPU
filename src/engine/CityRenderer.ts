@@ -37,7 +37,7 @@ function buildExpansionZonesGroup(): {
   const group = new THREE.Group();
   group.name = 'JakartaExpansionZonesGroup';
 
-  // 1. Jakarta Bay & Kepulauan Seribu Water Basin (North Z <= -72)
+  // 1. Jakarta Bay & Kepulauan Seribu Water Basin (North Z <= -72 .. -160)
   const bayWaterMat = new THREE.MeshStandardMaterial({
     color: 0x0369a1,
     roughness: 0.18,
@@ -46,10 +46,10 @@ function buildExpansionZonesGroup(): {
     transparent: true,
     opacity: 0.88,
   });
-  const bayGeo = new THREE.PlaneGeometry(190, 32, 24, 6);
+  const bayGeo = new THREE.PlaneGeometry(330, 92, 32, 10);
   bayGeo.rotateX(-Math.PI / 2);
   const bayMesh = new THREE.Mesh(bayGeo, bayMatOrFallback(bayWaterMat));
-  bayMesh.position.set(0, -0.02, -84);
+  bayMesh.position.set(0, -0.02, -118);
   group.add(bayMesh);
 
   // Kepulauan Seribu Coral Atoll & Speedboat Jetty Pier
@@ -201,7 +201,7 @@ export class CityRenderer {
   constructor(scene: THREE.Scene, maxAnisotropy: number) {
     this.buildingGrid = createBuildingSpatialGrid(CITY_BUILDINGS, 18);
     this.chunkLoader = new SpatialChunkLoader(scene, CITY_BUILDINGS, {
-      chunkSize: 250,
+      chunkSize: 120,
       activeRadiusChunks: 1,
       maxOpsPerFrame: 2,
     });
@@ -347,14 +347,14 @@ if (uWetness > 0.04) {
     };
     this.roadMat.customProgramCacheKey = () => 'san-nabilo-wet-asphalt-v3';
 
-    const nsRoadGeo = new THREE.PlaneGeometry(14, 190);
+    const nsRoadGeo = new THREE.PlaneGeometry(14, 272);
     nsRoadGeo.rotateX(-Math.PI / 2);
     const nsRoad = new THREE.Mesh(nsRoadGeo, this.roadMat);
     nsRoad.position.set(0, 0.036, 0);
     nsRoad.receiveShadow = true;
     this.rootGroup.add(nsRoad);
 
-    const ewRoadGeo = new THREE.PlaneGeometry(14, 190);
+    const ewRoadGeo = new THREE.PlaneGeometry(14, 272);
     ewRoadGeo.rotateX(-Math.PI / 2);
     ewRoadGeo.rotateY(Math.PI / 2);
     const ewRoad = new THREE.Mesh(ewRoadGeo, this.roadMat);
@@ -363,18 +363,34 @@ if (uWetness > 0.04) {
     this.rootGroup.add(ewRoad);
 
     for (const offset of [-32, 32]) {
-      const hRoadGeo = new THREE.PlaneGeometry(10, 160);
+      const hRoadGeo = new THREE.PlaneGeometry(10, 270);
       hRoadGeo.rotateX(-Math.PI / 2);
       hRoadGeo.rotateY(Math.PI / 2);
       const hRoad = new THREE.Mesh(hRoadGeo, this.roadMat);
       hRoad.position.set(0, 0.02, offset);
       this.rootGroup.add(hRoad);
 
-      const vRoadGeo = new THREE.PlaneGeometry(10, 160);
+      const vRoadGeo = new THREE.PlaneGeometry(10, 270);
       vRoadGeo.rotateX(-Math.PI / 2);
       const vRoad = new THREE.Mesh(vRoadGeo, this.roadMat);
       vRoad.position.set(offset, 0.028, 0);
       this.rootGroup.add(vRoad);
+    }
+
+    // Outer Jakarta Ring Boulevard (x = +-128, z = +128 south/east/west)
+    const outerRingSouthGeo = new THREE.PlaneGeometry(12, 268);
+    outerRingSouthGeo.rotateX(-Math.PI / 2);
+    outerRingSouthGeo.rotateY(Math.PI / 2);
+    const outerRingSouth = new THREE.Mesh(outerRingSouthGeo, this.roadMat);
+    outerRingSouth.position.set(0, 0.024, 128);
+    this.rootGroup.add(outerRingSouth);
+
+    for (const sideX of [-128, 128]) {
+      const outerSideGeo = new THREE.PlaneGeometry(12, 210);
+      outerSideGeo.rotateX(-Math.PI / 2);
+      const outerSide = new THREE.Mesh(outerSideGeo, this.roadMat);
+      outerSide.position.set(sideX, 0.026, 29);
+      this.rootGroup.add(outerSide);
     }
 
     // 3. Tol Layang, Enterable Interior Stage & Warung Stalls

@@ -235,6 +235,41 @@ test('Ephemeral WebSocket server: room join/leave, 8-player room cap overflow, 2
     assert.equal(broadcastMsg.roomId, 'balap_liar');
     assert.equal(broadcastMsg.peers.length, 8);
 
+    // 3b. Verify custom_race_sync & coop:event broadcast between clients
+    const customRacePromise = waitForMessage<{ type: string; track?: { name?: string } }>(
+      client2,
+      (m) => m.type === 'custom_race_sync' && m.track?.name === 'Sirkuit Sudirman'
+    );
+    client1.send(
+      JSON.stringify({
+        type: 'custom_race_sync',
+        track: {
+          id: 'ugc_1',
+          name: 'Sirkuit Sudirman',
+          checkpoints: [
+            [0, -20],
+            [30, -20],
+            [30, 20],
+          ],
+        },
+      })
+    );
+    const customRaceMsg = await customRacePromise;
+    assert.equal(customRaceMsg.track?.name, 'Sirkuit Sudirman');
+
+    const coopEventPromise = waitForMessage<{ type: string; event?: { type?: string; x?: number } }>(
+      client2,
+      (m) => m.type === 'coop:event' && m.event?.type === 'horn'
+    );
+    client1.send(
+      JSON.stringify({
+        type: 'coop:event',
+        event: { type: 'horn', x: 12, y: 0, z: 24 },
+      })
+    );
+    const coopEventMsg = await coopEventPromise;
+    assert.equal(coopEventMsg.event?.x, 12);
+
     // 4. Close all sockets and verify rooms are deterministically cleaned up
     await Promise.all(
       openSockets.map(

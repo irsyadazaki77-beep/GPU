@@ -6,6 +6,7 @@ import type {
   ProtagonistId,
   VehicleType,
 } from '../src/game/types';
+import { WORLD_MAX_BOUND } from '../src/game/world/bounds';
 
 export const MAX_PLAYERS_PER_ROOM = 8;
 export const SERVER_TICK_MS = 50; // 20Hz authoritative broadcast tick
@@ -68,7 +69,7 @@ function isNearKnownRespawn(x: number, z: number): boolean {
 
 function clampWorldCoord(n: unknown, fallback: number): number {
   if (typeof n !== 'number' || !Number.isFinite(n)) return fallback;
-  return Math.max(-92, Math.min(92, n));
+  return Math.max(-WORLD_MAX_BOUND, Math.min(WORLD_MAX_BOUND, n));
 }
 
 function computeRawByteLength(raw: RawData | string): number {
@@ -82,12 +83,20 @@ function computeRawByteLength(raw: RawData | string): number {
 }
 
 export interface ValidatedWsClientMessage {
-  type: 'ping' | 'room:switch' | 'peer:update' | 'custom_race_sync';
+  type: 'ping' | 'room:switch' | 'peer:update' | 'custom_race_sync' | 'coop:event';
   clientTime?: number;
   roomId?: string;
   mode?: MultiplayerRoomMode;
   state?: Partial<NetPeerSnapshot>;
   track?: Record<string, unknown>;
+  event?: {
+    type: 'horn' | 'weapon_fire' | 'explosion' | 'wanted_alert' | 'passenger_ping';
+    x: number;
+    y: number;
+    z: number;
+    wantedLevel?: number;
+    detail?: string;
+  };
 }
 
 export function validateIncomingWsFrame(
@@ -118,7 +127,8 @@ export function validateIncomingWsFrame(
     msgType !== 'ping' &&
     msgType !== 'room:switch' &&
     msgType !== 'peer:update' &&
-    msgType !== 'custom_race_sync'
+    msgType !== 'custom_race_sync' &&
+    msgType !== 'coop:event'
   ) {
     return { ok: false, reason: 'invalid_schema' };
   }
@@ -156,6 +166,34 @@ export function validateIncomingWsFrame(
     }
   }
 
+  let validatedEvent: ValidatedWsClientMessage['event'];
+  if (msgType === 'coop:event') {
+    const ev = candidate.event as Record<string, unknown> | undefined;
+    const validEvTypes = ['horn', 'weapon_fire', 'explosion', 'wanted_alert', 'passenger_ping'];
+    if (
+      !ev ||
+      typeof ev !== 'object' ||
+      !validEvTypes.includes(String(ev.type)) ||
+      typeof ev.x !== 'number' ||
+      !Number.isFinite(ev.x) ||
+      typeof ev.z !== 'number' ||
+      !Number.isFinite(ev.z)
+    ) {
+      return { ok: false, reason: 'invalid_schema' };
+    }
+    validatedEvent = {
+      type: ev.type as NonNullable<ValidatedWsClientMessage['event']>['type'],
+      x: clampWorldCoord(ev.x, 0),
+      y: typeof ev.y === 'number' && Number.isFinite(ev.y) ? Math.max(0, Math.min(72, ev.y)) : 0,
+      z: clampWorldCoord(ev.z, 0),
+      wantedLevel:
+        typeof ev.wantedLevel === 'number' && Number.isFinite(ev.wantedLevel)
+          ? Math.max(0, Math.min(5, Math.floor(ev.wantedLevel)))
+          : undefined,
+      detail: typeof ev.detail === 'string' ? ev.detail.slice(0, 96) : undefined,
+    };
+  }
+
   return {
     ok: true,
     msg: {
@@ -178,6 +216,7 @@ export function validateIncomingWsFrame(
         candidate.track && typeof candidate.track === 'object'
           ? (candidate.track as Record<string, unknown>)
           : undefined,
+      event: validatedEvent,
     },
   };
 }
@@ -457,6 +496,36 @@ export class MultiplayerRoomHub {
       }
     }
   }
+
+  public broadcastCoopEvent(
+    roomId: string,
+    senderPeerId: string,
+    event: NonNullable<ValidatedWsClientMessage['event']>
+  ): void {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+    const sender = room.clients.get(senderPeerId);
+    const payload = JSON.stringify({
+      type: 'coop:event',
+      roomId,
+      event: {
+        ...event,
+        peerId: senderPeerId,
+        displayName: sender?.state.displayName || `Kru-${senderPeerId.slice(0, 4)}`,
+        timestamp: Date.now(),
+      },
+    });
+    for (const client of room.clients.values()) {
+      if (client.peerId === senderPeerId) continue;
+      if (client.ws && client.ws.readyState === WebSocket.OPEN) {
+        try {
+          client.ws.send(payload);
+        } catch {
+          // Ignore send errors
+        }
+      }
+    }
+  }
 }
 
 export function attachMultiplayerWebSocketServer(
@@ -557,6 +626,10 @@ export function attachMultiplayerWebSocketServer(
 
       if (msg.type === 'custom_race_sync' && msg.track) {
         hub.broadcastCustomRaceTrack(currentRoomId, peerId, msg.track);
+      }
+
+      if (msg.type === 'coop:event' && msg.event) {
+        hub.broadcastCoopEvent(currentRoomId, peerId, msg.event);
       }
     });
 

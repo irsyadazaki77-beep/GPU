@@ -72,6 +72,27 @@ test('San Nabilo Open-World E2E Smoke: health/readyz probes, WebGL canvas boot, 
     overlayText.includes('CONNECTED') || overlayText.includes('RECONNECTING')
   ).toBe(true);
 
+  // 6. Trigger Trio Active Ability [L] and open NabiloPhone [Tab] -> verify UI & movement resilience
+  const abilityBtn = page.locator('[data-testid="trio-ability-btn"]');
+  await abilityBtn.click({ force: true });
+  await page.waitForTimeout(200);
+
+  await page.keyboard.press('Tab');
+  const phoneDialog = page.getByRole('dialog', { name: 'Smartphone iFruit Jakarta' });
+  await phoneDialog.waitFor({ state: 'visible', timeout: 5_000 });
+  const imperiumBtn = phoneDialog.getByRole('button', { name: 'Imperium' });
+  await imperiumBtn.click({ force: true });
+
+  const ugcToggleBtn = page.locator('[data-testid="toggle-ugc-race-builder-btn"]');
+  await ugcToggleBtn.waitFor({ state: 'visible', timeout: 5_000 });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+
+  // Simulate brief WASD movement
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(350);
+  await page.keyboard.up('KeyW');
+
   expect(pageErrors).toEqual([]);
   expect(fatalConsoleErrors).toEqual([]);
 });

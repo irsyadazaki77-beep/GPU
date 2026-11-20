@@ -1,8 +1,14 @@
 import * as THREE from 'three';
-import { PROTAGONIST_PROFILES, getGroundElevationAt } from '../game/rules';
+import {
+  PROTAGONIST_PROFILES,
+  createCustomRaceTrackSpec,
+  getGroundElevationAt,
+} from '../game/rules';
 import type {
+  CustomRaceTrackSpec,
   MultiplayerConnectionState,
   MultiplayerRoomMode,
+  NetCoopEvent,
   NetPeerSnapshot,
   ProtagonistId,
   VehicleType,
@@ -11,6 +17,8 @@ import {
   buildCharacterRig,
   buildIndonesianVehicleMesh,
 } from '../game/world/geometryBuilders';
+import { gameStore } from '../state/gameStore';
+import { spatialAudio } from './spatialAudio';
 
 export interface InterpolatedPeerPose {
   x: number;
@@ -78,6 +86,36 @@ interface RemotePeerRenderSlot {
   vehicleGroup: THREE.Group | null;
   vehicleType: VehicleType | null;
   markerRing: THREE.Mesh;
+  nameSprite: THREE.Sprite | null;
+}
+
+function createPeerNameplateSprite(label: string, colorHex: string): THREE.Sprite | null {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  ctx.clearRect(0, 0, 256, 64);
+  ctx.fillStyle = 'rgba(9, 12, 18, 0.82)';
+  ctx.fillRect(16, 12, 224, 40);
+  ctx.strokeStyle = colorHex;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(16, 12, 224, 40);
+  ctx.fillStyle = '#f8fafc';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label.slice(0, 18), 128, 32);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.position.set(0, 2.55, 0);
+  sprite.scale.set(2.4, 0.6, 1);
+  return sprite;
 }
 
 export class MultiplayerClientSync {
@@ -150,10 +188,13 @@ export class MultiplayerClientSync {
           const data = JSON.parse(String(evt.data)) as {
             type?: string;
             peerId?: string;
+            senderPeerId?: string;
             roomId?: string;
             mode?: MultiplayerRoomMode;
             peers?: NetPeerSnapshot[];
             clientTime?: number;
+            track?: Partial<CustomRaceTrackSpec>;
+            event?: NetCoopEvent;
           };
 
           if (data.type === 'room:init') {
@@ -174,6 +215,36 @@ export class MultiplayerClientSync {
             if (data.roomId) this.roomId = data.roomId;
             if (data.mode) this.roomMode = data.mode;
             this.ingestPeerList(data.peers);
+            return;
+          }
+
+          if (data.type === 'custom_race_sync' && data.track && data.senderPeerId !== this.localPeerId) {
+            const created = createCustomRaceTrackSpec({
+              name: String(data.track.name || 'Sirkuit Co-Op'),
+              subtitle: typeof data.track.subtitle === 'string' ? data.track.subtitle : undefined,
+              authorName: typeof data.track.authorName === 'string' ? data.track.authorName : 'Kru Co-Op',
+              checkpoints: Array.isArray(data.track.checkpoints) ? data.track.checkpoints : [],
+              isLoop: Boolean(data.track.isLoop),
+              entryFeeRp: typeof data.track.entryFeeRp === 'number' ? data.track.entryFeeRp : undefined,
+              rewardRp: typeof data.track.rewardRp === 'number' ? data.track.rewardRp : undefined,
+            });
+            if (created.track) {
+              gameStore.receiveSharedCoopRace({
+                ...created.track,
+                id: typeof data.track.id === 'string' ? data.track.id : created.track.id,
+              });
+            }
+            return;
+          }
+
+          if (data.type === 'coop:event' && data.event && data.event.peerId !== this.localPeerId) {
+            const ev = data.event;
+            if (ev.type === 'horn') {
+              spatialAudio.playOjolHorn3D(ev.x, ev.y, ev.z);
+            } else if (ev.type === 'weapon_fire' || ev.type === 'explosion') {
+              spatialAudio.playPoliceSiren3D(ev.x, ev.y, ev.z, true);
+            }
+            gameStore.pushCoopEventToast(ev);
             return;
           }
 
@@ -207,6 +278,43 @@ export class MultiplayerClientSync {
         this.reconnectAttempt
       );
       this.reconnectAttempt++;
+    }
+  }
+
+  public sendCustomRaceTrack(track: CustomRaceTrackSpec): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      this.ws.send(
+        JSON.stringify({
+          type: 'custom_race_sync',
+          track,
+        })
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  public sendCoopEvent(event: {
+    type: NetCoopEvent['type'];
+    x: number;
+    y: number;
+    z: number;
+    wantedLevel?: number;
+    detail?: string;
+  }): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      this.ws.send(
+        JSON.stringify({
+          type: 'coop:event',
+          event,
+        })
+      );
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -254,6 +362,15 @@ export class MultiplayerClientSync {
         markerRing.position.y = 0.08;
         rootGroup.add(markerRing);
 
+        const prof = PROTAGONIST_PROFILES[p.protagonist];
+        const nameSprite = createPeerNameplateSprite(
+          p.displayName || 'Kru',
+          prof?.colorHex || '#38bdf8'
+        );
+        if (nameSprite) {
+          rootGroup.add(nameSprite);
+        }
+
         rootGroup.position.set(p.x, p.y, p.z);
         rootGroup.rotation.y = p.heading;
         this.peersGroup.add(rootGroup);
@@ -267,6 +384,7 @@ export class MultiplayerClientSync {
           vehicleGroup: null,
           vehicleType: null,
           markerRing,
+          nameSprite,
         });
       }
     }

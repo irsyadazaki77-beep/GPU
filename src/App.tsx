@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useRef } from 'react';
 import {
   EnterableInteriorSpec,
   GRAND_HEISTS,
@@ -29,17 +29,11 @@ import {
   completeMissionReward,
   computeTrioSynergyPerks,
   consumeWarungSnack,
-  formatJakartaClock,
   formatRupiah,
   purchaseProperty,
   recruitCrewMember,
   resolveJakartaAmbientProfile,
-  resolveWeatherFromWorldClock,
   sellStockShares,
-  stepFokusAbility,
-  stepStockMarketTick,
-  stepWarungStaminaBuff,
-  stepWorldClockEventTicker,
   triggerStockMarketImpact,
   upgradeDroneTech,
   upgradeVehicleGarage,
@@ -62,7 +56,8 @@ import { CinematicOverlay } from './components/CinematicOverlay';
 import { MobileTouchControls } from './components/MobileTouchControls';
 import { PhotoModeOverlay } from './components/PhotoModeOverlay';
 import { WorldCalloutOverlay } from './components/WorldCalloutOverlay';
-import { cityAudio } from './engine/CityAudio';
+import { useGameKeyboardShortcuts } from './hooks/useGameKeyboardShortcuts';
+import { useGameRuntimeLoops } from './hooks/useGameRuntimeLoops';
 import { soundEngine } from './game/sound';
 import { speakDialogueLine } from './game/voiceClient';
 import {
@@ -119,12 +114,10 @@ export default function App() {
   const muted = useGameStore((s) => s.muted);
   const ambientCycleStep = useGameStore((s) => s.ambientCycleStep);
   const savedGame = useGameStore((s) => s.savedGame);
-  const audioVolumes = useGameStore((s) => s.audioVolumes);
   const gameSettings = useGameStore((s) => s.gameSettings);
   const combatHitEvents = useGameStore((s) => s.combatHitEvents);
   const playerHitFlash = useGameStore((s) => s.playerHitFlash);
   const cutsceneOverlay = useGameStore((s) => s.cutsceneOverlay);
-  const completedDynamicQuests = useGameStore((s) => s.completedDynamicQuests);
   const activeHeistBreach = useGameStore((s) => s.activeHeistBreach);
   const trioSynergy = useGameStore((s) => s.trioSynergy);
 
@@ -164,201 +157,7 @@ export default function App() {
     []
   );
 
-  // Sync body dataset state and silence looped audio outside playing state
-  useEffect(() => {
-    document.body.dataset.state = gameState;
-    if (gameState !== 'playing') {
-      soundEngine.stopEngineAudio(false);
-      soundEngine.stopAmbientSoundscape(false);
-    }
-  }, [gameState]);
-
-  // Cycle Jakarta Ambient Soundscape Cue every 6.5s while playing
-  useEffect(() => {
-    if (gameState !== 'playing') return;
-    const interval = window.setInterval(() => {
-      gameStore.setState((prev) => ({
-        ambientCycleStep: prev.ambientCycleStep + 1,
-      }));
-    }, 6500);
-    return () => clearInterval(interval);
-  }, [gameState]);
-
-  // Update Dynamic Jakarta Ambient Soundscape Layer
-  useEffect(() => {
-    const isOutdoorPlaying =
-      gameState === 'playing' &&
-      playerState.currentInterior === 'exterior' &&
-      !muted;
-    soundEngine.updateAmbientSoundscape(
-      district.id,
-      weatherMode,
-      isOutdoorPlaying,
-      ambientCycleStep,
-      isOutdoorPlaying
-    );
-  }, [
-    gameState,
-    district.id,
-    weatherMode,
-    muted,
-    playerState.currentInterior,
-    ambientCycleStep,
-  ]);
-
-  // Unlock & resume continuous ambient city bed on first gesture
-  useEffect(() => {
-    const unlockAmbience = () => {
-      soundEngine.unlockAudio();
-      cityAudio.unlock();
-      const s = gameStore.getState();
-      if (s.gameState !== 'playing' || s.muted) return;
-      const isOutdoor = s.playerState.currentInterior === 'exterior';
-      soundEngine.updateAmbientSoundscape(
-        s.district.id,
-        s.weatherMode,
-        isOutdoor,
-        s.ambientCycleStep,
-        false
-      );
-    };
-    window.addEventListener('pointerdown', unlockAmbience, { passive: true });
-    window.addEventListener('keydown', unlockAmbience, { passive: true });
-    return () => {
-      window.removeEventListener('pointerdown', unlockAmbience);
-      window.removeEventListener('keydown', unlockAmbience);
-    };
-  }, []);
-
-  // Delayed trailing ghost HP bar effect
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      gameStore.setState({ ghostHp: playerState.hp });
-    }, 320);
-    return () => clearTimeout(timer);
-  }, [playerState.hp]);
-
-  // Fokus Badai [Q] energy drain & recharge + Warung Stamina Buff ticker (250ms)
-  useEffect(() => {
-    if (gameState !== 'playing') return;
-    const interval = window.setInterval(() => {
-      gameStore.updatePlayerState((prev) =>
-        stepWarungStaminaBuff(stepFokusAbility(prev, 0.25), 0.25)
-      );
-    }, 250);
-    return () => clearInterval(interval);
-  }, [gameState]);
-
-  // Real-Time 24-Hour Jakarta Clock, Road Event Ticker & Active Street Contract Countdown (1s)
-  useEffect(() => {
-    if (gameState !== 'playing') return;
-    const interval = window.setInterval(() => {
-      gameStore.setState((prev) => {
-        const nextMinutes = prev.autoTimeCycle
-          ? (prev.worldTimeMinutes + 2) % 1440
-          : prev.worldTimeMinutes;
-        const nextWeather = prev.autoTimeCycle
-          ? resolveWeatherFromWorldClock(
-              nextMinutes,
-              prev.weatherMode === 'hujan'
-            )
-          : prev.weatherMode;
-
-        let nextContract = prev.activeContract;
-        let nextOutcome = prev.lastOutcomeText;
-        let nextWaypoint = prev.customWaypoint;
-        if (nextContract) {
-          const rem = nextContract.timeRemainingSec - 1;
-          if (rem <= 0) {
-            nextContract = null;
-            nextWaypoint = null;
-            nextOutcome = `Waktu Habis: ${prev.activeContract?.title} gagal diselesaikan.`;
-          } else {
-            nextContract = { ...nextContract, timeRemainingSec: rem };
-          }
-        }
-
-        const eventStep = stepWorldClockEventTicker(
-          prev.worldClockEventState,
-          nextMinutes,
-          1
-        );
-        if (eventStep.triggeredEvent) {
-          const ev = eventStep.triggeredEvent;
-          nextOutcome = `Info Lalu Lintas (${formatJakartaClock(nextMinutes)}): ${ev.spec.title} — ${ev.spec.detourLabel}`;
-          if (!nextWaypoint && !prev.activeMission && !nextContract) {
-            const firstPt = ev.spec.detourWaypoints[0] || [
-              ev.spec.detourTargetX,
-              ev.spec.detourTargetZ,
-            ];
-            nextWaypoint = {
-              x: firstPt[0],
-              z: firstPt[1],
-              label: `Rute Alternatif (1/${ev.spec.detourWaypoints.length}): ${ev.spec.detourLabel}`,
-              category: 'detour',
-            };
-          }
-        } else if (eventStep.expiredEvent) {
-          if (nextWaypoint?.category === 'detour') {
-            nextWaypoint = null;
-          }
-        }
-
-        return {
-          worldTimeMinutes: nextMinutes,
-          weatherMode: nextWeather,
-          activeContract: nextContract,
-          customWaypoint: nextWaypoint,
-          lastOutcomeText: nextOutcome,
-          worldClockEventState: eventStep.nextState,
-        };
-      });
-      gameStore.tickStreetRandomEvent(1);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [gameState]);
-
-  // Passive property + 13-District Turf Wars dividend, BAJSA stock ticker & Drone Rajawali-X regen (4s)
-  useEffect(() => {
-    if (gameState !== 'playing') return;
-    const interval = window.setInterval(() => {
-      gameStore.updatePlayerState((prev) => {
-        const tickedStocks = stepStockMarketTick(prev);
-        const dividend =
-          calculatePassivePropertyIncome(tickedStocks.ownedProperties) +
-          calculateTurfWarsIncome(tickedStocks);
-        const armorRegen =
-          tickedStocks.droneActive && tickedStocks.droneLevel > 0
-            ? tickedStocks.droneLevel * 3
-            : 0;
-        const nextScore = tickedStocks.score + (dividend > 0 ? 25 : 0);
-        return {
-          ...tickedStocks,
-          rupiah: tickedStocks.rupiah + dividend,
-          armor: Math.min(
-            tickedStocks.maxArmor,
-            tickedStocks.armor + armorRegen
-          ),
-          score: nextScore,
-          bestScore: Math.max(tickedStocks.bestScore, nextScore),
-        };
-      });
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [gameState]);
-
-  // Radio FM Jakarta Groove
-  useEffect(() => {
-    if (gameState !== 'playing' || playerState.radioStation === 'off') return;
-    let step = 0;
-    const station = playerState.radioStation;
-    const interval = window.setInterval(() => {
-      soundEngine.playRadioBeat(station, step++);
-    }, 420);
-    return () => clearInterval(interval);
-  }, [gameState, playerState.radioStation]);
-
-  // Save v3 persistence helper + debounced & periodic auto-save
+  // Save v3 persistence helper + runtime loops
   const persistCurrentSave = useCallback(() => {
     const cur = gameStore.getState();
     if (cur.playerState.hp <= 0) return;
@@ -387,31 +186,7 @@ export default function App() {
     });
   }, []);
 
-  useEffect(() => {
-    if (gameState !== 'playing' || playerState.hp <= 0) return;
-    const timer = window.setTimeout(() => {
-      persistCurrentSave();
-    }, 650);
-    return () => clearTimeout(timer);
-  }, [
-    gameState,
-    playerState,
-    origin,
-    selectedStage,
-    weatherMode,
-    audioVolumes,
-    gameSettings,
-    completedDynamicQuests,
-    persistCurrentSave,
-  ]);
-
-  useEffect(() => {
-    if (gameState !== 'playing') return;
-    const interval = window.setInterval(() => {
-      persistCurrentSave();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [gameState, persistCurrentSave]);
+  useGameRuntimeLoops(persistCurrentSave);
 
   const cycleWeather = useCallback(() => {
     gameStore.setState((prev) => {
@@ -558,197 +333,23 @@ export default function App() {
     []
   );
 
-  // Global keyboard bindings
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const isTyping =
-        target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA';
+  const handleTriggerProtagonistAbility = useCallback(() => {
+    controllerRef.current?.triggerProtagonistAbility();
+  }, []);
 
-      const s = gameStore.getState();
-      if (s.gameState === 'title') {
-        if (e.code === 'Enter' || e.code === 'Space') {
-          e.preventDefault();
-          if (s.savedGame) {
-            handleContinueGame();
-          } else {
-            startNewGame(s.origin, s.selectedStage);
-          }
-        }
-        return;
-      }
+  const handleTriggerHorn = useCallback(() => {
+    controllerRef.current?.triggerHorn();
+  }, []);
 
-      if (s.gameState === 'gameover') {
-        if (e.code === 'Enter') {
-          e.preventDefault();
-          startNewGame(s.origin, s.selectedStage);
-        }
-        return;
-      }
-
-      if (e.code === 'KeyP' || e.code === 'Escape') {
-        if (isTyping && e.code === 'KeyP') return;
-        if (s.dialogueMission) {
-          gameStore.setState({ dialogueMission: null });
-          return;
-        }
-        if (s.wheelMode) {
-          gameStore.setState({ wheelMode: null });
-          return;
-        }
-        if (s.activeHeistBreach) {
-          gameStore.closeHeistBreach();
-          return;
-        }
-        if (s.heistBoardOpen) {
-          gameStore.setState({ heistBoardOpen: false });
-          return;
-        }
-        if (s.customsGarageOpen) {
-          gameStore.setState({ customsGarageOpen: false });
-          return;
-        }
-        if (s.warungModalOpen) {
-          gameStore.setState({ warungModalOpen: false });
-          return;
-        }
-        if (s.photoModeOpen) {
-          gameStore.setState({ photoModeOpen: false });
-          return;
-        }
-        if (s.phoneOpen) {
-          gameStore.setState({ phoneOpen: false });
-          return;
-        }
-        e.preventDefault();
-        const next = s.gameState === 'playing' ? 'paused' : 'playing';
-        document.body.dataset.state = next;
-        gameStore.setState({ gameState: next });
-        return;
-      }
-
-      if (s.gameState !== 'playing' || isTyping) return;
-
-      if (e.code === 'Tab') {
-        e.preventDefault();
-        gameStore.setState((prev) => ({
-          phoneOpen: !prev.phoneOpen,
-          phoneTargetScreen: 'home',
-          wheelMode: null,
-          heistBoardOpen: false,
-          customsGarageOpen: false,
-          warungModalOpen: false,
-          photoModeOpen: false,
-        }));
-      } else if (e.code === 'KeyN') {
-        e.preventDefault();
-        soundEngine.playPickup();
-        gameStore.setState((prev) => ({
-          photoModeOpen: !prev.photoModeOpen,
-          phoneOpen: false,
-          wheelMode: null,
-          heistBoardOpen: false,
-          customsGarageOpen: false,
-          warungModalOpen: false,
-        }));
-      } else if (e.code === 'KeyU') {
-        e.preventDefault();
-        gameStore.setState((prev) => ({ zenHudMode: !prev.zenHudMode }));
-      } else if (e.code === 'F1' || e.code === 'F2' || e.code === 'F3') {
-        // Prevent browser help/search shortcuts; PlayerController handles F1/F2/F3 Squad Orders
-        e.preventDefault();
-      } else if (e.code === 'F8') {
-        e.preventDefault();
-        gameStore.togglePerfOverlay();
-      } else if (e.code === 'KeyY') {
-        e.preventDefault();
-        gameStore.setState((prev) => ({
-          wheelMode: prev.wheelMode === 'weapon' ? null : 'weapon',
-          phoneOpen: false,
-        }));
-      } else if (e.code === 'KeyC') {
-        e.preventDefault();
-        gameStore.setState((prev) => ({
-          wheelMode: prev.wheelMode === 'character' ? null : 'character',
-          phoneOpen: false,
-        }));
-      } else if (e.code === 'KeyH') {
-        e.preventDefault();
-        if (s.drivingVehicle) {
-          controllerRef.current?.triggerHorn();
-        } else {
-          gameStore.setState((prev) => ({
-            heistBoardOpen: !prev.heistBoardOpen,
-            phoneOpen: false,
-            wheelMode: null,
-          }));
-        }
-      } else if (e.code === 'KeyB') {
-        e.preventDefault();
-        gameStore.setState((prev) => ({
-          customsGarageOpen: !prev.customsGarageOpen,
-          phoneOpen: false,
-          wheelMode: null,
-        }));
-      } else if (e.code === 'KeyJ') {
-        e.preventDefault();
-        soundEngine.playPickup();
-        gameStore.setState((prev) => ({
-          playerState: {
-            ...prev.playerState,
-            currentInterior: prev.warungModalOpen
-              ? prev.playerState.currentInterior
-              : 'warung',
-          },
-          warungModalOpen: !prev.warungModalOpen,
-          phoneOpen: false,
-          wheelMode: null,
-          heistBoardOpen: false,
-          customsGarageOpen: false,
-        }));
-      } else if (e.code === 'KeyT') {
-        e.preventDefault();
-        gameStore.setState((prev) => ({ tpsAiming: !prev.tpsAiming }));
-      } else if (e.code === 'KeyQ') {
-        handleToggleFokus();
-      } else if (e.code === 'KeyZ') {
-        handleToggleDrone();
-      } else if (e.code === 'KeyO') {
-        cycleWeather();
-      } else if (e.code === 'KeyM') {
-        gameStore.toggleMute();
-      } else if (e.code === 'KeyR' && !s.drivingVehicle) {
-        startNewGame(s.origin, s.selectedStage);
-      } else {
-        const slotMap: Record<string, WeaponId> = {
-          Digit1: 'fist',
-          Digit2: 'golok',
-          Digit3: 'pistol',
-          Digit4: 'rifle',
-          Digit5: 'mercon',
-          Digit6: 'pasopati',
-          Digit7: 'gatotkaca',
-        };
-        const chosenWeapon = slotMap[e.code];
-        if (chosenWeapon) {
-          gameStore.updatePlayerState((prev) =>
-            prev.unlockedWeapons.includes(chosenWeapon)
-              ? { ...prev, activeWeapon: chosenWeapon }
-              : prev
-          );
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    handleContinueGame,
-    startNewGame,
-    cycleWeather,
-    handleToggleFokus,
-    handleToggleDrone,
-  ]);
+  useGameKeyboardShortcuts({
+    onContinueGame: handleContinueGame,
+    onStartNewGame: startNewGame,
+    onCycleWeather: cycleWeather,
+    onToggleFokus: handleToggleFokus,
+    onToggleDrone: handleToggleDrone,
+    onTriggerHorn: handleTriggerHorn,
+    onTriggerProtagonistAbility: handleTriggerProtagonistAbility,
+  });
 
   const handleSelectChoice = useCallback(
     (choice: StoryChoiceOption) => {
@@ -911,24 +512,6 @@ export default function App() {
   const handleStartStreetRace = useCallback((raceId: string) => {
     controllerRef.current?.startStreetRace(raceId);
     soundEngine.playNitroBoost();
-  }, []);
-
-  // Auto-dismiss transient Wave 2 cinematic banners & squad radio callouts
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const s = gameStore.getState();
-      const now = Date.now();
-      if (s.lastStuntBanner && now - s.lastStuntBanner.timestampMs > 3800) {
-        gameStore.dismissStuntBanner();
-      }
-      if (s.killCamBanner && now - s.killCamBanner.stamp > 2100) {
-        gameStore.setState({ killCamBanner: null });
-      }
-      if (s.squadCallout && now - s.squadCallout.stamp > 4200) {
-        gameStore.setState({ squadCallout: null });
-      }
-    }, 350);
-    return () => clearInterval(id);
   }, []);
 
   const handleCompleteActiveObjective = useCallback(() => {
@@ -1421,8 +1004,63 @@ export default function App() {
   }, []);
 
   const handleInteriorQuickAction = useCallback(
-    (action: 'hangout' | 'save' | 'repair') => {
-      if (action === 'hangout') {
+    (
+      action:
+        | 'hangout'
+        | 'save'
+        | 'repair'
+        | 'rest'
+        | 'refill_ammo'
+        | 'faction_boost'
+    ) => {
+      if (action === 'rest') {
+        gameStore.restInSafehouse(6);
+        persistCurrentSave();
+      } else if (action === 'refill_ammo') {
+        const cur = gameStore.getState().playerState;
+        if (cur.rupiah < 25000) {
+          gameStore.setState({
+            lastOutcomeText: 'Dana minimal Rp 25.000 untuk paket amunisi Glodok.',
+          });
+          return;
+        }
+        soundEngine.playCashRegister();
+        gameStore.updatePlayerState((prev) => ({
+          ...prev,
+          rupiah: prev.rupiah - 25000,
+          ammo: {
+            ...prev.ammo,
+            pistol: 96,
+            rifle: 180,
+            mercon: 24,
+            pasopati: 36,
+            gatotkaca: 18,
+          },
+        }));
+        gameStore.setState({
+          lastOutcomeText: 'Amunisi taktis seluruh senjata diisi penuh di Glodok Tech Shop!',
+        });
+      } else if (action === 'faction_boost') {
+        const interiorId = gameStore.getState().playerState.currentInterior;
+        const targetFaction =
+          interiorId === 'faction_hq_sindikat'
+            ? 'sindikat'
+            : interiorId === 'faction_hq_rakyat'
+            ? 'rakyat'
+            : 'jalanan';
+        soundEngine.playPickup();
+        gameStore.updatePlayerState((prev) => ({
+          ...prev,
+          reputation: {
+            ...prev.reputation,
+            [targetFaction]: Math.min(100, prev.reputation[targetFaction] + 6),
+          },
+        }));
+        gameStore.boostTrioSynergy(
+          6,
+          `Briefing Markas Faksi (${targetFaction.toUpperCase()}): Reputasi +6 & Sinergi Trio +6%!`
+        );
+      } else if (action === 'hangout') {
         gameStore.updatePlayerState((prev) => ({
           ...prev,
           hp: Math.min(prev.maxHp, prev.hp + 35),
@@ -1620,6 +1258,7 @@ export default function App() {
             });
           }}
           onInteriorAction={handleInteriorQuickAction}
+          onTriggerProtagonistAbility={handleTriggerProtagonistAbility}
           onToggleVehicle={() => controllerRef.current?.toggleEnterExitVehicle()}
           onHonk={() => controllerRef.current?.triggerHorn()}
           onToggleFokus={handleToggleFokus}
@@ -1843,6 +1482,12 @@ export default function App() {
           }
           onEnterInterior={handleEnterInteriorById}
           onStartStreetRace={handleStartStreetRace}
+          onStartCustomRace={(track) =>
+            controllerRef.current?.startCustomStreetRace(track)
+          }
+          onShareCustomRace={(track) =>
+            controllerRef.current?.sendCustomRaceTrack?.(track) ?? false
+          }
           onCaptureViralSnap={handleCaptureViralSnap}
           onStartTurfWar={(districtId) =>
             controllerRef.current?.startTurfWar(districtId)

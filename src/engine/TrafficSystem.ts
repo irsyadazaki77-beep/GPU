@@ -75,6 +75,7 @@ export class TrafficSystem {
   private roadblockZ = -42;
   private roadblockCooldown = 0;
   private pendingHornPulse = false;
+  private workerAheadBuffer: Float32Array | null = null;
   private readonly raceRivals: {
     id: string;
     name: string;
@@ -129,7 +130,7 @@ export class TrafficSystem {
       { type: 'supercar', x: 28, z: -26, heading: -Math.PI / 2 },
       { type: 'angkot', x: -5.4, z: 45.5, heading: Math.PI },
       { type: 'sedan', x: 5.4, z: -15.0, heading: 0 },
-      { type: 'speedboat', x: -195, z: -232, heading: 0 },
+      { type: 'speedboat', x: -28, z: -82, heading: 0 },
     ];
 
     parkedVehicles.forEach((vCfg, idx) => {
@@ -384,6 +385,10 @@ export class TrafficSystem {
     this.roadEventGroup.add(this.constructionSubGroup, this.trafficJamSubGroup);
     this.roadEventGroup.visible = false;
     scene.add(this.roadEventGroup);
+  }
+
+  public setWorkerAheadDistances(buf: Float32Array | null): void {
+    this.workerAheadBuffer = buf;
   }
 
   public notifyHorn(
@@ -692,10 +697,12 @@ export class TrafficSystem {
       }
     }
 
+    const kiranaBlackout = gameStore.getState().kiranaHackState.cameraBlackout;
     if (
       pState.wantedLevel >= 3 &&
       pState.currentInterior === 'exterior' &&
-      isPlaying
+      isPlaying &&
+      !kiranaBlackout
     ) {
       this.policeHeliMesh.visible = true;
       const heliOrbit = nowMs * 0.0014;
@@ -758,8 +765,11 @@ export class TrafficSystem {
     const hornTriggered = this.pendingHornPulse;
     this.pendingHornPulse = false;
 
+    const kiranaHack = gameStore.getState().kiranaHackState;
     this.signalState = stepTrafficSignals(this.signalState, simDt);
-    const signalPhase = this.signalState.phase;
+    const signalPhase: TrafficSignalPhase = kiranaHack.forceGreenLights
+      ? 'ns_green'
+      : this.signalState.phase;
 
     // Tactical Police Roadblock (Wanted >= 3)
     this.roadblockCooldown = Math.max(0, this.roadblockCooldown - simDt);
@@ -885,30 +895,35 @@ export class TrafficSystem {
         let minAheadDist = 999;
         const sinH = Math.sin(v.heading);
         const cosH = Math.cos(v.heading);
+        const workerBuf = this.workerAheadBuffer;
 
-        for (let oi = 0; oi < this.vehicles.length; oi++) {
-          if (oi === vi) continue;
-          const other = this.vehicles[oi];
-          if (Math.abs(other.y - v.y) > 2.2) continue;
-          const dxO = other.x - v.x;
-          const dzO = other.z - v.z;
-          const fwdDot = dxO * sinH + dzO * cosH;
-          if (fwdDot > 0.4 && fwdDot < minAheadDist) {
-            const latDist = Math.abs(dxO * cosH - dzO * sinH);
-            if (latDist < 2.25) {
-              minAheadDist = fwdDot;
+        if (workerBuf && vi * 4 < workerBuf.length) {
+          minAheadDist = workerBuf[vi * 4] || 999;
+        } else {
+          for (let oi = 0; oi < this.vehicles.length; oi++) {
+            if (oi === vi) continue;
+            const other = this.vehicles[oi];
+            if (Math.abs(other.y - v.y) > 2.2) continue;
+            const dxO = other.x - v.x;
+            const dzO = other.z - v.z;
+            const fwdDot = dxO * sinH + dzO * cosH;
+            if (fwdDot > 0.4 && fwdDot < minAheadDist) {
+              const latDist = Math.abs(dxO * cosH - dzO * sinH);
+              if (latDist < 2.25) {
+                minAheadDist = fwdDot;
+              }
             }
           }
-        }
 
-        if (Math.abs(playerY - v.y) < 2.2) {
-          const dxP = playerX - v.x;
-          const dzP = playerZ - v.z;
-          const fwdP = dxP * sinH + dzP * cosH;
-          if (fwdP > 0.4 && fwdP < minAheadDist) {
-            const latP = Math.abs(dxP * cosH - dzP * sinH);
-            if (latP < 2.1) {
-              minAheadDist = fwdP;
+          if (Math.abs(playerY - v.y) < 2.2) {
+            const dxP = playerX - v.x;
+            const dzP = playerZ - v.z;
+            const fwdP = dxP * sinH + dzP * cosH;
+            if (fwdP > 0.4 && fwdP < minAheadDist) {
+              const latP = Math.abs(dxP * cosH - dzP * sinH);
+              if (latP < 2.1) {
+                minAheadDist = fwdP;
+              }
             }
           }
         }
@@ -918,7 +933,7 @@ export class TrafficSystem {
           playerWantedLevel: pState.wantedLevel,
           hornTriggered:
             hornTriggered && Math.hypot(v.x - playerX, v.z - playerZ) < 30,
-          signalPhase,
+          signalPhase: kiranaHack.forceGreenLights ? undefined : signalPhase,
           buildingGrid: this.buildingGrid,
           activeRoadEvent:
             gameStore.getState().worldClockEventState.activeEvent,
@@ -953,7 +968,8 @@ export class TrafficSystem {
         true,
         Boolean(vSpec.isAircraft),
         pState.fokusActive,
-        !isWheelSlowMo
+        !isWheelSlowMo,
+        activeVehicle.type
       );
 
       if (nightFactor > 0.04) {

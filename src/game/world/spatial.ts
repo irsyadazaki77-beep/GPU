@@ -20,8 +20,10 @@ export function isNearBuilding(x: number, z: number, pad: number = 4): boolean {
 
 export function isOnRoadway(x: number, z: number): boolean {
   if (Math.abs(x) < 9.5 || Math.abs(z) < 9.5) return true;
-  if (Math.abs(Math.abs(x) - 32) < 6.5 && Math.abs(z) < 82) return true;
-  if (Math.abs(Math.abs(z) - 32) < 6.5 && Math.abs(x) < 82) return true;
+  if (Math.abs(Math.abs(x) - 32) < 6.5 && Math.abs(z) < 136) return true;
+  if (Math.abs(Math.abs(z) - 32) < 6.5 && Math.abs(x) < 136) return true;
+  if (Math.abs(Math.abs(x) - 128) < 6.5 && Math.abs(z) < 136) return true;
+  if (Math.abs(Math.abs(z) - 128) < 6.5 && Math.abs(x) < 136) return true;
   if (z >= -32 && z <= -20 && Math.abs(x) <= 72) return true;
   return false;
 }

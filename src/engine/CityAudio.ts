@@ -68,7 +68,11 @@ class CityAudioSynthesizer {
     this.masterGain.gain.setTargetAtTime(muted ? 0 : 0.72, now, 0.05);
   }
 
-  public updateEngine(speedRatio: number, isDriving: boolean): void {
+  public updateEngine(
+    speedRatio: number,
+    isDriving: boolean,
+    vehicleType: string | null = null
+  ): void {
     if (!this.unlocked || soundEngine.muted) {
       if (this.engineGain && this.ctx) {
         this.engineGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08);
@@ -112,11 +116,75 @@ class CityAudioSynthesizer {
         return;
       }
       const r = Math.max(0, Math.min(1.25, speedRatio));
-      const baseFreq = 52 + r * 118;
+      // Distinct acoustic signature per Indonesian vehicle archetype
+      let waveMain: OscillatorType = 'sawtooth';
+      let baseIdle = 52;
+      let revSpan = 118;
+      let subRatio = 0.5;
+      let filterBase = 160;
+      let filterSpan = 420;
+      let gainPeak = 0.038;
+
+      if (vehicleType === 'bajaj') {
+        waveMain = 'square';
+        baseIdle = 68;
+        revSpan = 132;
+        subRatio = 0.34;
+        filterBase = 260;
+        filterSpan = 520;
+        gainPeak = 0.032;
+      } else if (vehicleType === 'ojek') {
+        waveMain = 'sawtooth';
+        baseIdle = 74;
+        revSpan = 165;
+        subRatio = 0.5;
+        filterBase = 240;
+        filterSpan = 580;
+      } else if (vehicleType === 'supercar') {
+        waveMain = 'sawtooth';
+        baseIdle = 62;
+        revSpan = 195;
+        subRatio = 1.5; // High-rev harmonic fifth
+        filterBase = 220;
+        filterSpan = 740;
+        gainPeak = 0.044;
+      } else if (
+        vehicleType === 'transjakarta' ||
+        vehicleType === 'metromini' ||
+        vehicleType === 'barracuda'
+      ) {
+        waveMain = 'triangle';
+        baseIdle = 36;
+        revSpan = 68;
+        subRatio = 0.5;
+        filterBase = 110;
+        filterSpan = 240;
+        gainPeak = 0.045;
+      } else if (vehicleType === 'speedboat') {
+        waveMain = 'sawtooth';
+        baseIdle = 48;
+        revSpan = 128;
+        subRatio = 0.75;
+        filterBase = 190;
+        filterSpan = 480;
+      } else if (vehicleType === 'heli' || vehicleType === 'vtol_jet') {
+        waveMain = 'triangle';
+        baseIdle = vehicleType === 'vtol_jet' ? 84 : 44;
+        revSpan = vehicleType === 'vtol_jet' ? 140 : 54;
+        subRatio = 0.25;
+        filterBase = 150;
+        filterSpan = 360;
+      }
+
+      if (this.engineOscMain.type !== waveMain) {
+        this.engineOscMain.type = waveMain;
+      }
+
+      const baseFreq = baseIdle + r * revSpan;
       this.engineOscMain.frequency.setTargetAtTime(baseFreq, now, 0.07);
-      this.engineOscSub.frequency.setTargetAtTime(baseFreq * 0.5, now, 0.07);
-      this.engineFilter.frequency.setTargetAtTime(160 + r * 420, now, 0.08);
-      this.engineGain.gain.setTargetAtTime(0.032 + r * 0.038, now, 0.08);
+      this.engineOscSub.frequency.setTargetAtTime(baseFreq * subRatio, now, 0.07);
+      this.engineFilter.frequency.setTargetAtTime(filterBase + r * filterSpan, now, 0.08);
+      this.engineGain.gain.setTargetAtTime(0.028 + r * gainPeak, now, 0.08);
     }
   }
 

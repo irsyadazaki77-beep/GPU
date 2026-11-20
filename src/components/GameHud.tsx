@@ -79,7 +79,10 @@ interface GameHudProps {
   onRestart: () => void;
   onOpenNabiloGram?: () => void;
   onRepairVehicle?: () => void;
-  onInteriorAction?: (action: 'hangout' | 'save' | 'repair') => void;
+  onInteriorAction?: (
+    action: 'hangout' | 'save' | 'repair' | 'rest' | 'refill_ammo' | 'faction_boost'
+  ) => void;
+  onTriggerProtagonistAbility?: () => void;
   onCycleCamera?: () => void;
   onToggleCover?: () => void;
   onSquadOrder?: (order: SquadOrderMode) => void;
@@ -178,6 +181,7 @@ export const GameHud: React.FC<GameHudProps> = ({
   onOpenNabiloGram,
   onRepairVehicle,
   onInteriorAction,
+  onTriggerProtagonistAbility,
   onCycleCamera,
   onToggleCover,
   onSquadOrder,
@@ -209,6 +213,9 @@ export const GameHud: React.FC<GameHudProps> = ({
   const activeTurfWar = useGameStore((s) => s.activeTurfWar);
   const killCamBanner = useGameStore((s) => s.killCamBanner);
   const dailyChallenges = useGameStore((s) => s.dailyChallenges);
+  const kiranaHackState = useGameStore((s) => s.kiranaHackState);
+  const trioAbilityBuffUntilMs = useGameStore((s) => s.trioAbilityBuffUntilMs);
+  const inFloodZone = useGameStore((s) => s.inFloodZone);
   const activeRoadEvent = worldClockEventState.activeEvent;
 
   const claimableChallengesCount = dailyChallenges.items.filter(
@@ -1412,8 +1419,36 @@ export const GameHud: React.FC<GameHudProps> = ({
             {playerState.currentInterior !== 'exterior' && onInteriorAction ? (
               <div
                 data-testid="seamless-interior-dock"
-                className="aaa-glass rounded-xl px-3 py-2 shadow-xl flex items-center gap-2 animate-aaa-up"
+                className="aaa-glass rounded-xl px-3 py-2 shadow-xl flex flex-wrap items-center justify-center gap-2 animate-aaa-up"
               >
+                {playerState.currentInterior === 'safehouse_trio' && (
+                  <button
+                    type="button"
+                    data-testid="safehouse-rest-btn"
+                    onClick={() => onInteriorAction('rest')}
+                    className="px-2.5 py-1.5 rounded-lg bg-[#8b5cf6]/25 hover:bg-[#8b5cf6]/45 text-[#ddd6fe] text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap"
+                  >
+                    Tidur Safehouse (+6 Jam & Pulih Penuh)
+                  </button>
+                )}
+                {playerState.currentInterior === 'glodok_tech_shop' && (
+                  <button
+                    type="button"
+                    onClick={() => onInteriorAction('refill_ammo')}
+                    className="px-2.5 py-1.5 rounded-lg bg-[#f97316]/25 hover:bg-[#f97316]/45 text-[#fdba74] text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap"
+                  >
+                    Isi Amunisi Taktis (Rp 25rb)
+                  </button>
+                )}
+                {playerState.currentInterior.startsWith('faction_hq_') && (
+                  <button
+                    type="button"
+                    onClick={() => onInteriorAction('faction_boost')}
+                    className="px-2.5 py-1.5 rounded-lg bg-[#eab308]/25 hover:bg-[#eab308]/45 text-[#fde047] text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap"
+                  >
+                    Briefing Faksi (+Rep & Honor)
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => onInteriorAction('hangout')}
@@ -1516,6 +1551,11 @@ export const GameHud: React.FC<GameHudProps> = ({
 
               <div className="flex flex-col items-end text-right">
                 <div className="flex items-center gap-1.5">
+                  {inFloodZone && (
+                    <span className="px-1.5 py-0.5 rounded bg-[#0ea5e9] text-[#090c12] font-mono-num text-[10px] font-extrabold tracking-wider">
+                      BANJIR
+                    </span>
+                  )}
                   {(isDrifting || driftScore > 0) && (
                     <span className="px-1.5 py-0.5 rounded bg-[#f59e0b] text-[#090c12] font-mono-num text-[10px] font-extrabold tracking-wider">
                       DRIFT {driftScore > 0 ? `${driftScore} · x${driftMultiplier}` : ''}
@@ -1670,6 +1710,42 @@ export const GameHud: React.FC<GameHudProps> = ({
 
           {/* Compact Protagonist & Tactical Ability Strip */}
           <div className="flex items-center gap-1 sm:gap-2 aaa-glass-subtle px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-lg max-w-full">
+            {onTriggerProtagonistAbility && (
+              <button
+                type="button"
+                data-testid="trio-ability-btn"
+                onClick={onTriggerProtagonistAbility}
+                title={
+                  playerState.activeProtagonist === 'kirana'
+                    ? 'Retas Siber Distrik: Lampu Hijau & Buta Radar Polisi 20d [L]'
+                    : playerState.activeProtagonist === 'raka'
+                    ? 'Kilat Overdrive: Akselerasi & Lari Maksimal 12d [L]'
+                    : 'Garuda Armor Surge: +25 Armor & Tahan Benturan [L]'
+                }
+                className={`px-1.5 sm:px-2 py-0.5 rounded text-[11px] font-mono-num font-semibold cursor-pointer transition-colors whitespace-nowrap ${
+                  (playerState.activeProtagonist === 'kirana' && kiranaHackState.active) ||
+                  (playerState.activeProtagonist !== 'kirana' &&
+                    trioAbilityBuffUntilMs > Date.now())
+                    ? 'bg-[#22d3ee] text-[#090c12] font-bold'
+                    : 'text-[#67e8f9] hover:bg-white/10'
+                }`}
+              >
+                [L]
+                <span className="hidden sm:inline">
+                  {' '}
+                  {playerState.activeProtagonist === 'kirana'
+                    ? kiranaHackState.active
+                      ? `Hack ${Math.ceil(kiranaHackState.remainingSeconds)}d`
+                      : kiranaHackState.cooldownSeconds > 0
+                      ? `CD ${Math.ceil(kiranaHackState.cooldownSeconds)}d`
+                      : 'Retas'
+                    : playerState.activeProtagonist === 'raka'
+                    ? 'Kilat'
+                    : 'Garuda'}
+                </span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={onToggleFokus}

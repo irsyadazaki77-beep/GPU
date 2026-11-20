@@ -613,6 +613,16 @@ export const TRAFFIC_ROUTES: Record<TrafficRouteId, TrafficWaypoint[]> = {
     { x: 65, z: -27.8 },
     { x: -65, z: -27.8 },
   ],
+  outer_ring_express: [
+    { x: -126, z: 2.5 },
+    { x: -34.4, z: 2.5 },
+    { x: -34.4, z: 34.4 },
+    { x: 34.4, z: 34.4 },
+    { x: 34.4, z: 2.5 },
+    { x: 126, z: 2.5 },
+    { x: 126, z: 126 },
+    { x: -126, z: 126 },
+  ],
 };
 
 function interpolateRoutePosition(
@@ -656,6 +666,8 @@ export function generateInitialTrafficSpawns(): TrafficSpawnSpec[] {
     { id: 'traffic_angkot_grand', type: 'angkot', routeId: 'grand_boulevard_circuit', seg: 1, t: 0.55, speed: 9.6 },
     { id: 'traffic_sedan_tol1', type: 'sedan', routeId: 'tol_layang_express', seg: 0, t: 0.32, speed: 15.8 },
     { id: 'traffic_sedan_tol2', type: 'sedan', routeId: 'tol_layang_express', seg: 2, t: 0.35, speed: 14.8 },
+    { id: 'traffic_supercar_outer', type: 'supercar', routeId: 'outer_ring_express', seg: 1, t: 0.4, speed: 17.5 },
+    { id: 'traffic_tj_outer', type: 'transjakarta', routeId: 'outer_ring_express', seg: 2, t: 0.55, speed: 11.2 },
   ];
 
   return assignments.map((item) => {
@@ -1412,8 +1424,8 @@ export function validateCustomRaceTrack(
         normalizedCheckpoints: [],
       };
     }
-    const cx = Math.max(-88, Math.min(88, Math.round(pt[0] * 10) / 10));
-    const cz = Math.max(-88, Math.min(88, Math.round(pt[1] * 10) / 10));
+    const cx = Math.max(-156, Math.min(156, Math.round(pt[0] * 10) / 10));
+    const cz = Math.max(-156, Math.min(156, Math.round(pt[1] * 10) / 10));
 
     if (i > 0) {
       const prev = normalized[i - 1];

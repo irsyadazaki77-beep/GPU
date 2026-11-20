@@ -563,7 +563,8 @@ export type TrafficRouteId =
   | 'merdeka_west_arterial'
   | 'merdeka_east_arterial'
   | 'grand_boulevard_circuit'
-  | 'tol_layang_express';
+  | 'tol_layang_express'
+  | 'outer_ring_express';
 
 export interface TrafficWaypoint {
   x: number;
@@ -874,6 +875,18 @@ export type MultiplayerRoomMode = 'free_roam' | 'street_race' | 'coop_heist';
 
 export type MultiplayerConnectionState = 'connected' | 'reconnecting' | 'offline';
 
+export interface NetCoopEvent {
+  type: 'horn' | 'weapon_fire' | 'explosion' | 'wanted_alert' | 'passenger_ping';
+  peerId: string;
+  displayName: string;
+  x: number;
+  y: number;
+  z: number;
+  wantedLevel?: number;
+  detail?: string;
+  timestamp: number;
+}
+
 export interface NetPeerSnapshot {
   peerId: string;
   displayName: string;
@@ -884,6 +897,7 @@ export interface NetPeerSnapshot {
   heading: number;
   speed: number;
   vehicleType: VehicleType | null;
+  wantedLevel?: number;
   updatedAt: number;
 }
 

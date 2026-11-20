@@ -85,7 +85,7 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
         ctx.stroke();
       }
 
-      // 1. Roads
+      // 1. Roads (Inner Ring + Outer Ring Boulevard)
       ctx.strokeStyle = '#1e293b';
       ctx.lineWidth = 12;
       ctx.strokeRect(
@@ -94,11 +94,21 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
         64 * zoom,
         64 * zoom
       );
+      ctx.strokeStyle = 'rgba(30, 41, 59, 0.72)';
+      ctx.lineWidth = 8;
+      ctx.strokeRect(
+        cx + (-128 - px) * zoom,
+        cy + (-72 - pz) * zoom,
+        256 * zoom,
+        200 * zoom
+      );
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 12;
       ctx.beginPath();
-      ctx.moveTo(cx + (0 - px) * zoom, cy + (-92 - pz) * zoom);
-      ctx.lineTo(cx + (0 - px) * zoom, cy + (92 - pz) * zoom);
-      ctx.moveTo(cx + (-92 - px) * zoom, cy + (0 - pz) * zoom);
-      ctx.lineTo(cx + (92 - px) * zoom, cy + (0 - pz) * zoom);
+      ctx.moveTo(cx + (0 - px) * zoom, cy + (-136 - pz) * zoom);
+      ctx.lineTo(cx + (0 - px) * zoom, cy + (136 - pz) * zoom);
+      ctx.moveTo(cx + (-136 - px) * zoom, cy + (0 - pz) * zoom);
+      ctx.lineTo(cx + (136 - px) * zoom, cy + (0 - pz) * zoom);
       ctx.stroke();
 
       // 2. Monas Plaza core

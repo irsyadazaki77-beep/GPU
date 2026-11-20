@@ -453,7 +453,8 @@ class SoundEngine {
     isDriving: boolean,
     isAircraft: boolean,
     nitroActive: boolean,
-    active: boolean
+    active: boolean,
+    vehicleType: string | null = null
   ) {
     const sfxMult = this.getChannelGain('sfx');
     if (!active || !isDriving || this.muted || sfxMult <= 0.001) {
@@ -497,15 +498,27 @@ class SoundEngine {
         this.engineRunning = true;
       }
 
-      const desiredType: OscillatorType = isAircraft ? 'triangle' : 'sawtooth';
+      const desiredType: OscillatorType = isAircraft
+        ? 'triangle'
+        : vehicleType === 'bajaj'
+        ? 'square'
+        : 'sawtooth';
       if (this.engineOsc.type !== desiredType) {
         this.engineOsc.type = desiredType;
       }
 
       const sr = Math.max(0, Math.min(1.4, speedRatio));
+      const pitchOffset =
+        vehicleType === 'ojek' || vehicleType === 'bajaj'
+          ? 18
+          : vehicleType === 'supercar'
+          ? 24
+          : vehicleType === 'transjakarta' || vehicleType === 'barracuda' || vehicleType === 'metromini'
+          ? -10
+          : 0;
       const baseFreq = isAircraft
         ? 54 + sr * 52 + (nitroActive ? 22 : 0)
-        : 42 + sr * 76 + (nitroActive ? 26 : 0);
+        : Math.max(28, 42 + pitchOffset + sr * 76 + (nitroActive ? 26 : 0));
       const cutoff = 180 + sr * 520 + (nitroActive ? 240 : 0);
       const gainTarget =
         (0.02 + Math.min(1, sr) * 0.028 + (nitroActive ? 0.012 : 0)) * sfxMult;

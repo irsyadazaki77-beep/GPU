@@ -44,7 +44,7 @@ import {
   computeTimeOfDayToneState,
   pickHornReactionCallout,
 } from './visualOverhaulMath';
-import type { MultiplayerRoomMode } from '../game/types';
+import type { CustomRaceTrackSpec, MultiplayerRoomMode, NetCoopEvent } from '../game/types';
 
 export interface WorldControllerHandle {
   spawnVehicleNearPlayer: (type: VehicleType) => void;
@@ -69,6 +69,10 @@ export interface WorldControllerHandle {
   captureViralThumbnailDataUrl: () => string | null;
   repairCurrentVehicle: () => boolean;
   switchMultiplayerRoom?: (roomId: string, mode: MultiplayerRoomMode) => void;
+  sendCustomRaceTrack?: (track: CustomRaceTrackSpec) => boolean;
+  sendCoopEvent?: (type: NetCoopEvent['type'], detail?: string) => boolean;
+  triggerProtagonistAbility: () => void;
+  startCustomStreetRace: (track: CustomRaceTrackSpec) => void;
   cycleCameraViewMode: () => void;
   toggleCover: () => void;
   setSquadOrder: (order: SquadOrderMode) => void;
@@ -236,7 +240,16 @@ export class WorldEngine {
       undefined,
       this.cityRenderer.buildingGrid
     );
-    void this.physicsWorld.init();
+    void this.physicsWorld.init().then((ready) => {
+      if (ready && !this.disposed) {
+        this.cityRenderer.chunkLoader.setPhysicsBridge({
+          registerChunkStaticBox: (cid, x, y, z, hw, hh, hd) =>
+            this.physicsWorld.registerChunkStaticBox(cid, x, y, z, hw, hh, hd),
+          unregisterChunkStaticBox: (cid) =>
+            this.physicsWorld.unregisterChunkStaticBox(cid),
+        });
+      }
+    });
     this.netSync = new MultiplayerClientSync(this.scene);
     this.netSync.connect('jakarta_pusat', 'free_roam');
     this.simWorker = new SimWorkerClient(this.trafficSystem.vehicles.length);
@@ -273,7 +286,8 @@ export class WorldEngine {
         onEnterOrExitInterior: (t) => this.props.onEnterOrExitInterior(t),
         onCombatHitFeedback: (evt) => this.props.onCombatHitFeedback?.(evt),
         onPlayerHitAngle: (ang) => this.props.onPlayerHitAngle?.(ang),
-        onHornTriggered: (hx, _hy, hz) => {
+        onHornTriggered: (hx, hy, hz) => {
+          this.netSync.sendCoopEvent({ type: 'horn', x: hx, y: hy, z: hz });
           const reactedVehicles = this.trafficSystem.notifyHorn(hx, hz);
           let reactedPeds = this.crowdSystem.reactToHorn(hx, hz, 24);
           if (reactedVehicles.length === 0 && reactedPeds.length === 0) {
@@ -319,6 +333,12 @@ export class WorldEngine {
           if (radius >= 16) {
             const dZone = resolveDistrictAtPosition(wx, wz);
             gameStore.reportWitnessCrime(wx, wz, dZone.name);
+            this.netSync.sendCoopEvent({
+              type: isBlast ? 'explosion' : 'weapon_fire',
+              x: wx,
+              y: this.playerController.playerPhys.y,
+              z: wz,
+            });
           }
           if (isBlast) {
             this.crowdSystem.triggerSocialFilmingNear(wx, wz, radius * 1.15);
@@ -422,6 +442,85 @@ export class WorldEngine {
       }),
       switchMultiplayerRoom: (roomId, mode) => {
         this.netSync.switchRoom(roomId, mode);
+      },
+      sendCustomRaceTrack: (track) => this.netSync.sendCustomRaceTrack(track),
+      sendCoopEvent: (type, detail) => {
+        const phys = this.playerController.playerPhys;
+        return this.netSync.sendCoopEvent({
+          type,
+          x: phys.x,
+          y: phys.y,
+          z: phys.z,
+          wantedLevel: this.props.playerState.wantedLevel,
+          detail,
+        });
+      },
+      triggerProtagonistAbility: () => {
+        const res = gameStore.triggerActiveProtagonistAbility();
+        if (!res.triggered) return;
+        const phys = this.playerController.playerPhys;
+        if (res.kind === 'kirana_hack') {
+          this.trafficSystem.applyEmpPulseAt(
+            phys.x,
+            phys.z,
+            45,
+            phys.drivingVehicleId
+          );
+          this.playerController.spawnParticles(
+            phys.x,
+            phys.y + 1.4,
+            phys.z,
+            26,
+            0x22d3ee,
+            10
+          );
+        } else {
+          this.playerController.spawnParticles(
+            phys.x,
+            phys.y + 1.2,
+            phys.z,
+            20,
+            res.kind === 'raka_overdrive' ? 0x38bdf8 : 0xf59e0b,
+            8
+          );
+        }
+      },
+      startCustomStreetRace: (track) => {
+        const session = gameStore.startCustomStreetRace(track);
+        if (!session || session.checkpoints.length === 0) return;
+        const cp0 = session.checkpoints[0];
+        const cp1 = session.checkpoints[1] || cp0;
+        const startHeading = Math.atan2(cp1[0] - cp0[0], cp1[1] - cp0[1]);
+        const startX = cp0[0] - Math.sin(startHeading) * 8;
+        const startZ = cp0[1] - Math.cos(startHeading) * 8;
+
+        this.playerController.teleportPlayerTo(startX, startZ);
+        if (!this.playerController.playerPhys.drivingVehicleId) {
+          this.trafficSystem.spawnVehicleNearPlayer(
+            'supercar',
+            startX,
+            startZ,
+            startHeading,
+            this.props.playerState.vehicleCustoms
+          );
+          this.playerController.toggleEnterExitVehicle();
+        }
+        const activeVeh = this.trafficSystem.vehicles.find(
+          (v) => v.id === this.playerController.playerPhys.drivingVehicleId
+        );
+        if (activeVeh) {
+          activeVeh.x = startX;
+          activeVeh.z = startZ;
+          activeVeh.heading = startHeading;
+          activeVeh.speed = 0;
+        }
+        this.trafficSystem.startRaceRivals(
+          session.checkpoints,
+          startX,
+          startZ,
+          startHeading
+        );
+        this.cityRenderer.setRaceCheckpointMarker(cp0[0], cp0[1], false);
       },
       captureSnapshotDataUrl: () => {
         const s = gameStore.getState();
@@ -707,6 +806,8 @@ export class WorldEngine {
       );
 
       this.cityRenderer.setTrafficSignalPhase(stepRes.signalPhase);
+      this.cityRenderer.updateChunksAroundPlayer(phys.x, phys.z);
+      gameStore.stepKiranaHackTick(dt);
       this._camRight.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
       spatialAudio.syncCameraListener({
         x: this.camera.position.x,
@@ -724,20 +825,26 @@ export class WorldEngine {
       const physStep = this.physicsWorld.stepFixed(
         dt,
         this.trafficSystem.vehicles,
-        phys.drivingVehicleId
+        phys.drivingVehicleId,
+        stepRes.turnInput,
+        this.props.weatherMode
       );
+      if (physStep.playerInFloodZone !== gameStore.getState().inFloodZone) {
+        gameStore.setState({ inFloodZone: physStep.playerInFloodZone });
+      }
       if (physStep.playerCollisionImpact > 0.35) {
         soundEngine.playPropCrash(0);
         this.crowdSystem.triggerPanicNear(phys.x, phys.z, 18);
       }
 
-      // Offload spatial radar & LOD distance calculations to Web Worker
-      this.simWorker.stepBatch(
+      // Offload spatial radar & LOD distance calculations to Web Worker and pipe back to TrafficSystem
+      const simOut = this.simWorker.stepBatch(
         this.trafficSystem.vehicles,
         phys.x,
         phys.z,
         dt
       );
+      this.trafficSystem.setWorkerAheadDistances(simOut);
 
       // Step 20Hz -> 60fps Co-Op Multiplayer Interpolation
       const activeVeh = stepRes.activeVehicle;
@@ -1092,7 +1199,10 @@ export class WorldEngine {
     // Update procedural Web Audio engine & urban ambience layers
     const isDrivingNow =
       currentGameState === 'playing' && Boolean(phys.drivingVehicleId);
-    cityAudio.updateEngine(speedRatio, isDrivingNow);
+    const activeDrivingVeh = isDrivingNow
+      ? this.trafficSystem.vehicles.find((v) => v.id === phys.drivingVehicleId)
+      : null;
+    cityAudio.updateEngine(speedRatio, isDrivingNow, activeDrivingVeh?.type ?? null);
     cityAudio.updateUrbanAmbience(
       currentGameState === 'playing' && pState.currentInterior === 'exterior',
       nightFactor

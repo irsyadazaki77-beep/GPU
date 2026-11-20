@@ -9,6 +9,7 @@ import {
   CombatHitFeedbackEvent,
   CustomWaypointState,
   CutsceneOverlayState,
+  CustomRaceTrackSpec,
   DailyChallengeKind,
   DailyChallengesState,
   DistrictZone,
@@ -21,8 +22,10 @@ import {
   HeistBreachSession,
   HeistId,
   JAKARTA_DISTRICTS,
+  KiranaDistrictHackState,
   NabiloGramPost,
   NabiloGramTriggerKind,
+  NetCoopEvent,
   NpcDynamicSideQuest,
   OriginArchetype,
   PROTAGONIST_PROFILES,
@@ -60,6 +63,7 @@ import {
   claimDailyChallengeReward,
   computeViralCloutState,
   createDailyChallengesForDate,
+  createInitialKiranaHackState,
   createInitialPlayerState,
   createInitialPoliceTacticalState,
   createInitialTrioSynergy,
@@ -72,10 +76,13 @@ import {
   incrementTrioSynergy,
   resolveSquadOrderCallout,
   spawnNextStreetRandomEvent,
+  stepKiranaDistrictHack,
   stepPoliceTacticalState,
+  triggerKiranaDistrictHack,
   triggerManualWorldRoadEvent,
   triggerWitnessCrimeReport,
 } from '../game/rules';
+import { InteriorManager } from '../engine/interiorManager';
 import {
   DEFAULT_AUDIO_VOLUMES,
   DEFAULT_GAME_SETTINGS,
@@ -402,6 +409,11 @@ export interface GameStoreSnapshot {
   activeTurfWar: ActiveTurfWarSession | null;
   dailyChallenges: DailyChallengesState;
   killCamBanner: { label: string; stamp: number } | null;
+  kiranaHackState: KiranaDistrictHackState;
+  trioAbilityBuffUntilMs: number;
+  inFloodZone: boolean;
+  sharedCoopRaces: CustomRaceTrackSpec[];
+  lastCoopEventToast: NetCoopEvent | null;
 }
 
 export function buildInitialStateForStage(
@@ -583,6 +595,11 @@ let state: GameStoreSnapshot = {
   activeTurfWar: null,
   dailyChallenges: createDailyChallengesForDate(),
   killCamBanner: null,
+  kiranaHackState: createInitialKiranaHackState(),
+  trioAbilityBuffUntilMs: 0,
+  inFloodZone: false,
+  sharedCoopRaces: [],
+  lastCoopEventToast: null,
 };
 
 const listeners = new Set<() => void>();
@@ -1748,6 +1765,171 @@ export const gameStore = {
     };
     emitChange();
     return true;
+  },
+
+  triggerActiveProtagonistAbility: (): { triggered: boolean; kind: 'kirana_hack' | 'raka_overdrive' | 'nabilo_surge' | 'none'; message: string } => {
+    const activeId = state.playerState.activeProtagonist;
+    if (activeId === 'kirana') {
+      const res = triggerKiranaDistrictHack(activeId, state.kiranaHackState);
+      if (res.triggered) {
+        soundEngine.playMissionFanfare();
+        state = {
+          ...state,
+          kiranaHackState: res.hackState,
+          lastOutcomeText: res.message,
+        };
+        emitChange();
+        return { triggered: true, kind: 'kirana_hack', message: res.message };
+      }
+      state = { ...state, lastOutcomeText: res.message };
+      emitChange();
+      return { triggered: false, kind: 'none', message: res.message };
+    }
+
+    const nowMs = Date.now();
+    if (state.trioAbilityBuffUntilMs > nowMs) {
+      const rem = Math.ceil((state.trioAbilityBuffUntilMs - nowMs) / 1000);
+      const msg = `Skill Taktis ${PROTAGONIST_PROFILES[activeId].name} masih aktif (${rem} dtk).`;
+      state = { ...state, lastOutcomeText: msg };
+      emitChange();
+      return { triggered: false, kind: 'none', message: msg };
+    }
+
+    if (state.playerState.fokusEnergy < 30) {
+      const msg = 'Energi Fokus minimal 30% untuk mengaktifkan Skill Taktis!';
+      state = { ...state, lastOutcomeText: msg };
+      emitChange();
+      return { triggered: false, kind: 'none', message: msg };
+    }
+
+    soundEngine.playNitroBoost();
+    const isRaka = activeId === 'raka';
+    const msg = isRaka
+      ? 'KILAT OVERDRIVE (12 dtk): Akselerasi motor & kecepatan lari Raka memuncak!'
+      : 'GARUDA ARMOR SURGE (12 dtk): +25 Armor darurat & ketahanan benturan maksimal!';
+    state = {
+      ...state,
+      trioAbilityBuffUntilMs: nowMs + 12_000,
+      playerState: {
+        ...state.playerState,
+        fokusEnergy: Math.max(0, state.playerState.fokusEnergy - 30),
+        armor: isRaka
+          ? state.playerState.armor
+          : Math.min(state.playerState.maxArmor, state.playerState.armor + 25),
+      },
+      lastOutcomeText: msg,
+    };
+    emitChange();
+    return {
+      triggered: true,
+      kind: isRaka ? 'raka_overdrive' : 'nabilo_surge',
+      message: msg,
+    };
+  },
+
+  stepKiranaHackTick: (dt: number) => {
+    if (!state.kiranaHackState.active && state.kiranaHackState.cooldownSeconds <= 0) {
+      return;
+    }
+    const nextHack = stepKiranaDistrictHack(state.kiranaHackState, dt);
+    if (
+      nextHack.active !== state.kiranaHackState.active ||
+      Math.ceil(nextHack.remainingSeconds) !== Math.ceil(state.kiranaHackState.remainingSeconds) ||
+      Math.ceil(nextHack.cooldownSeconds) !== Math.ceil(state.kiranaHackState.cooldownSeconds)
+    ) {
+      state = { ...state, kiranaHackState: nextHack };
+      emitChange();
+    } else {
+      state.kiranaHackState = nextHack;
+    }
+  },
+
+  restInSafehouse: (hours: number = 6) => {
+    const res = InteriorManager.restInSafehouse(
+      state.playerState,
+      state.worldTimeMinutes,
+      hours
+    );
+    soundEngine.playMissionFanfare();
+    state = {
+      ...state,
+      playerState: res.nextPlayerState,
+      worldTimeMinutes: res.nextWorldTimeMinutes,
+      lastOutcomeText: `Istirahat Safehouse +${res.hoursRested} Jam (${formatJakartaClock(
+        res.nextWorldTimeMinutes
+      )}): HP & Armor penuh, level buronan mereda.`,
+    };
+    emitChange();
+    return res;
+  },
+
+  addCustomRaceTrack: (track: CustomRaceTrackSpec) => {
+    const existing = state.playerState.customRaceTracks || [];
+    const nextTracks = [track, ...existing.filter((t) => t.id !== track.id)].slice(0, 12);
+    soundEngine.playPickup();
+    state = {
+      ...state,
+      playerState: {
+        ...state.playerState,
+        customRaceTracks: nextTracks,
+      },
+      lastOutcomeText: `Sirkuit UGC "${track.name}" tersimpan (${track.checkpoints.length} CP).`,
+    };
+    emitChange();
+  },
+
+  receiveSharedCoopRace: (track: CustomRaceTrackSpec) => {
+    const nextShared = [
+      track,
+      ...state.sharedCoopRaces.filter((t) => t.id !== track.id),
+    ].slice(0, 8);
+    state = {
+      ...state,
+      sharedCoopRaces: nextShared,
+      lastOutcomeText: `Sirkuit Co-Op diterima dari ${track.authorName}: "${track.name}"!`,
+    };
+    emitChange();
+  },
+
+  startCustomStreetRace: (track: CustomRaceTrackSpec): ActiveStreetRaceSession => {
+    const session: ActiveStreetRaceSession = {
+      raceId: track.id,
+      raceName: track.name,
+      checkpoints: track.checkpoints,
+      playerCheckpointIndex: 0,
+      countdownSec: 3,
+      elapsedSec: 0,
+      position: 1,
+      totalRacers: 4,
+      status: 'countdown',
+      rewardRp: track.rewardRp,
+      finishedPlace: null,
+    };
+    soundEngine.playPickup();
+    state = {
+      ...state,
+      phoneOpen: false,
+      activeRace: session,
+      lastOutcomeText: `Balap Sirkuit UGC dimulai: ${track.name} (3 Rival AI)`,
+    };
+    emitChange();
+    return session;
+  },
+
+  pushCoopEventToast: (evt: NetCoopEvent) => {
+    const labelMap: Record<NetCoopEvent['type'], string> = {
+      horn: `${evt.displayName} membunyikan klakson di dekatmu!`,
+      weapon_fire: `${evt.displayName} sedang baku tembak!`,
+      explosion: `Ledakan besar dipicu oleh ${evt.displayName}!`,
+      wanted_alert: `${evt.displayName} memicu kejaran Polisi ★${evt.wantedLevel || 1}!`,
+      passenger_ping: `${evt.displayName} mengajak mabar satu mobil/lokasi!`,
+    };
+    state = {
+      ...state,
+      lastCoopEventToast: evt,
+      lastOutcomeText: evt.detail || labelMap[evt.type],
+    };
+    emitChange();
   },
 };
 

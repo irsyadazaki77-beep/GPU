@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   CHARACTER_SKILL_SPECS,
+  CustomRaceTrackSpec,
   DRONE_UPGRADE_COST,
   ENTERABLE_INTERIORS,
   InteriorZoneId,
@@ -49,6 +50,7 @@ import {
   useGameStore,
 } from '../state/gameStore';
 import { soundEngine } from '../game/sound';
+import { CustomRaceUgcSection } from './phone/CustomRaceUgcSection';
 
 interface NabiloPhoneModalProps {
   playerState: PlayerProgressState;
@@ -76,6 +78,8 @@ interface NabiloPhoneModalProps {
   onSwitchProtagonist: (targetId: ProtagonistId) => void;
   onEnterInterior: (interiorId: InteriorZoneId) => void;
   onStartStreetRace: (raceId: string) => void;
+  onStartCustomRace?: (track: CustomRaceTrackSpec) => void;
+  onShareCustomRace?: (track: CustomRaceTrackSpec) => boolean;
   onCaptureViralSnap?: () => void;
   onStartTurfWar?: (districtId: string) => void;
   onWarpToRamp?: (rampId: string) => void;
@@ -239,6 +243,8 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
   onSwitchProtagonist,
   onEnterInterior,
   onStartStreetRace,
+  onStartCustomRace,
+  onShareCustomRace,
   onCaptureViralSnap,
   onStartTurfWar,
   onWarpToRamp,
@@ -1820,6 +1826,16 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                     </div>
                   ))}
                 </div>
+                {onStartCustomRace && (
+                  <CustomRaceUgcSection
+                    protagonistName={
+                      PROTAGONIST_PROFILES[playerState.activeProtagonist].name
+                    }
+                    onStartCustomRace={onStartCustomRace}
+                    onShareCustomRace={onShareCustomRace}
+                    onClosePhone={onClose}
+                  />
+                )}
               </div>
 
               <div className="pt-2 border-t border-white/10 flex flex-col gap-2">

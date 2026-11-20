@@ -63,9 +63,9 @@ const VALID_ORIGINS: OriginArchetype[] = [
 
 const VALID_WEATHERS: WeatherMode[] = ['senja', 'malam', 'siang', 'hujan'];
 
-function clampCoord(n: unknown, fallback: number): number {
+function clampCoord(n: unknown, fallback: number, maxBound: number = 156): number {
   if (typeof n !== 'number' || !Number.isFinite(n)) return fallback;
-  return Math.max(-88, Math.min(88, n));
+  return Math.max(-maxBound, Math.min(maxBound, n));
 }
 
 function clampUnitVolume(n: unknown, fallback: number): number {
@@ -209,9 +209,10 @@ export function migrateSavedGame(raw: unknown): SavedGameSnapshot | null {
       : fallbackState.customRaceTracks,
   };
 
+  const maxCoordBound = parsed.version && parsed.version < 3 ? 88 : 156;
   const playerPos = {
-    x: clampCoord(parsed.playerPos?.x, 0),
-    z: clampCoord(parsed.playerPos?.z, 26),
+    x: clampCoord(parsed.playerPos?.x, 0, maxCoordBound),
+    z: clampCoord(parsed.playerPos?.z, 26, maxCoordBound),
   };
 
   const rawAudio = (parsed.audioSettings || {}) as Partial<AudioChannelVolumes>;

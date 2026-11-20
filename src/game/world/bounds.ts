@@ -1,6 +1,6 @@
 import type { BuildingFootprint, SidewalkBounds } from '../types';
 
-export const WORLD_MAX_BOUND = 92;
+export const WORLD_MAX_BOUND = 160;
 
 export const CITY_BUILDINGS: BuildingFootprint[] = [
   // Monas Centerpiece at (0, 0)

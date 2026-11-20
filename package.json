@@ -9,7 +9,7 @@
     "build": "vite build",
     "build:server": "esbuild server.ts --bundle --platform=node --packages=external --format=esm --outfile=dist-server/server.js",
     "preview": "vite preview",
-    "test": "tsx --test src/game/rules.test.ts src/game/nextGenSystems.test.ts src/game/wave2Systems.test.ts src/game/world/spatial.test.ts src/state/save.test.ts src/engine/chunkLoader.test.ts src/game/economy.test.ts src/game/wantedSystem.test.ts server/npcDialogue.test.ts server/socialViral.test.ts server/cloudSave.test.ts server/multiplayer.test.ts",
+    "test": "tsx --test src/game/rules.test.ts src/game/nextGenSystems.test.ts src/game/wave2Systems.test.ts src/game/grandPlanIntegration.test.ts src/game/world/spatial.test.ts src/state/save.test.ts src/engine/chunkLoader.test.ts src/game/economy.test.ts src/game/wantedSystem.test.ts server/npcDialogue.test.ts server/socialViral.test.ts server/cloudSave.test.ts server/multiplayer.test.ts",
     "test:e2e": "PLAYWRIGHT_HTML_OPEN=never playwright test",
     "clean": "rm -rf dist dist-server server.js",
     "lint": "tsc --noEmit"
@@ -38,7 +38,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"

@@ -55,8 +55,8 @@ export const JAKARTA_EXPANSION_ZONES: ExpansionZoneSpec[] = [
     subtitle: 'Perairan Laut Utara, Dermaga Speedboat & Pulau Karang',
     chunkKey: '-1,-1',
     centerX: -66,
-    centerZ: -78,
-    bounds: { minX: -90, maxX: 90, minZ: -92, maxZ: -72 },
+    centerZ: -112,
+    bounds: { minX: -158, maxX: 158, minZ: -158, maxZ: -72 },
     waterLevelY: -0.15,
   },
 ];
@@ -211,11 +211,11 @@ export function computeChunkDiff(
  */
 export function isInJakartaBayWaterZone(x: number, z: number): boolean {
   // Northern coastal water basin & Kepulauan Seribu channel
-  if (z <= -72 && Math.abs(x) <= 90) {
+  if (z <= -72 && Math.abs(x) <= 158) {
     return true;
   }
   // Ancol-PIK western coastal marina inlet
-  if (x <= -70 && z >= 46 && z <= 88) {
+  if (x <= -70 && z >= 46 && z <= 156) {
     return true;
   }
   return false;
