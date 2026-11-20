@@ -318,8 +318,8 @@ export class PostProcessingPipeline {
 
     const u = this.gradePass.material.uniforms;
     u.uChromatic.value =
-      0.00055 + params.speedRatio * 0.0016 + params.damagePulse * 0.0022;
-    u.uVignette.value = 0.18 + params.speedRatio * 0.14;
+      Math.max(0, params.speedRatio - 0.65) * 0.0012 + params.damagePulse * 0.0018;
+    u.uVignette.value = 0.14 + params.speedRatio * 0.11;
     u.uDamagePulse.value = params.damagePulse;
     u.uFokusMix.value = params.fokusActive ? 1.0 : 0.0;
     u.uSpeedRatio.value = params.speedRatio;

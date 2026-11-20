@@ -18,9 +18,12 @@ import {
   StuntRampSpec,
   VEHICLE_SPECS,
   WARUNG_STALL_LOCATIONS,
+  WEAPON_MAGAZINE_SIZES,
+  WEAPON_RELOAD_SEC,
   applyCoverDamageMitigation,
   checkPlayerDetourProgress,
   computeNearMissBonus,
+  computeSpeedSensitiveTurnRate,
   evaluateCoverAvailability,
   evaluateFloodZoneAt,
   evaluateRoadEventImpactAt,
@@ -34,6 +37,7 @@ import {
   resolveCircleAABBCollision,
   scoreStuntJump,
   stepEnemyMovementPolicy,
+  stepVehicleLongitudinalSpeed,
 } from '../game/rules';
 import { soundEngine } from '../game/sound';
 import {
@@ -46,6 +50,7 @@ import {
 import type {
   CombatHitFeedbackEvent,
   TrafficSignalPhase,
+  WeaponId,
 } from '../game/types';
 import {
   engineTelemetryRef,
@@ -279,11 +284,21 @@ export class PlayerController {
   private readonly keysHeld = new Set<string>();
   private readonly keysJustPressed = new Set<string>();
   private mouseJustClicked = false;
+  private leftMouseHeld = false;
   private rightMouseHeld = false;
   private isOrbitDragging = false;
   private lastPointerX = 0;
   private lastPointerY = 0;
   private dragDistance = 0;
+  private clipAmmo: Partial<Record<WeaponId, number>> = {
+    pistol: 12,
+    rifle: 30,
+    mercon: 1,
+    pasopati: 20,
+    gatotkaca: 1,
+  };
+  private reloadTimer = 0;
+  private meleeComboStep = 0;
 
   constructor(
     scene: THREE.Scene,
@@ -298,10 +313,10 @@ export class PlayerController {
     this.traffic = traffic;
     this.callbacks = callbacks;
 
-    // 1. Clean Ground-to-Sky Mission Waypoint Beacon (Thin Soft Additive Beam + Dual Rings + Bobbing Chevron)
+    // 1. Grounded GTA-Style Mission Corona Marker (low profile, clean unobstructed skyline)
     this.beaconGroup = new THREE.Group();
     const beaconCyl = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.32, 0.92, 42, 14, 1, true),
+      new THREE.CylinderGeometry(1.45, 1.55, 2.2, 24, 1, true),
       new THREE.MeshBasicMaterial({
         color: 0xf59e0b,
         transparent: true,
@@ -311,29 +326,15 @@ export class PlayerController {
         blending: THREE.AdditiveBlending,
       })
     );
-    beaconCyl.position.y = 21;
+    beaconCyl.position.y = 1.12;
     this.beaconGroup.add(beaconCyl);
 
-    const beaconCore = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.34, 34, 10, 1, true),
-      new THREE.MeshBasicMaterial({
-        color: 0xfef08a,
-        transparent: true,
-        opacity: 0.34,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      })
-    );
-    beaconCore.position.y = 17;
-    this.beaconGroup.add(beaconCore);
-
     const beaconRing = new THREE.Mesh(
-      new THREE.RingGeometry(1.5, 2.2, 28).rotateX(-Math.PI / 2),
+      new THREE.RingGeometry(1.35, 1.65, 28).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({
         color: 0xfef08a,
         transparent: true,
-        opacity: 0.92,
+        opacity: 0.65,
         side: THREE.DoubleSide,
         depthWrite: false,
       })
@@ -342,50 +343,52 @@ export class PlayerController {
     this.beaconGroup.add(beaconRing);
 
     this.beaconOuterRing = new THREE.Mesh(
-      new THREE.RingGeometry(2.5, 3.1, 32).rotateX(-Math.PI / 2),
+      new THREE.RingGeometry(1.8, 2.05, 32).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({
         color: 0xf59e0b,
         transparent: true,
-        opacity: 0.62,
+        opacity: 0.32,
         side: THREE.DoubleSide,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       })
     );
-    this.beaconOuterRing.position.y = 0.1;
+    this.beaconOuterRing.position.y = 0.09;
     this.beaconGroup.add(this.beaconOuterRing);
 
     this.beaconChevron = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.95, 0),
+      new THREE.OctahedronGeometry(0.32, 0),
       new THREE.MeshBasicMaterial({
         color: 0xfef08a,
         transparent: true,
-        opacity: 0.92,
+        opacity: 0.65,
       })
     );
-    this.beaconChevron.position.y = 7.4;
+    this.beaconChevron.position.y = 2.6;
     this.beaconGroup.add(this.beaconChevron);
     scene.add(this.beaconGroup);
 
-    // 1b. Custom GPS Waypoint Beacon (Tactical Purple/Cyan Pillar + Ring)
+    // 1b. Grounded Custom GPS Waypoint Corona
     this.waypointBeaconGroup = new THREE.Group();
     const wpCyl = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.35, 1.35, 22, 16, 1, true),
+      new THREE.CylinderGeometry(1.25, 1.35, 1.8, 16, 1, true),
       new THREE.MeshBasicMaterial({
-        color: 0xc084fc,
+        color: 0x38bdf8,
         transparent: true,
-        opacity: 0.34,
+        opacity: 0.18,
         side: THREE.DoubleSide,
         depthWrite: false,
       })
     );
-    wpCyl.position.y = 11;
+    wpCyl.position.y = 0.92;
     this.waypointBeaconGroup.add(wpCyl);
 
     const wpRing = new THREE.Mesh(
-      new THREE.RingGeometry(1.4, 2.1, 24).rotateX(-Math.PI / 2),
+      new THREE.RingGeometry(1.2, 1.5, 24).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({
         color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.52,
         side: THREE.DoubleSide,
         depthWrite: false,
       })
@@ -515,6 +518,7 @@ export class PlayerController {
     this.keysHeld.clear();
     this.keysJustPressed.clear();
     this.mouseJustClicked = false;
+    this.leftMouseHeld = false;
     this.rightMouseHeld = false;
     this.isOrbitDragging = false;
   };
@@ -524,6 +528,7 @@ export class PlayerController {
     this.lastPointerX = e.clientX;
     this.lastPointerY = e.clientY;
     if (e.button === 0) {
+      this.leftMouseHeld = true;
       this.isOrbitDragging = true;
       this.dragDistance = 0;
       if (this.callbacks.getTpsAiming() || this.rightMouseHeld) {
@@ -566,6 +571,7 @@ export class PlayerController {
 
   private onPointerUp = (e: PointerEvent) => {
     if (e.button === 0) {
+      this.leftMouseHeld = false;
       if (
         this.isOrbitDragging &&
         this.dragDistance < 8 &&
@@ -880,14 +886,6 @@ export class PlayerController {
     } else {
       this.traffic.notifyHorn(this.playerPhys.x, this.playerPhys.z);
     }
-    this.spawnParticles(
-      this.playerPhys.x,
-      this.playerPhys.y + 1.8,
-      this.playerPhys.z,
-      5,
-      0xfacc15,
-      4.5
-    );
   }
 
   public toggleEnterExitVehicle(): void {
@@ -897,16 +895,28 @@ export class PlayerController {
       );
       this.playerPhys.drivingVehicleId = null;
       if (v) {
+        const wasHighSpeedBail =
+          !VEHICLE_SPECS[v.type].isAircraft && Math.abs(v.speed) > 10;
         const gY = getGroundElevationAt(v.x, v.z);
         v.y = gY;
         v.mesh.position.y = gY;
         v.mesh.rotation.z = 0;
-        this.playerPhys.x = v.x + Math.cos(v.heading) * 2.4;
-        this.playerPhys.z = v.z - Math.sin(v.heading) * 2.4;
+        v.isBraking = false;
+        this.playerPhys.x = v.x + Math.cos(v.heading) * 2.5;
+        this.playerPhys.z = v.z - Math.sin(v.heading) * 2.5;
         this.playerPhys.y = getGroundElevationAt(
           this.playerPhys.x,
           this.playerPhys.z
         );
+        if (wasHighSpeedBail) {
+          // GTA high-speed bail-out: tumble roll sideways while car coasts forward with momentum
+          this.playerPhys.combatRollTimer = 0.55;
+          this.playerPhys.vx = Math.sin(v.heading) * v.speed * 0.45 + Math.cos(v.heading) * 4.5;
+          this.playerPhys.vz = Math.cos(v.heading) * v.speed * 0.45 - Math.sin(v.heading) * 4.5;
+          this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.35);
+          this.callbacks.onPlayerDamage(6);
+          soundEngine.playHit(false);
+        }
       }
       this.playerRig.group.visible = true;
       soundEngine.stopEngineAudio(false);
@@ -1102,24 +1112,48 @@ export class PlayerController {
         : pState.activeWeapon;
     const wSpec = getEffectiveWeaponSpec(effectiveWeaponId, pState);
     if (isDriveBy && wSpec.isMelee) return;
-    if (this.playerPhys.attackCooldown > 0) return;
+    if (this.playerPhys.attackCooldown > 0 || this.reloadTimer > 0) return;
 
     if (!wSpec.isMelee) {
+      const magSize = WEAPON_MAGAZINE_SIZES[wSpec.id] || 12;
+      const curClip = this.clipAmmo[wSpec.id] ?? magSize;
+      if (curClip <= 0) {
+        this.reloadTimer = WEAPON_RELOAD_SEC[wSpec.id] || 1.2;
+        this.clipAmmo[wSpec.id] = magSize;
+        soundEngine.playTone(210, 0.08, 'triangle', 0.1, 1.35);
+        return;
+      }
       const hasAmmo = this.callbacks.onConsumeAmmo();
       if (!hasAmmo) {
         soundEngine.playTone(150, 0.06, 'sine', 0.1);
         this.playerPhys.attackCooldown = 0.25;
         return;
       }
+      const nextClip = curClip - 1;
+      this.clipAmmo[wSpec.id] = nextClip;
+      if (nextClip <= 0 && (pState.ammo[wSpec.id] || 0) > 1) {
+        this.reloadTimer = WEAPON_RELOAD_SEC[wSpec.id] || 1.2;
+        this.clipAmmo[wSpec.id] = magSize;
+      }
+    } else {
+      // 3-Hit GTA Melee Combo with subtle forward step lunge
+      this.meleeComboStep = (this.meleeComboStep + 1) % 3;
+      const lungeSpeed = this.meleeComboStep === 2 ? 7.5 : 4.2;
+      this.playerPhys.vx += Math.sin(this.playerPhys.facing) * lungeSpeed;
+      this.playerPhys.vz += Math.cos(this.playerPhys.facing) * lungeSpeed;
     }
 
     this.playerPhys.attackCooldown = wSpec.cooldown;
     this.crosshairSpread = Math.min(
       1.0,
-      this.crosshairSpread + (wSpec.isMelee ? 0.1 : 0.28)
+      this.crosshairSpread + (wSpec.isMelee ? 0.1 : 0.22)
     );
     soundEngine.playShoot(wSpec.id);
-    this.playerRig.rightArm.rotation.x = -Math.PI * 0.75;
+    if (wSpec.isMelee && this.meleeComboStep === 1) {
+      this.playerRig.leftArm.rotation.x = -Math.PI * 0.72;
+    } else {
+      this.playerRig.rightArm.rotation.x = -Math.PI * 0.75;
+    }
 
     const aimYaw = isDriveBy ? this.camYaw : this.playerPhys.facing;
     const fwdX = Math.sin(aimYaw);
@@ -1482,20 +1516,10 @@ export class PlayerController {
     const pRingMat = this.playerRig.telegraphRing
       .material as THREE.MeshBasicMaterial;
     if (pState.fokusActive) {
-      pRingMat.opacity = 0.65 + Math.sin(nowMs * 0.014) * 0.25;
+      pRingMat.opacity = 0.28 + Math.sin(nowMs * 0.01) * 0.1;
       this.playerRig.telegraphRing.scale.setScalar(
-        1.1 + Math.sin(nowMs * 0.01) * 0.15
+        1.04 + Math.sin(nowMs * 0.008) * 0.08
       );
-      if (Math.random() < 0.25) {
-        this.spawnParticles(
-          this.playerPhys.x,
-          this.playerPhys.y + 0.9,
-          this.playerPhys.z,
-          1,
-          0xfacc15,
-          4
-        );
-      }
     } else {
       pRingMat.opacity = 0;
     }
@@ -1577,10 +1601,10 @@ export class PlayerController {
     }
     this.beaconGroup.rotation.y += dt * 1.4;
     if (this.beaconGroup.visible) {
-      const pulse = 1 + Math.sin(nowMs * 0.0052) * 0.18;
+      const pulse = 1 + Math.sin(nowMs * 0.004) * 0.1;
       this.beaconOuterRing.scale.set(pulse, 1, pulse);
-      this.beaconChevron.position.y = 7.4 + Math.sin(nowMs * 0.0045) * 0.72;
-      this.beaconChevron.rotation.y -= dt * 2.4;
+      this.beaconChevron.position.y = 2.6 + Math.sin(nowMs * 0.0045) * 0.24;
+      this.beaconChevron.rotation.y -= dt * 1.8;
     }
 
     // Update Custom GPS Waypoint 3D Beacon & Detour / Contract progression
@@ -1728,6 +1752,9 @@ export class PlayerController {
     if (this.stuntJump.slowMoTimer > 0) {
       this.stuntJump.slowMoTimer = Math.max(0, this.stuntJump.slowMoTimer - dt);
     }
+    if (this.reloadTimer > 0) {
+      this.reloadTimer = Math.max(0, this.reloadTimer - dt);
+    }
     if (this.muzzleLightTimer > 0) {
       this.muzzleLightTimer = Math.max(0, this.muzzleLightTimer - dt);
       this.muzzleFlashLight.intensity =
@@ -1735,7 +1762,10 @@ export class PlayerController {
     } else {
       this.muzzleFlashLight.intensity = 0;
     }
-    const isTpsAim = this.callbacks.getTpsAiming();
+    // Authentic GTA Hold-RMB to enter over-the-shoulder TPS Aim cleanly on foot
+    const isTpsAim =
+      this.callbacks.getTpsAiming() ||
+      (this.rightMouseHeld && !this.playerPhys.drivingVehicleId);
     const isWheelSlowMo = this.callbacks.getWheelSlowMo();
     const isCustomsOpen = this.callbacks.getCustomsOpen();
 
@@ -1900,8 +1930,18 @@ export class PlayerController {
     } else if (this.keysJustPressed.has('F3')) {
       gameStore.setSquadOrder('hold');
     }
-    if (this.keysJustPressed.has('KeyR') && this.playerPhys.drivingVehicleId) {
-      gameStore.cycleRadioStation();
+    if (this.keysJustPressed.has('KeyR')) {
+      if (this.playerPhys.drivingVehicleId) {
+        gameStore.cycleRadioStation();
+      } else if (this.reloadTimer <= 0) {
+        const magSize = WEAPON_MAGAZINE_SIZES[pState.activeWeapon] || 0;
+        const curClip = this.clipAmmo[pState.activeWeapon] ?? magSize;
+        if (magSize > 0 && curClip < magSize && (pState.ammo[pState.activeWeapon] || 0) > 0) {
+          this.reloadTimer = WEAPON_RELOAD_SEC[pState.activeWeapon] || 1.2;
+          this.clipAmmo[pState.activeWeapon] = magSize;
+          soundEngine.playTone(230, 0.09, 'triangle', 0.11, 1.35);
+        }
+      }
     }
     if (
       (this.keysJustPressed.has('AltLeft') ||
@@ -1911,17 +1951,15 @@ export class PlayerController {
       this.playerPhys.combatRollTimer <= 0
     ) {
       virtualInputRef.rollTap = false;
-      this.playerPhys.combatRollTimer = 0.32;
-      soundEngine.playTone(220, 0.12, 'triangle', 0.14, 1.5);
-      this.spawnParticles(
-        this.playerPhys.x,
-        this.playerPhys.y + 0.5,
-        this.playerPhys.z,
-        10,
-        0x38bdf8,
-        6
-      );
+      this.playerPhys.combatRollTimer = 0.34;
+      soundEngine.playTone(200, 0.1, 'triangle', 0.12, 1.35);
     }
+
+    const autoFireHeld =
+      this.leftMouseHeld &&
+      (isTpsAim ||
+        pState.activeWeapon === 'rifle' ||
+        pState.activeWeapon === 'pasopati');
 
     if (
       this.keysJustPressed.has('KeyK') ||
@@ -1937,6 +1975,7 @@ export class PlayerController {
     } else if (
       this.keysJustPressed.has('Space') ||
       this.mouseJustClicked ||
+      autoFireHeld ||
       virtualInputRef.fireTap ||
       virtualInputRef.fireHeld ||
       gpFireHeld
@@ -1947,7 +1986,7 @@ export class PlayerController {
       } else if (
         this.playerPhys.drivingVehicleId &&
         !isPhotoMode &&
-        (this.mouseJustClicked || virtualInputRef.fireHeld || gpFireHeld)
+        (this.mouseJustClicked || this.leftMouseHeld || virtualInputRef.fireHeld || gpFireHeld)
       ) {
         this.triggerPlayerAttack(true);
       } else if (
@@ -2097,37 +2136,35 @@ export class PlayerController {
         Math.abs(moveTurn) > 0;
       activeVehicle.isDrifting = isDrifting;
 
-      if (activeVehicle.damage.exploded) {
-        activeVehicle.speed *= Math.exp(-5.0 * simDt);
-      } else if (handbrakeHeld) {
-        activeVehicle.speed *= Math.exp(-1.9 * simDt);
-      } else if (moveForward !== 0) {
-        activeVehicle.speed +=
-          moveForward *
-          vSpec.acceleration *
-          turboMult *
-          handlingPenalty.speedMultiplier *
-          simDt;
-      } else {
-        activeVehicle.speed *= Math.exp(-3.5 * simDt);
-      }
-      activeVehicle.speed = THREE.MathUtils.clamp(
+      const longStep = stepVehicleLongitudinalSpeed(
         activeVehicle.speed,
-        -effectiveMaxSpeed * 0.45,
-        effectiveMaxSpeed
+        moveForward,
+        vSpec.acceleration * turboMult * handlingPenalty.speedMultiplier,
+        effectiveMaxSpeed,
+        handbrakeHeld,
+        activeVehicle.damage.exploded,
+        simDt
       );
+      activeVehicle.speed = longStep.speed;
+      activeVehicle.isBraking = longStep.isBraking;
 
-      if (vSpec.isAircraft || Math.abs(activeVehicle.speed) > 0.4) {
+      if (vSpec.isAircraft || Math.abs(activeVehicle.speed) > 0.35) {
         const dirSign =
           vSpec.isAircraft || activeVehicle.speed >= 0 ? 1 : -1;
-        const driftTurnBoost = isDrifting ? 1.52 * wetGripMult : 1.0;
+        const effectiveTurnRate = computeSpeedSensitiveTurnRate(
+          vSpec.turnRate,
+          Math.abs(activeVehicle.speed),
+          effectiveMaxSpeed,
+          isDrifting,
+          wetGripMult
+        );
         const pullYaw =
           !vSpec.isAircraft && Math.abs(activeVehicle.speed) > 4
             ? handlingPenalty.steeringPull *
               Math.min(1, Math.abs(activeVehicle.speed) / 14)
             : 0;
         activeVehicle.heading +=
-          (moveTurn * vSpec.turnRate * driftTurnBoost + pullYaw) *
+          (moveTurn * effectiveTurnRate + pullYaw) *
           dirSign *
           simDt;
       }
@@ -2621,18 +2658,18 @@ export class PlayerController {
       if (mag > 0.01) {
         const nx = inputX / mag;
         const nz = inputZ / mag;
-        this.playerPhys.vx = nx * walkSpeed;
-        this.playerPhys.vz = nz * walkSpeed;
-        if (staminaMult > 1.0 && Math.random() < 0.22) {
-          this.spawnParticles(
-            this.playerPhys.x,
-            this.playerPhys.y + 0.35,
-            this.playerPhys.z,
-            1,
-            0x10b981,
-            3.5
-          );
-        }
+        this.playerPhys.vx = THREE.MathUtils.damp(
+          this.playerPhys.vx,
+          nx * walkSpeed,
+          13.5,
+          simDt
+        );
+        this.playerPhys.vz = THREE.MathUtils.damp(
+          this.playerPhys.vz,
+          nz * walkSpeed,
+          13.5,
+          simDt
+        );
         const targetAngle = isTpsAim || isFirstPerson ? this.camYaw : Math.atan2(nx, nz);
         const diff =
           ((targetAngle - this.playerPhys.facing + Math.PI * 3) %
@@ -2640,8 +2677,8 @@ export class PlayerController {
           Math.PI;
         this.playerPhys.facing += diff * (1 - Math.exp(-15 * simDt));
       } else {
-        this.playerPhys.vx *= Math.exp(-12 * simDt);
-        this.playerPhys.vz *= Math.exp(-12 * simDt);
+        this.playerPhys.vx *= Math.exp(-11 * simDt);
+        this.playerPhys.vz *= Math.exp(-11 * simDt);
         if (isTpsAim || isFirstPerson) {
           const diff =
             ((this.camYaw - this.playerPhys.facing + Math.PI * 3) %

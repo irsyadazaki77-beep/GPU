@@ -226,9 +226,9 @@ export class CityRenderer {
       roughness: 0.22,
     });
     const pkgRingMat = new THREE.MeshBasicMaterial({
-      color: 0x22d3ee,
+      color: 0xfacc15,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.34,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
@@ -374,8 +374,8 @@ if (uWetness > 0.04) {
   vec3 neonTint = mix(coralAmber, viceCyan, smoothstep(0.45, 0.78, roadNoise(vRoadWorldPos.xz * 0.06 + vec2(3.1, 1.7))));
   float rainRippleAmp = smoothstep(0.6, 0.95, uWetness);
   float rippleCell = sin(length(fract(vRoadWorldPos.xz * 0.72) - 0.5) * 28.0 - uTime * 9.5);
-  float rippleSpark = smoothstep(0.92, 1.0, rippleCell) * sanPuddleMask * 0.16 * rainRippleAmp;
-  gl_FragColor.rgb += (sunsetSkyRef * 0.36 + neonTint * (0.20 + uNightFactor * 0.28)) * (sanPuddleMask * (0.38 + fresnel * 0.68)) + vec3(rippleSpark);
+  float rippleSpark = smoothstep(0.92, 1.0, rippleCell) * sanPuddleMask * 0.10 * rainRippleAmp;
+  gl_FragColor.rgb += (sunsetSkyRef * 0.24 + neonTint * (0.08 + uNightFactor * 0.14)) * (sanPuddleMask * (0.28 + fresnel * 0.52)) + vec3(rippleSpark);
 }
 #include <dithering_fragment>`
         );
@@ -778,30 +778,30 @@ if (uWetness > 0.04) {
 
   private buildStreetEventBeacon(): THREE.Group {
     const g = new THREE.Group();
-    const ringGeo = new THREE.RingGeometry(2.6, 3.4, 32);
+    const ringGeo = new THREE.RingGeometry(2.4, 2.85, 32);
     ringGeo.rotateX(-Math.PI / 2);
     const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xff5e7e,
+      color: 0xf59e0b,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.55,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
     const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.position.y = 0.16;
+    ring.position.y = 0.12;
     g.add(ring);
 
-    const beamGeo = new THREE.CylinderGeometry(0.42, 1.4, 24, 12, 1, true);
+    const beamGeo = new THREE.CylinderGeometry(2.5, 2.6, 1.6, 20, 1, true);
     const beamMat = new THREE.MeshBasicMaterial({
-      color: 0xff5e7e,
+      color: 0xf59e0b,
       transparent: true,
-      opacity: 0.24,
+      opacity: 0.14,
       side: THREE.DoubleSide,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
     const beam = new THREE.Mesh(beamGeo, beamMat);
-    beam.position.y = 12.1;
+    beam.position.y = 0.9;
     g.add(beam);
 
     return g;
@@ -966,32 +966,32 @@ if (uWetness > 0.04) {
 
   private buildTurfWarZoneRing(): THREE.Group {
     const g = new THREE.Group();
-    const ringGeo = new THREE.RingGeometry(24.8, 26.2, 48);
+    const ringGeo = new THREE.RingGeometry(25.2, 26.0, 48);
     ringGeo.rotateX(-Math.PI / 2);
     const ringMat = new THREE.MeshBasicMaterial({
       color: 0xef4444,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.42,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
     const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.position.y = 0.17;
+    ring.position.y = 0.14;
     g.add(ring);
 
     const pillarMat = new THREE.MeshBasicMaterial({
       color: 0xef4444,
       transparent: true,
-      opacity: 0.24,
+      opacity: 0.12,
       side: THREE.DoubleSide,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
     const pillar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.6, 1.8, 30, 12, 1, true),
+      new THREE.CylinderGeometry(1.2, 1.4, 2.2, 16, 1, true),
       pillarMat
     );
-    pillar.position.y = 15.1;
+    pillar.position.y = 1.15;
     g.add(pillar);
     return g;
   }
@@ -1185,10 +1185,10 @@ if (uWetness > 0.04) {
       this.streetEventBeaconGroup.scale.set(pulse, 1, pulse);
     }
 
-    // Wave 2: Pulse stunt ramp chevrons, monsoon flood puddles & race checkpoint gate
+    // Wave 2: Pulse stunt ramp chevrons subtly, monsoon flood puddles & race checkpoint gate
     for (let i = 0; i < this.rampChevronMats.length; i++) {
       this.rampChevronMats[i].opacity =
-        0.58 + Math.sin(this.elapsedTime * 4.5 + i * 1.1) * 0.28;
+        0.26 + Math.sin(this.elapsedTime * 3.2 + i * 1.1) * 0.12;
     }
     this.wave2FloodZonesGroup.visible = wetnessFactor > 0.55;
     if (this.floodZoneMat && this.wave2FloodZonesGroup.visible) {

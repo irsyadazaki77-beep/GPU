@@ -51,10 +51,10 @@ export function computeTimeOfDayToneState(
   // Strong enough IBL so car clearcoat & skyscraper glass visibly reflect sky/horizon
   const envIntensity = Math.max(0.32, lerp(0.76, 0.36, n) - w * 0.06);
 
-  // Conservative bloom: barely active in daylight so sky/UI never wash out, warm glow at night
-  const bloomThreshold = lerp(0.92, 0.82, n);
-  const bloomStrength = lerp(0.14, 0.36, n) + w * 0.04;
-  const bloomRadius = lerp(0.32, 0.44, n);
+  // Restrained filmic bloom: clean crisp daytime, subtle realistic night lights without neon glare
+  const bloomThreshold = lerp(0.95, 0.88, n);
+  const bloomStrength = lerp(0.10, 0.24, n) + w * 0.02;
+  const bloomRadius = lerp(0.28, 0.38, n);
 
   // Office & ruko windows turn on smoothly starting at late afternoon / golden hour
   const windowRamp = clamp01((n - 0.18) / 0.62);

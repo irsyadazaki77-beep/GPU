@@ -911,3 +911,103 @@ export function computeNearMissBonus(
     scoreDelta: speedAbs >= 28 ? 110 : 75,
   };
 }
+
+export const WEAPON_MAGAZINE_SIZES: Record<WeaponId, number> = {
+  fist: 0,
+  golok: 0,
+  pistol: 12,
+  rifle: 30,
+  mercon: 1,
+  pasopati: 20,
+  gatotkaca: 1,
+};
+
+export const WEAPON_RELOAD_SEC: Record<WeaponId, number> = {
+  fist: 0,
+  golok: 0,
+  pistol: 1.15,
+  rifle: 1.45,
+  mercon: 1.85,
+  pasopati: 1.5,
+  gatotkaca: 2.0,
+};
+
+/**
+ * Computes GTA-style speed-sensitive steering multiplier: agile at low city speeds,
+ * planted and stable at high highway speeds.
+ */
+export function computeSpeedSensitiveTurnRate(
+  baseTurnRate: number,
+  speedAbs: number,
+  maxSpeed: number,
+  isDrifting: boolean,
+  wetGripMult: number
+): number {
+  const ratio = Math.max(0, Math.min(1, speedAbs / Math.max(1, maxSpeed)));
+  const speedCurve = 1.16 - ratio * 0.54;
+  const driftBoost = isDrifting ? 1.48 * wetGripMult : 1.0;
+  return baseTurnRate * speedCurve * driftBoost;
+}
+
+/**
+ * Computes GTA-style dedicated brake vs reverse acceleration step.
+ */
+export function stepVehicleLongitudinalSpeed(
+  currentSpeed: number,
+  moveForward: number,
+  acceleration: number,
+  maxSpeed: number,
+  handbrakeHeld: boolean,
+  isExploded: boolean,
+  dt: number
+): { speed: number; isBraking: boolean } {
+  if (isExploded) {
+    return { speed: currentSpeed * Math.exp(-5.0 * dt), isBraking: false };
+  }
+  if (handbrakeHeld) {
+    return { speed: currentSpeed * Math.exp(-2.1 * dt), isBraking: true };
+  }
+  // Pressing reverse while moving forward engages strong service brakes first
+  if (moveForward < -0.05 && currentSpeed > 0.6) {
+    const next = Math.max(0, currentSpeed - acceleration * 2.55 * Math.abs(moveForward) * dt);
+    return { speed: next, isBraking: true };
+  }
+  // Pressing forward while reversing engages brakes first
+  if (moveForward > 0.05 && currentSpeed < -0.6) {
+    const next = Math.min(0, currentSpeed + acceleration * 2.55 * moveForward * dt);
+    return { speed: next, isBraking: true };
+  }
+  if (Math.abs(moveForward) > 0.01) {
+    const accelMult = moveForward < 0 ? 0.68 : 1.0;
+    const raw = currentSpeed + moveForward * acceleration * accelMult * dt;
+    const clamped = Math.max(-maxSpeed * 0.42, Math.min(maxSpeed, raw));
+    return { speed: clamped, isBraking: false };
+  }
+  // Natural coasting roll drag
+  return { speed: currentSpeed * Math.exp(-1.85 * dt), isBraking: false };
+}
+
+/**
+ * Computes GTA-style Hospital Respawn (RS Cipto Mangunkusumo) state after Wasted:
+ * preserves all missions, properties, weapons & vehicles while charging a 5% medical fee (max Rp 50,000).
+ */
+export function computeHospitalRespawnState(
+  prev: PlayerProgressState
+): { nextState: PlayerProgressState; billRp: number; spawnX: number; spawnZ: number } {
+  const billRp = Math.min(50_000, Math.round(prev.rupiah * 0.05));
+  return {
+    nextState: {
+      ...prev,
+      hp: prev.maxHp,
+      rupiah: Math.max(0, prev.rupiah - billRp),
+      wantedLevel: 0,
+      wantedEvading: false,
+      wantedEvadeTimer: 0,
+      fokusActive: false,
+      currentInterior: 'exterior',
+    },
+    billRp,
+    spawnX: 12,
+    spawnZ: 22,
+  };
+}

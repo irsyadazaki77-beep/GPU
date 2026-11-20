@@ -9,10 +9,13 @@ import {
   TRAFFIC_ROUTES,
   WORLD_MAX_BOUND,
   collectNusantaraPackage,
+  computeHospitalRespawnState,
   computeNearMissBonus,
+  computeSpeedSensitiveTurnRate,
   createCustomRaceTrackSpec,
   createInitialPlayerState,
   resolveCombatComboState,
+  stepVehicleLongitudinalSpeed,
 } from './rules';
 import { gameStore } from '../state/gameStore';
 
@@ -165,4 +168,36 @@ test('Wave 3 combat takedown combo streaks and high-speed near-miss adrenaline b
 
   const nmCooldown = computeNearMissBonus(29, 3.1, false, 10_000, 10_000 + NEAR_MISS_COOLDOWN_MS - 200);
   assert.equal(nmCooldown.triggered, false);
+});
+
+test('GTA driving braking vs reverse, speed-sensitive steering, and Hospital Respawn preserve progress', () => {
+  // Pressing reverse while moving forward engages service brakes to 0 instead of reversing immediately
+  const brakeStep = stepVehicleLongitudinalSpeed(18, -1, 14, 34, false, false, 0.25);
+  assert.equal(brakeStep.isBraking, true);
+  assert.ok(brakeStep.speed < 18 && brakeStep.speed >= 0);
+
+  // From standstill, pressing reverse engages reverse gear
+  const revStep = stepVehicleLongitudinalSpeed(0, -1, 14, 34, false, false, 0.25);
+  assert.equal(revStep.isBraking, false);
+  assert.ok(revStep.speed < 0);
+
+  // Speed-sensitive steering is sharper at low city speed than at highway top speed
+  const lowSpeedTurn = computeSpeedSensitiveTurnRate(2.4, 4, 34, false, 1);
+  const highSpeedTurn = computeSpeedSensitiveTurnRate(2.4, 32, 34, false, 1);
+  assert.ok(lowSpeedTurn > highSpeedTurn);
+
+  // Hospital respawn preserves weapons/missions, clears wanted, heals full HP, caps bill at 50k
+  const wounded = {
+    ...createInitialPlayerState('anak_jalanan'),
+    hp: 0,
+    rupiah: 2_000_000,
+    wantedLevel: 4,
+    completedMissions: ['ch1_m1', 'ch1_m2'],
+  };
+  const respawn = computeHospitalRespawnState(wounded);
+  assert.equal(respawn.billRp, 50_000);
+  assert.equal(respawn.nextState.hp, wounded.maxHp);
+  assert.equal(respawn.nextState.wantedLevel, 0);
+  assert.equal(respawn.nextState.rupiah, 1_950_000);
+  assert.deepEqual(respawn.nextState.completedMissions, ['ch1_m1', 'ch1_m2']);
 });

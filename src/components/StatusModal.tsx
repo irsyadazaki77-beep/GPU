@@ -40,6 +40,7 @@ interface StatusModalProps {
   muted?: boolean;
   onResume: () => void;
   onRestart: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  onHospitalRespawn?: () => void;
   onReturnTitle: () => void;
   onFastTravel?: (districtId: string) => void;
   onTeleportCoords?: (x: number, z: number, label: string) => void;
@@ -98,6 +99,7 @@ export const StatusModal: React.FC<StatusModalProps> = ({
   muted = false,
   onResume,
   onRestart,
+  onHospitalRespawn,
   onReturnTitle,
   onFastTravel,
   onTeleportCoords,
@@ -182,14 +184,35 @@ export const StatusModal: React.FC<StatusModalProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-            <button
-              type="button"
-              data-start="true"
-              onClick={onRestart}
-              className="flex-1 min-w-[200px] py-3 px-6 rounded-lg bg-[#f59e0b] hover:bg-[#fbbf24] text-[#090c12] font-display text-xl font-extrabold uppercase tracking-wider cursor-pointer transition-colors"
-            >
-              {isVictory ? 'Mainkan Lagi' : 'Bangkit Kembali [Enter]'}
-            </button>
+            {!isVictory && onHospitalRespawn ? (
+              <button
+                type="button"
+                data-start="true"
+                data-testid="hospital-respawn-btn"
+                onClick={onHospitalRespawn}
+                className="flex-1 min-w-[220px] py-3 px-6 rounded-lg bg-[#f59e0b] hover:bg-[#fbbf24] text-[#090c12] font-display text-xl font-extrabold uppercase tracking-wider cursor-pointer transition-colors"
+              >
+                Keluar RS Cipto (Biaya 5%)
+              </button>
+            ) : (
+              <button
+                type="button"
+                data-start="true"
+                onClick={onRestart}
+                className="flex-1 min-w-[200px] py-3 px-6 rounded-lg bg-[#f59e0b] hover:bg-[#fbbf24] text-[#090c12] font-display text-xl font-extrabold uppercase tracking-wider cursor-pointer transition-colors"
+              >
+                Mainkan Lagi
+              </button>
+            )}
+            {!isVictory && onHospitalRespawn && (
+              <button
+                type="button"
+                onClick={onRestart}
+                className="py-3 px-5 rounded-lg bg-white/10 hover:bg-white/15 text-[#cbd5e1] font-display text-base font-bold uppercase tracking-wider cursor-pointer transition-colors"
+              >
+                Ulang Awal
+              </button>
+            )}
             <button
               type="button"
               onClick={onReturnTitle}

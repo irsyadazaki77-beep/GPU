@@ -48,6 +48,7 @@ export interface VehicleEntity extends TrafficAISteppable {
   routeId: TrafficRouteId;
   driftAngle: number;
   isDrifting: boolean;
+  isBraking?: boolean;
   pitchAngle: number;
   rollAngle: number;
   damage: VehicleDamageState;
@@ -642,6 +643,7 @@ export class TrafficSystem {
       if (tailMat) {
         const isBraking =
           v.isDrifting ||
+          Boolean(v.isBraking) ||
           (v.id === drivingVehicleId && v.speed < -0.2) ||
           (v.isTraffic && (v.speed < 1.5 || (v.hornReactionTimer ?? 0) > 1.0));
         tailMat.emissiveIntensity = isBraking ? 3.2 : 0.72 + nightFactor * 0.65;
@@ -854,7 +856,34 @@ export class TrafficSystem {
 
     for (let vi = 0; vi < this.vehicles.length; vi++) {
       const v = this.vehicles[vi];
-      if (!v.isTraffic || v.id === drivingVehicleId) continue;
+      if (v.id === drivingVehicleId) continue;
+      if (!v.isTraffic) {
+        // Unmanned coasting momentum (e.g. after GTA high-speed bail-out)
+        if (Math.abs(v.speed) > 0.25) {
+          v.speed *= Math.exp(-2.1 * simDt);
+          const nx = v.x + Math.sin(v.heading) * v.speed * simDt;
+          const nz = v.z + Math.cos(v.heading) * v.speed * simDt;
+          const col = resolveCircleAABBCollision(
+            nx,
+            nz,
+            VEHICLE_SPECS[v.type].radius,
+            undefined,
+            this.buildingGrid
+          );
+          if (col.collided) {
+            v.speed *= -0.2;
+          }
+          v.x = col.x;
+          v.z = col.z;
+          v.y = getGroundElevationAt(v.x, v.z);
+          v.mesh.position.set(v.x, v.y, v.z);
+          v.mesh.rotation.y = v.heading;
+        } else if (v.speed !== 0) {
+          v.speed = 0;
+          v.isBraking = false;
+        }
+        continue;
+      }
 
       if (
         (v.type === 'polisi' && pState.wantedLevel > 0) ||

@@ -753,9 +753,9 @@ export const GameHud: React.FC<GameHudProps> = ({
         </div>
       ) : (
       <div className="flex items-start justify-between gap-2 sm:gap-4">
-        {/* TOP-LEFT: Frameless Active Objective OR Transient District Reveal */}
+        {/* TOP-LEFT: Clean Contextual Mission / Contract / Police / GPS ONLY (GTA V style, zero permanent clutter) */}
         <div className="flex flex-col gap-2 flex-1 max-w-sm min-w-0">
-          {activeMission && activeChoice ? (
+          {activeMission && activeChoice && (
             <div className="aaa-glass-subtle rounded-lg px-3 py-2 sm:px-3.5 sm:py-2.5 shadow-lg pointer-events-auto animate-aaa-up">
               <div className="flex items-center justify-between gap-2 sm:gap-3">
                 <span className="text-xs font-semibold text-[#f59e0b] truncate">
@@ -782,52 +782,9 @@ export const GameHud: React.FC<GameHudProps> = ({
                 />
               </div>
             </div>
-          ) : (
-            <div className="aaa-glass-subtle rounded-lg border-l-2 border-l-[#f59e0b] px-2.5 py-1.5 sm:px-3.5 sm:py-2 flex flex-col gap-0.5 shadow-xl min-w-0">
-              <div className="flex items-center gap-1.5 sm:gap-2 text-xs font-medium text-[#e2e8f0] hud-stroke-sm min-w-0">
-                <span className="font-display text-sm sm:text-base md:text-lg font-bold uppercase tracking-wide text-[#f4f1ea] truncate">
-                  {district.name}
-                </span>
-                <span aria-hidden="true" className="text-[#f59e0b] shrink-0">
-                  ·
-                </span>
-                <span className="font-mono-num text-[11px] font-bold text-[#fef08a] whitespace-nowrap shrink-0">
-                  {formatJakartaClock(worldTimeMinutes)}
-                </span>
-                <span aria-hidden="true" className="hidden sm:inline text-[#f59e0b] shrink-0">
-                  ·
-                </span>
-                <span className="hidden sm:inline text-[#cbd5e1] whitespace-nowrap">
-                  {weatherSpec.label}
-                </span>
-              </div>
-              <div className="text-[10px] sm:text-[11px] font-mono-num text-[#94a3b8] hud-stroke-sm flex items-center gap-1.5 flex-wrap">
-                <span>
-                  Babak {playerState.completedMissions.length}/15 · Heist{' '}
-                  {playerState.completedHeists.length}/3
-                  {playerState.currentInterior !== 'exterior' && ' · Interior'}
-                </span>
-                {playerState.staminaBuffTimer > 0 && (
-                  <>
-                    <span aria-hidden="true" className="text-[#64748b]">·</span>
-                    <span className="text-[#34d399] font-bold">
-                      Stamina +{Math.ceil(playerState.staminaBuffTimer)}d
-                    </span>
-                  </>
-                )}
-                {ambientCueLabel && !muted && playerState.currentInterior === 'exterior' && (
-                  <>
-                    <span aria-hidden="true" className="hidden sm:inline text-[#64748b]">·</span>
-                    <span className="hidden sm:inline text-[#38bdf8] font-sans font-medium">
-                      {ambientCueLabel}
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
           )}
 
-          {/* Active Open-World Street Contract (Kurir Ojol Kilat / Konvoi Lapis Baja / Rebut Teritori) */}
+          {/* Active Open-World Street Contract */}
           {activeContract && (
             <div className="aaa-glass-subtle rounded-lg border-l-2 border-l-[#22c55e] px-3 py-2 flex flex-col gap-1 pointer-events-auto animate-aaa-up max-w-xs">
               <div className="flex items-center justify-between gap-2 text-xs">
@@ -844,112 +801,18 @@ export const GameHud: React.FC<GameHudProps> = ({
             </div>
           )}
 
-          {/* World Clock Ticker Event: Traffic Jam / Road Construction & Detour Tracker */}
-          {activeRoadEvent && (
-            <div
-              data-testid="world-clock-road-event-banner"
-              className={`aaa-glass-subtle rounded-lg border-l-2 ${
-                activeRoadEvent.spec.kind === 'road_construction'
-                  ? 'border-l-[#f97316]'
-                  : 'border-l-[#ef4444]'
-              } px-3 py-2 flex flex-col gap-1 pointer-events-auto animate-aaa-up max-w-xs shadow-lg`}
-            >
-              <div className="flex items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <svg
-                    viewBox="0 0 24 24"
-                    className={`w-3.5 h-3.5 shrink-0 ${
-                      activeRoadEvent.spec.kind === 'road_construction'
-                        ? 'text-[#f97316]'
-                        : 'text-[#ef4444]'
-                    }`}
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                  >
-                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                    <line x1="12" y1="9" x2="12" y2="13" />
-                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                  </svg>
-                  <span
-                    className={`font-bold truncate ${
-                      activeRoadEvent.spec.kind === 'road_construction'
-                        ? 'text-[#fb923c]'
-                        : 'text-[#f87171]'
-                    }`}
-                  >
-                    {activeRoadEvent.spec.kind === 'road_construction'
-                      ? 'PROYEK JALAN'
-                      : 'MACET MENDADAK'}
-                  </span>
-                </div>
-                <span className="font-mono-num text-[11px] font-bold text-[#fef08a] shrink-0">
-                  {Math.ceil(activeRoadEvent.remainingSec)}d
-                </span>
-              </div>
-              <div className="text-xs font-semibold text-[#f4f1ea] truncate">
-                {activeRoadEvent.spec.title}
-              </div>
-              <div className="text-[11px] text-[#38bdf8] truncate">
-                Jalur Alternatif: {activeRoadEvent.spec.detourLabel}
-                {!activeRoadEvent.detourCompleted &&
-                  ` (${Math.min(
-                    activeRoadEvent.detourStageIndex + 1,
-                    activeRoadEvent.spec.detourWaypoints.length
-                  )}/${activeRoadEvent.spec.detourWaypoints.length})`}
-              </div>
-              <div className="flex items-center gap-1.5 pt-1">
-                <button
-                  type="button"
-                  data-testid="activate-road-event-detour-btn"
-                  onClick={() => gameStore.activateRoadEventDetourGps()}
-                  className="flex-1 py-1 px-2 rounded bg-[#38bdf8]/20 hover:bg-[#38bdf8] text-[#38bdf8] hover:text-[#090c12] text-[10px] font-mono-num font-bold cursor-pointer transition-colors truncate"
-                >
-                  {activeRoadEvent.detourCompleted
-                    ? 'Rute Alternatif Tuntas ✓'
-                    : 'Pasang GPS Rute Alternatif'}
-                </button>
-                <button
-                  type="button"
-                  data-testid="trigger-next-road-event-btn"
-                  onClick={() => gameStore.triggerNextWorldRoadEvent()}
-                  title="Simulasi Insiden Jam Dunia Berikutnya"
-                  className="py-1 px-2 rounded bg-white/8 hover:bg-white/15 text-[#cbd5e1] hover:text-white text-[10px] font-mono-num cursor-pointer transition-colors shrink-0"
-                >
-                  Berikutnya
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* Custom GPS Waypoint Tracker Pill */}
           {customWaypoint && waypointDistanceM !== null && (
             <div
               data-testid="custom-gps-waypoint-pill"
-              className={`aaa-glass-subtle rounded-lg border-l-2 ${
-                customWaypoint.category === 'detour'
-                  ? 'border-l-[#38bdf8]'
-                  : 'border-l-[#c084fc]'
-              } px-3 py-1.5 flex items-center justify-between gap-2 pointer-events-auto animate-aaa-up max-w-xs`}
+              className="aaa-glass-subtle rounded-lg border-l-2 border-l-[#38bdf8] px-3 py-1.5 flex items-center justify-between gap-2 pointer-events-auto animate-aaa-up max-w-xs"
             >
               <div className="min-w-0 flex items-center gap-2 text-xs">
-                <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${
-                    customWaypoint.category === 'detour'
-                      ? 'bg-[#38bdf8]'
-                      : 'bg-[#c084fc]'
-                  }`}
-                />
+                <span className="w-2 h-2 rounded-full shrink-0 bg-[#38bdf8]" />
                 <span className="font-semibold text-[#f4f1ea] truncate">
                   {customWaypoint.label}
                 </span>
-                <span
-                  className={`font-mono-num font-bold shrink-0 ${
-                    customWaypoint.category === 'detour'
-                      ? 'text-[#38bdf8]'
-                      : 'text-[#c084fc]'
-                  }`}
-                >
+                <span className="font-mono-num font-bold shrink-0 text-[#38bdf8]">
                   {waypointDistanceM}m
                 </span>
               </div>
@@ -964,7 +827,7 @@ export const GameHud: React.FC<GameHudProps> = ({
             </div>
           )}
 
-          {/* Tactical Police AI Status (Witness Reporting / LKP Search / Live Radio Callout) */}
+          {/* Tactical Police AI Status (ONLY when active witness or wanted pursuit) */}
           {(policeTactical.phase !== 'clear' ||
             (playerState.wantedLevel > 0 && policeTactical.radioCallout)) && (
             <div
@@ -975,7 +838,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                   : policeTactical.phase === 'searching_lkp'
                   ? 'border-l-[#38bdf8]'
                   : 'border-l-[#ef4444]'
-              } px-3 py-2 flex flex-col gap-1 pointer-events-auto animate-aaa-up max-w-xs shadow-lg`}
+              } px-3 py-1.5 flex flex-col gap-1 pointer-events-auto animate-aaa-up max-w-xs shadow-lg`}
             >
               <div className="flex items-center justify-between gap-2 text-[11px] font-mono-num">
                 <span
@@ -990,8 +853,8 @@ export const GameHud: React.FC<GameHudProps> = ({
                   {policeTactical.phase === 'witness_reporting'
                     ? 'Saksi Melapor 110'
                     : policeTactical.phase === 'searching_lkp'
-                    ? 'Menyisir Lokasi Terakhir (LKP)'
-                    : 'Radio Taktis Metro'}
+                    ? 'Polisi Menyisir Area'
+                    : 'Radio Metro'}
                 </span>
                 {policeTactical.phase === 'witness_reporting' && (
                   <span className="font-bold text-[#fef08a]">
@@ -1014,223 +877,109 @@ export const GameHud: React.FC<GameHudProps> = ({
               )}
             </div>
           )}
-
-          {/* Living Jakarta Street Random Event Card (when no Road Event banner is occupying stack) */}
-          {!activeRoadEvent &&
-            !activeMission &&
-            activeStreetEvent &&
-            activeStreetEvent.status === 'active' &&
-            playerState.currentInterior === 'exterior' && (
-              <div
-                data-testid="street-random-event-banner"
-                className="aaa-glass-subtle rounded-lg border-l-2 border-l-[#ff6b4a] px-3 py-2 flex flex-col gap-1 pointer-events-auto animate-aaa-up max-w-xs shadow-lg"
-              >
-                <div className="flex items-center justify-between gap-2 text-[11px] font-mono-num">
-                  <span className="font-bold uppercase text-[#ff6b4a] truncate">
-                    Event Jalanan · {activeStreetEvent.districtName}
-                  </span>
-                  <span className="text-[#fef08a] font-bold shrink-0">
-                    {Math.ceil(activeStreetEvent.remainingSec)}d
-                  </span>
-                </div>
-                <div className="text-xs font-semibold text-[#f4f1ea] truncate">
-                  {activeStreetEvent.title}
-                </div>
-                <div className="flex items-center justify-between gap-2 pt-0.5 text-[10px] font-mono-num">
-                  <span className="text-[#22c55e] font-bold">
-                    +{formatRupiah(activeStreetEvent.rewardRp)} · +{activeStreetEvent.cloutXp} Clout
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      gameStore.setCustomWaypoint({
-                        x: activeStreetEvent.x,
-                        z: activeStreetEvent.z,
-                        label: activeStreetEvent.title,
-                        category: 'custom',
-                      })
-                    }
-                    className="text-[#38bdf8] hover:text-white font-bold cursor-pointer"
-                  >
-                    Pin GPS ›
-                  </button>
-                </div>
-              </div>
-            )}
-
-          {/* Transient District Toast when moving across Jakarta */}
-          {districtToast && activeMission && (
-            <div className="animate-aaa-up aaa-glass-subtle rounded-lg px-3 py-1.5 border-l-2 border-l-[#38bdf8]">
-              <div className="font-display text-xl font-extrabold italic uppercase tracking-wide text-[#f4f1ea] hud-stroke">
-                {district.name}
-              </div>
-              <div className="text-xs text-[#cbd5e1] hud-stroke-sm">
-                {district.subtitle}
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* TOP-RIGHT: GTA V Wanted Stars + Cash + Weapon + Discreet Corner Icons */}
+        {/* TOP-RIGHT: Frameless GTA V Wanted Stars (only when wanted), Cash, Weapon & 2 Discreet Icons */}
         <div className="flex flex-col items-end gap-1.5 pointer-events-auto shrink-0">
-          <div className="aaa-glass-subtle rounded-lg px-3.5 py-2 flex flex-col items-end gap-1 shadow-xl border-r-2 border-r-[#22c55e]/70">
-            {/* Row 1: Wanted Stars + Cash */}
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                {playerState.wantedLevel > 0 &&
-                  playerState.wantedEvadeTimer > 0 && (
-                    <span className="px-2 py-0.5 rounded text-[11px] font-mono-num font-bold bg-[#0a0d14]/90 text-[#38bdf8] border border-[#38bdf8]/40 whitespace-nowrap">
-                      Lolos {Math.ceil(playerState.wantedEvadeTimer)}d
-                    </span>
-                  )}
+          <div className="flex flex-col items-end gap-0.5 px-1">
+            {playerState.wantedLevel > 0 && (
+              <div className="flex items-center gap-1.5 mb-0.5">
+                {playerState.wantedEvadeTimer > 0 && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono-num font-bold bg-[#0a0d14]/85 text-[#38bdf8] whitespace-nowrap">
+                    Lolos {Math.ceil(playerState.wantedEvadeTimer)}d
+                  </span>
+                )}
                 <div
                   className="flex items-center gap-0.5"
                   aria-label={`Tingkat Buronan Polisi ${playerState.wantedLevel} dari 5`}
                 >
-                  {[1, 2, 3, 4, 5].map((star) => {
-                    const active = star <= playerState.wantedLevel;
-                    return (
-                      <span
-                        key={star}
-                        className={`text-base leading-none ${
-                          active
-                            ? 'wanted-siren-star'
-                            : 'text-white/25 hud-stroke-sm'
-                        }`}
-                      >
-                        ★
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="flex flex-col items-end">
-                <div className="flex items-baseline gap-2">
-                  {passiveIncome > 0 && (
-                    <span className="text-[11px] font-mono-num font-semibold text-[#38bdf8] hud-stroke-sm whitespace-nowrap">
-                      +{formatRupiah(passiveIncome)}
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <span
+                      key={star}
+                      className={`text-lg leading-none ${
+                        star <= playerState.wantedLevel
+                          ? 'wanted-siren-star'
+                          : 'text-white/20 hud-stroke-sm'
+                      }`}
+                    >
+                      ★
                     </span>
-                  )}
-                  <span className="font-display text-base sm:text-xl md:text-2xl font-extrabold text-[#22c55e] hud-stroke tracking-tight whitespace-nowrap font-mono-num">
-                    {formatRupiah(playerState.rupiah)}
-                  </span>
+                  ))}
                 </div>
-
-                {cashDelta !== null && (
-                  <div
-                    className={`font-mono-num text-xs font-bold hud-stroke-sm whitespace-nowrap ${
-                      cashDelta >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'
-                    }`}
-                  >
-                    {cashDelta >= 0
-                      ? `+${formatRupiah(cashDelta)}`
-                      : `-${formatRupiah(Math.abs(cashDelta))}`}
-                  </div>
-                )}
               </div>
+            )}
+
+            <div className="flex flex-col items-end">
+              <span className="font-display text-lg sm:text-2xl font-extrabold text-[#22c55e] hud-stroke tracking-tight whitespace-nowrap font-mono-num leading-none">
+                {formatRupiah(playerState.rupiah)}
+              </span>
+              {cashDelta !== null && (
+                <div
+                  className={`font-mono-num text-xs font-bold hud-stroke-sm whitespace-nowrap mt-0.5 ${
+                    cashDelta >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'
+                  }`}
+                >
+                  {cashDelta >= 0
+                    ? `+${formatRupiah(cashDelta)}`
+                    : `-${formatRupiah(Math.abs(cashDelta))}`}
+                </div>
+              )}
             </div>
 
-            {/* Row 2: Active Weapon Readout (click opens Weapon Wheel) */}
             <button
               type="button"
               onClick={onOpenWeaponWheel}
               title="Buka Roda Senjata [Y]"
-              className="flex items-center gap-2.5 pt-1 border-t border-white/10 w-full justify-end text-right cursor-pointer group"
+              className="flex items-center gap-2 mt-1 text-right cursor-pointer group"
             >
               <div className="text-[#f4f1ea] group-hover:text-[#f59e0b] transition-colors drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">
                 <WeaponSilhouetteSvg
                   weaponId={playerState.activeWeapon}
-                  className="w-10 h-4"
+                  className="w-9 h-3.5"
                 />
               </div>
-              <div className="flex flex-col items-end">
-                <span className="font-display text-xs md:text-sm font-bold uppercase tracking-wide text-[#f4f1ea] group-hover:text-[#f59e0b] transition-colors hud-stroke-sm leading-none whitespace-nowrap">
-                  {currentWeaponSpec.name}
-                </span>
-                <span className="font-mono-num text-[11px] font-semibold text-[#cbd5e1] hud-stroke-sm mt-0.5 whitespace-nowrap">
-                  {currentWeaponSpec.isMelee
-                    ? 'Jarak Dekat'
-                    : `${playerState.ammo[playerState.activeWeapon] || 0} / ${
-                        currentWeaponSpec.maxAmmo
-                      }`}
-                </span>
-              </div>
+              <span className="font-mono-num text-xs font-bold text-[#f4f1ea] hud-stroke-sm whitespace-nowrap">
+                {currentWeaponSpec.isMelee
+                  ? currentWeaponSpec.name
+                  : `${playerState.ammo[playerState.activeWeapon] || 0}`}
+              </span>
             </button>
           </div>
 
-          {/* Row 3: Discreet Corner Utility Icons (Photo Mode, Zen HUD, Phone & Pause Menu) */}
-          <div className="flex items-center gap-1.5 mt-0.5">
-            {gamepadActive && (
-              <span
-                title="Kontroler Gamepad Terhubung"
-                className="px-2 py-1 rounded-md aaa-glass-subtle text-[10px] font-mono-num text-[#22c55e] hidden sm:inline-flex items-center gap-1"
-              >
-                PAD
-              </span>
-            )}
-            {onOpenPhotoMode && (
+          <div className="flex items-center gap-1.5 mt-0.5 opacity-80 hover:opacity-100 transition-opacity">
+            {onTriggerProtagonistAbility && (
               <button
                 type="button"
-                onClick={onOpenPhotoMode}
-                title="Studio Kamera Sinematik / Photo Mode [N]"
-                className="px-2 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-xs font-medium text-[#e2e8f0] transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1"
+                data-testid="trio-ability-btn"
+                onClick={onTriggerProtagonistAbility}
+                title="Skill Khusus Protagonis [L]"
+                className={`px-1.5 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-[10px] font-mono-num font-bold transition-colors cursor-pointer ${
+                  (playerState.activeProtagonist === 'kirana' && kiranaHackState.active) ||
+                  (playerState.activeProtagonist !== 'kirana' &&
+                    trioAbilityBuffUntilMs > Date.now())
+                    ? 'text-[#22d3ee]'
+                    : 'text-[#94a3b8] hover:text-white'
+                }`}
               >
-                <svg
-                  viewBox="0 0 24 24"
-                  className="w-3.5 h-3.5 text-[#c084fc]"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
-                  <circle cx="12" cy="13" r="4" />
-                </svg>
-                <span className="hidden sm:inline font-mono-num text-[11px]">N</span>
-              </button>
-            )}
-            {onOpenImperium && (
-              <button
-                type="button"
-                onClick={onOpenImperium}
-                data-testid="open-imperium-btn"
-                title="Imperium, Tantangan Harian, Balap Liar & Stunt Ramp"
-                className="relative px-2 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-[11px] font-mono-num font-bold text-[#f59e0b] transition-colors cursor-pointer whitespace-nowrap"
-              >
-                Imperium
-                {claimableChallengesCount > 0 && (
-                  <span className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-[#22c55e] text-[#090c12] text-[10px] font-extrabold">
-                    {claimableChallengesCount}
-                  </span>
-                )}
+                [L]
               </button>
             )}
             <button
               type="button"
               onClick={() => gameStore.togglePerfOverlay()}
               data-testid="toggle-perf-overlay-btn"
-              title="Overlay Telemetri 60FPS, Rapier3D & Co-Op Multiplayer [F8]"
-              className={`px-2 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-[11px] font-mono-num transition-colors cursor-pointer whitespace-nowrap ${
-                perfOverlayOpen
-                  ? 'text-[#22c55e] border border-[#22c55e]/50'
-                  : 'text-[#94a3b8] hover:text-white'
+              title="Telemetri Engine [F8]"
+              className={`px-1.5 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-[10px] font-mono-num transition-colors cursor-pointer ${
+                perfOverlayOpen ? 'text-[#22c55e]' : 'text-[#94a3b8]/70 hover:text-white'
               }`}
             >
-              [F8]
-            </button>
-            <button
-              type="button"
-              onClick={() => gameStore.setState({ zenHudMode: true })}
-              title="Mode Layar Bersih / Zen HUD [U]"
-              className="hidden sm:flex px-2 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-[11px] font-mono-num text-[#94a3b8] hover:text-white transition-colors cursor-pointer whitespace-nowrap"
-            >
-              [U]
+              FPS
             </button>
             <button
               type="button"
               onClick={onTogglePhone}
-              title="Buka iFruit Phone [Tab]"
-              className="px-2.5 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-xs font-medium text-[#e2e8f0] transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5"
+              title="Buka Nabilo Phone [Tab]"
+              className="px-2 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-xs font-medium text-[#e2e8f0] transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -1242,13 +991,13 @@ export const GameHud: React.FC<GameHudProps> = ({
                 <rect x="6" y="2" width="12" height="20" rx="2.5" />
                 <line x1="10" y1="18" x2="14" y2="18" />
               </svg>
-              <span className="font-mono-num text-[11px]">Tab</span>
+              <span className="font-mono-num text-[10px]">Tab</span>
             </button>
             <button
               type="button"
               onClick={onPause}
-              title="Menu Jeda & Peta Interaktif [Esc / P]"
-              className="px-2.5 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-xs font-medium text-[#e2e8f0] transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5"
+              title="Menu Jeda & Peta [Esc / P]"
+              className="px-2 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-xs font-medium text-[#e2e8f0] transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -1261,7 +1010,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 <line x1="4" y1="12" x2="20" y2="12" />
                 <line x1="4" y1="17" x2="20" y2="17" />
               </svg>
-              <span className="font-mono-num text-[11px]">Esc</span>
+              <span className="font-mono-num text-[10px]">Esc</span>
             </button>
           </div>
 
@@ -1602,7 +1351,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                     : `${activeRadioSpec.id === 'off' ? 'Radio Off' : activeRadioSpec.freq} · Turbo Lv.${playerState.vehicleUpgradeLevel}`}
                 </span>
                 {activeVehicleDamage &&
-                  (activeVehicleDamage.integrity < 95 ||
+                  (activeVehicleDamage.integrity < 85 ||
                     activeVehicleDamage.puncturedTires.some(Boolean)) && (
                     <div className="flex items-center gap-2 mt-1 text-[10px] font-mono-num">
                       <span
@@ -1618,12 +1367,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                       </span>
                       {activeVehicleDamage.puncturedTires.some(Boolean) && (
                         <span className="text-[#ef4444] font-bold">
-                          · Ban Pecah!
-                        </span>
-                      )}
-                      {activeVehicleDamage.smokeStage === 'fire' && (
-                        <span className="text-[#f97316] font-bold">
-                          · Mesin Terbakar!
+                          · Ban Pecah
                         </span>
                       )}
                       {onRepairVehicle && (
@@ -1637,218 +1381,21 @@ export const GameHud: React.FC<GameHudProps> = ({
                       )}
                     </div>
                   )}
-                <div className="flex items-center gap-1.5 sm:gap-2 mt-1.5 text-[10px] sm:text-[11px] font-mono-num">
-                  <button
-                    type="button"
-                    onClick={() => gameStore.cycleRadioStation()}
-                    title="Ganti Stasiun Radio FM Jakarta [R]"
-                    className="text-[#38bdf8] hover:text-[#7dd3fc] cursor-pointer transition-colors"
-                  >
-                    [R]<span className="hidden sm:inline"> Radio</span>
-                  </button>
-                  <span className="text-white/20">·</span>
-                  {onHonk && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={onHonk}
-                        title="Bunyikan Klakson untuk reaksi Ojol/Angkot [H / K]"
-                        className="text-[#facc15] hover:text-[#fef08a] cursor-pointer transition-colors"
-                      >
-                        [H/K]<span className="hidden sm:inline"> Klakson</span>
-                      </button>
-                      <span className="text-white/20">·</span>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    onClick={onToggleFokus}
-                    className={`cursor-pointer transition-colors ${
-                      playerState.fokusActive
-                        ? 'text-[#38bdf8] font-bold'
-                        : 'text-[#cbd5e1] hover:text-white'
-                    }`}
-                  >
-                    [Q]<span className="hidden sm:inline"> Nitro</span>
-                  </button>
-                  <span className="text-white/20">·</span>
-                  <button
-                    type="button"
-                    onClick={onOpenCustomsGarage}
-                    className="text-[#c084fc] hover:text-[#e9d5ff] cursor-pointer transition-colors"
-                  >
-                    [B]<span className="hidden sm:inline"> Bengkel</span>
-                  </button>
-                  <span className="text-white/20">·</span>
-                  <span
-                    title="Klik Kiri mouse sambil menyetir untuk tembak Drive-By 360°"
-                    className="text-[#f87171] font-semibold"
-                  >
-                    [Klik] Drive-By
-                  </span>
-                </div>
               </div>
             </div>
           )}
 
-          {/* Wave 2 Tactical Squad Orders, Camera Mode [V] & Cover [X] Strip */}
-          <div className="hidden sm:flex items-center gap-1.5 aaa-glass-subtle px-2 py-1 rounded-lg text-[10px] font-mono-num">
-            {onCycleCamera && (
-              <button
-                type="button"
-                onClick={onCycleCamera}
-                data-testid="hud-camera-cycle-btn"
-                title="Ganti Sudut Kamera [V]"
-                className="px-1.5 py-0.5 rounded text-[#cbd5e1] hover:bg-white/10 hover:text-white cursor-pointer"
-              >
-                [V] {CAMERA_VIEW_LABELS[cameraViewMode]}
-              </button>
-            )}
-            {!drivingVehicle && onToggleCover && (
-              <>
-                <span className="text-white/20">·</span>
-                <button
-                  type="button"
-                  onClick={onToggleCover}
-                  data-testid="hud-cover-toggle-btn"
-                  title="Masuk/Keluar Cover Taktis [X]"
-                  className={`px-1.5 py-0.5 rounded font-bold cursor-pointer transition-colors ${
-                    inCover
-                      ? 'bg-[#22c55e] text-[#090c12]'
-                      : 'text-[#94a3b8] hover:bg-white/10 hover:text-white'
-                  }`}
-                >
-                  [X] {inCover ? 'Cover Aktif' : 'Cover'}
-                </button>
-              </>
-            )}
-            {!drivingVehicle && onSquadOrder && (
-              <>
-                <span className="text-white/20">·</span>
-                <span className="text-[#94a3b8]">Kru:</span>
-                {(['follow', 'attack', 'hold'] as SquadOrderMode[]).map(
-                  (ord, idx) => (
-                    <button
-                      key={ord}
-                      type="button"
-                      onClick={() => onSquadOrder(ord)}
-                      className={`px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
-                        squadOrder === ord
-                          ? 'bg-[#38bdf8] text-[#090c12] font-bold'
-                          : 'text-[#94a3b8] hover:bg-white/10 hover:text-white'
-                      }`}
-                    >
-                      [F{idx + 1}] {SQUAD_ORDER_LABELS[ord].split(' ')[0]}
-                    </button>
-                  )
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Compact Protagonist & Tactical Ability Strip */}
-          <div className="flex items-center gap-1 sm:gap-2 aaa-glass-subtle px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-lg max-w-full">
-            {onTriggerProtagonistAbility && (
-              <button
-                type="button"
-                data-testid="trio-ability-btn"
-                onClick={onTriggerProtagonistAbility}
-                title={
-                  playerState.activeProtagonist === 'kirana'
-                    ? 'Retas Siber Distrik: Lampu Hijau & Buta Radar Polisi 20d [L]'
-                    : playerState.activeProtagonist === 'raka'
-                    ? 'Kilat Overdrive: Akselerasi & Lari Maksimal 12d [L]'
-                    : 'Garuda Armor Surge: +25 Armor & Tahan Benturan [L]'
-                }
-                className={`px-1.5 sm:px-2 py-0.5 rounded text-[11px] font-mono-num font-semibold cursor-pointer transition-colors whitespace-nowrap ${
-                  (playerState.activeProtagonist === 'kirana' && kiranaHackState.active) ||
-                  (playerState.activeProtagonist !== 'kirana' &&
-                    trioAbilityBuffUntilMs > Date.now())
-                    ? 'bg-[#22d3ee] text-[#090c12] font-bold'
-                    : 'text-[#67e8f9] hover:bg-white/10'
-                }`}
-              >
-                [L]
-                <span className="hidden sm:inline">
-                  {' '}
-                  {playerState.activeProtagonist === 'kirana'
-                    ? kiranaHackState.active
-                      ? `Hack ${Math.ceil(kiranaHackState.remainingSeconds)}d`
-                      : kiranaHackState.cooldownSeconds > 0
-                      ? `CD ${Math.ceil(kiranaHackState.cooldownSeconds)}d`
-                      : 'Retas'
-                    : playerState.activeProtagonist === 'raka'
-                    ? 'Kilat'
-                    : 'Garuda'}
-                </span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={onToggleFokus}
-              title={`Aktifkan ${activeProtagonistProf.specialAbilityName} [Q]`}
-              className={`px-1.5 sm:px-2 py-0.5 rounded text-[11px] font-mono-num font-semibold cursor-pointer transition-colors whitespace-nowrap ${
-                playerState.fokusActive
-                  ? 'bg-[#facc15] text-[#090c12]'
-                  : 'text-[#fef08a] hover:bg-white/10'
-              }`}
-            >
-              [Q]<span className="hidden sm:inline"> Fokus</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={onToggleDrone}
-              title="Aktifkan/Matikan Drone Rajawali [Z]"
-              className={`px-1.5 sm:px-2 py-0.5 rounded text-[11px] font-mono-num font-semibold cursor-pointer transition-colors whitespace-nowrap ${
-                playerState.droneActive
-                  ? 'bg-[#38bdf8]/20 text-[#38bdf8]'
-                  : 'text-[#94a3b8] hover:bg-white/10'
-              }`}
-            >
-              [Z]<span className="hidden sm:inline"> Drone</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={onOpenWarung}
-              title="Masuk Warung Kopi & Jajanan Nusantara [J]"
-              className={`px-1.5 sm:px-2 py-0.5 rounded text-[11px] font-mono-num font-semibold cursor-pointer transition-colors whitespace-nowrap ${
-                playerState.currentInterior === 'warung' ||
-                playerState.staminaBuffTimer > 0
-                  ? 'bg-[#10b981]/25 text-[#34d399]'
-                  : 'text-[#34d399] hover:bg-white/10'
-              }`}
-            >
-              [J]<span className="hidden sm:inline"> Warung</span>
-              {playerState.staminaBuffTimer > 0 && (
-                <span className="ml-1 text-[#fde047]">
-                  +{Math.ceil(playerState.staminaBuffTimer)}d
-                </span>
-              )}
-            </button>
-
-            <div className="h-3.5 w-[1px] bg-white/15 shrink-0" />
-
-            <button
-              type="button"
-              onClick={onOpenCharacterWheel}
-              title="Buka Roda 3 Protagonis [C]"
-              className="flex items-center gap-1.5 px-1.5 sm:px-2 py-0.5 rounded hover:bg-white/10 cursor-pointer transition-colors whitespace-nowrap"
-            >
-              <span
-                className="w-2 h-2 rounded-full shrink-0"
-                style={{ backgroundColor: activeProtagonistProf.colorHex }}
-              />
-              <span className="font-display text-xs sm:text-sm font-bold uppercase tracking-wide text-[#f4f1ea]">
-                {activeProtagonistProf.name.split(' ')[0]}
-              </span>
-              <span className="hidden sm:inline font-mono-num text-[10px] text-[#94a3b8]">
-                [C]
-              </span>
-            </button>
-          </div>
+          {/* Transient Rockstar-style District Name Reveal (Bottom-Right, fades out cleanly) */}
+          {districtToast && (
+            <div className="text-right pointer-events-none animate-aaa-up px-1">
+              <div className="font-display text-2xl sm:text-3xl font-extrabold italic uppercase tracking-wide text-[#f4f1ea] hud-stroke leading-none">
+                {district.name}
+              </div>
+              <div className="text-xs font-mono-num text-[#cbd5e1] hud-stroke-sm mt-0.5">
+                {district.subtitle} · {formatJakartaClock(worldTimeMinutes)}
+              </div>
+            </div>
+          )}
         </div>
         </div>
       </div>

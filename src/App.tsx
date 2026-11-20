@@ -1514,6 +1514,11 @@ export default function App() {
             e.currentTarget.blur();
             startNewGame(origin, selectedStage);
           }}
+          onHospitalRespawn={() => {
+            const res = gameStore.respawnAtHospital();
+            document.body.dataset.state = 'playing';
+            controllerRef.current?.restoreSavedPosition(res.spawnX, res.spawnZ);
+          }}
           onReturnTitle={() => {
             persistCurrentSave();
             document.body.dataset.state = 'title';

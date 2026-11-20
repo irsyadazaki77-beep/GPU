@@ -63,6 +63,7 @@ import {
   captureDistrictTurf,
   claimDailyChallengeReward,
   collectNusantaraPackage,
+  computeHospitalRespawnState,
   computeViralCloutState,
   createDailyChallengesForDate,
   createInitialKiranaHackState,
@@ -2031,6 +2032,24 @@ export const gameStore = {
       },
     };
     emitChange();
+  },
+
+  respawnAtHospital: () => {
+    const res = computeHospitalRespawnState(state.playerState);
+    soundEngine.playPickup();
+    state = {
+      ...state,
+      gameState: 'playing',
+      playerState: res.nextState,
+      ghostHp: res.nextState.maxHp,
+      activeMission: null,
+      activeChoice: null,
+      combatCombo: null,
+      policeTactical: createInitialPoliceTacticalState(),
+      lastOutcomeText: `Keluar RS Cipto Mangunkusumo · Biaya Medis -Rp ${res.billRp.toLocaleString('id-ID')}`,
+    };
+    emitChange();
+    return res;
   },
 };
 
