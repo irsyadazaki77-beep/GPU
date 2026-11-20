@@ -3,9 +3,11 @@ import {
   CITY_BUILDINGS,
   GRAND_HEISTS,
   JAKARTA_DISTRICTS,
+  JAKARTA_FLOOD_ZONES,
   PROTAGONIST_PROFILES,
   ProtagonistId,
   STREET_RACES,
+  STUNT_RAMPS_CATALOG,
   generateRoadsideSpawnLayout,
 } from '../game/rules';
 import {
@@ -193,6 +195,98 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
         ctx.fillText('$', gx, gz + 0.5);
       }
 
+      // 8b. Monsoon Flood Zones (visible during heavy rain)
+      if (store.weatherMode === 'hujan') {
+        for (let fi = 0; fi < JAKARTA_FLOOD_ZONES.length; fi++) {
+          const fz = JAKARTA_FLOOD_ZONES[fi];
+          const fx = cx + (fz.x - px) * zoom;
+          const fzY = cy + (fz.z - pz) * zoom;
+          ctx.fillStyle = 'rgba(14, 165, 233, 0.24)';
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(fx, fzY, fz.radius * zoom, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+
+      // 8c. 6 Handcrafted Jakarta Stunt Ramps
+      for (let ri = 0; ri < STUNT_RAMPS_CATALOG.length; ri++) {
+        const ramp = STUNT_RAMPS_CATALOG[ri];
+        const rx = cx + (ramp.x - px) * zoom;
+        const rz = cy + (ramp.z - pz) * zoom;
+        const done = store.stuntCompletedIds.includes(ramp.id);
+        ctx.save();
+        ctx.translate(rx, rz);
+        ctx.rotate(-ramp.heading);
+        ctx.fillStyle = done ? '#22c55e' : '#f59e0b';
+        ctx.beginPath();
+        ctx.moveTo(0, -4.5);
+        ctx.lineTo(3.5, 3.5);
+        ctx.lineTo(0, 1.5);
+        ctx.lineTo(-3.5, 3.5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // 8d. Active 3D Turf War Contested Zone Ring
+      if (store.activeTurfWar && store.activeTurfWar.status === 'active') {
+        const tw = store.activeTurfWar;
+        const tx = cx + (tw.centerX - px) * zoom;
+        const tz = cy + (tw.centerZ - pz) * zoom;
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.16)';
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.arc(tx, tz, tw.radius * zoom, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // 8e. Active Street Race Checkpoint & Rival AI Racers
+      if (store.activeRace && store.activeRace.status !== 'finished') {
+        const cp =
+          store.activeRace.checkpoints[store.activeRace.playerCheckpointIndex];
+        if (cp) {
+          const rcx = cx + (cp[0] - px) * zoom;
+          const rcz = cy + (cp[1] - pz) * zoom;
+          ctx.strokeStyle = 'rgba(34, 211, 238, 0.9)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(rcx, rcz);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          ctx.fillStyle = '#22d3ee';
+          ctx.beginPath();
+          ctx.arc(
+            Math.max(8, Math.min(w - 8, rcx)),
+            Math.max(8, Math.min(h - 8, rcz)),
+            5.2,
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+        }
+        const rivals = engineTelemetryRef.raceRivals;
+        for (let vi = 0; vi < rivals.length; vi++) {
+          const rv = rivals[vi];
+          const rvx = cx + (rv.x - px) * zoom;
+          const rvz = cy + (rv.z - pz) * zoom;
+          ctx.fillStyle = `#${rv.colorHex.toString(16).padStart(6, '0')}`;
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(rvx, rvz, 3.6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+
       // 9. GPS Route Dashed Line to Active Objective or Nearby Mission
       const gpsTargetX = activeChoice?.targetX ?? nearbyMission?.markerX;
       const gpsTargetZ = activeChoice?.targetZ ?? nearbyMission?.markerZ;
@@ -313,16 +407,36 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
         ctx.fillText('W', clampedX, clampedZ + 0.5);
       }
 
-      // 10. Inactive Protagonists
-      for (const pId of ['nabilo', 'raka', 'kirana'] as ProtagonistId[]) {
-        if (pId === playerState.activeProtagonist) continue;
-        const pInfo = playerState.protagonistRoster[pId];
-        const rx = cx + (pInfo.x - px) * zoom;
-        const rz = cy + (pInfo.z - pz) * zoom;
-        ctx.fillStyle = PROTAGONIST_PROFILES[pId].colorHex;
-        ctx.beginPath();
-        ctx.arc(rx, rz, 3.2, 0, Math.PI * 2);
-        ctx.fill();
+      // 10. Autonomous 3D Trio Squad Wingmen (Raka & Kirana live telemetry)
+      const squadMembers = engineTelemetryRef.squadMembers;
+      if (squadMembers.length > 0) {
+        for (let si = 0; si < squadMembers.length; si++) {
+          const sm = squadMembers[si];
+          const rx = cx + (sm.x - px) * zoom;
+          const rz = cy + (sm.z - pz) * zoom;
+          ctx.fillStyle = PROTAGONIST_PROFILES[sm.id].colorHex;
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(rx, rz - 4);
+          ctx.lineTo(rx + 4, rz);
+          ctx.lineTo(rx, rz + 4);
+          ctx.lineTo(rx - 4, rz);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+      } else {
+        for (const pId of ['nabilo', 'raka', 'kirana'] as ProtagonistId[]) {
+          if (pId === playerState.activeProtagonist) continue;
+          const pInfo = playerState.protagonistRoster[pId];
+          const rx = cx + (pInfo.x - px) * zoom;
+          const rz = cy + (pInfo.z - pz) * zoom;
+          ctx.fillStyle = PROTAGONIST_PROFILES[pId].colorHex;
+          ctx.beginPath();
+          ctx.arc(rx, rz, 3.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
 
       // 11. Active Enemies
@@ -340,31 +454,109 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
         ctx.fill();
       }
 
-      // 12. Traffic & Police Units (with flashing red-blue siren + vision cone during Wanted pursuit)
-      const sirenFlash = Math.floor(now / 190) % 2 === 0;
-      for (const v of vehicles) {
-        const vx = cx + (v.x - px) * zoom;
-        const vz = cy + (v.z - pz) * zoom;
+      // 11b. Living Jakarta Street Random Event Beacon (Coral Vice-Jakarta Pulse)
+      const activeStreetEv = store.activeStreetEvent;
+      if (activeStreetEv && activeStreetEv.status === 'active') {
+        const sx = cx + (activeStreetEv.x - px) * zoom;
+        const sz = cy + (activeStreetEv.z - pz) * zoom;
+        const clampedSX = Math.max(8, Math.min(w - 8, sx));
+        const clampedSZ = Math.max(8, Math.min(h - 8, sz));
+        const pulseR = 6.5 + Math.sin(now * 0.008) * 2.2;
+        ctx.strokeStyle = 'rgba(255, 107, 74, 0.78)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(clampedSX, clampedSZ, pulseR, 0, Math.PI * 2);
+        ctx.stroke();
 
-        if (v.type === 'polisi' && playerState.wantedLevel > 0) {
+        ctx.fillStyle = '#ff6b4a';
+        ctx.beginPath();
+        ctx.arc(clampedSX, clampedSZ, 4.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#090c12';
+        ctx.font = 'bold 7px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('★', clampedSX, clampedSZ + 0.5);
+      }
+
+      // 11c. Tactical Police Witness Ring & Last Known Position (LKP) Search Zone
+      const tac = store.policeTactical;
+      if (tac.phase === 'witness_reporting') {
+        const wx = cx + (tac.witnessX - px) * zoom;
+        const wz = cy + (tac.witnessZ - pz) * zoom;
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.85)';
+        ctx.lineWidth = 1.6;
+        ctx.setLineDash([3, 2]);
+        ctx.beginPath();
+        ctx.arc(wx, wz, 14, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (
+        tac.phase === 'searching_lkp' &&
+        tac.lastKnownX !== null &&
+        tac.lastKnownZ !== null
+      ) {
+        const lx = cx + (tac.lastKnownX - px) * zoom;
+        const lz = cy + (tac.lastKnownZ - pz) * zoom;
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)';
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.12)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(lx, lz, Math.min(44, tac.searchRadius * zoom * 0.55), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Pulsing LKP Diamond
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.moveTo(lx, lz - 5);
+        ctx.lineTo(lx + 5, lz);
+        ctx.lineTo(lx, lz + 5);
+        ctx.lineTo(lx - 5, lz);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // 12. Tactical Police Vision Cones & Helicopter Searchlight from engineTelemetryRef
+      const sirenFlash = Math.floor(now / 190) % 2 === 0;
+      const policeCones = engineTelemetryRef.policeCones;
+      for (let ci = 0; ci < policeCones.length; ci++) {
+        const cone = policeCones[ci];
+        const vx = cx + (cone.x - px) * zoom;
+        const vz = cy + (cone.z - pz) * zoom;
+        if (cone.isHeli) {
+          ctx.fillStyle = 'rgba(254, 240, 138, 0.22)';
+          ctx.strokeStyle = 'rgba(250, 204, 21, 0.72)';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.arc(vx, vz, cone.range * zoom, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        } else {
           ctx.fillStyle = sirenFlash
-            ? 'rgba(239, 68, 68, 0.25)'
-            : 'rgba(59, 130, 246, 0.25)';
+            ? 'rgba(239, 68, 68, 0.24)'
+            : 'rgba(59, 130, 246, 0.24)';
           ctx.beginPath();
           ctx.moveTo(vx, vz);
           ctx.arc(
             vx,
             vz,
-            24,
-            -v.heading - Math.PI / 2 - 0.55,
-            -v.heading - Math.PI / 2 + 0.55
+            Math.min(36, cone.range * zoom * 0.85),
+            -cone.heading + Math.PI / 2 - cone.halfAngleRad,
+            -cone.heading + Math.PI / 2 + cone.halfAngleRad
           );
           ctx.closePath();
           ctx.fill();
         }
+      }
+
+      // 12b. Traffic & Police Units
+      for (const v of vehicles) {
+        const vx = cx + (v.x - px) * zoom;
+        const vz = cy + (v.z - pz) * zoom;
 
         ctx.fillStyle =
-          v.type === 'polisi'
+          v.type === 'polisi' || v.type === 'barracuda'
             ? sirenFlash
               ? '#ef4444'
               : '#3b82f6'

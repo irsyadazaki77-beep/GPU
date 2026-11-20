@@ -11,7 +11,8 @@ export type PedestrianAiState =
   | 'WALKING'
   | 'CROSSING_AT_GREEN'
   | 'FLEEING'
-  | 'CROWDING';
+  | 'CROWDING'
+  | 'FILMING';
 
 export interface PedestrianAiAgent {
   x: number;
@@ -31,6 +32,9 @@ export interface PedestrianAiAgent {
   crowdTimer: number;
   crowdAnchorX: number;
   crowdAnchorZ: number;
+  filmTimer?: number;
+  filmTargetX?: number;
+  filmTargetZ?: number;
   torsoColor: number;
 }
 
@@ -46,6 +50,7 @@ export interface PedestrianStepContext {
 /**
  * Pure state machine evaluator for Jakarta pedestrian agents:
  * - FLEEING: during gunfights, high wanted levels (wanted >= 2 near player), horns, or vehicle collisions
+ * - FILMING: pulling out smartphones to record viral stunts, explosions, or chases for NabiloGram
  * - CROSSING_AT_GREEN: when near intersection curb ends and perpendicular vehicle signal is red
  * - CROWDING: when near Warung culinary stalls and pausing to socialize
  * - WALKING: normal sidewalk patrol
@@ -56,6 +61,10 @@ export function evaluatePedestrianAiState(
 ): PedestrianAiState {
   if (agent.panicTimer > 0) {
     return 'FLEEING';
+  }
+
+  if ((agent.filmTimer ?? 0) > 0) {
+    return 'FILMING';
   }
 
   if (ctx.wantedLevel >= 2) {
@@ -92,17 +101,21 @@ export function stepPedestrianAgentInPlace(
 ): { facing: number; moving: boolean; state: PedestrianAiState } {
   const { dt, signalPhase, wantedLevel, playerX, playerZ, buildingGrid } = ctx;
 
-  if (wantedLevel >= 2 && ag.panicTimer <= 0) {
+  if (wantedLevel >= 2 && ag.panicTimer <= 0 && (ag.filmTimer ?? 0) <= 0) {
     const dP = Math.hypot(ag.x - playerX, ag.z - playerZ);
     if (dP < 15) {
       ag.panicTimer = 3.2;
       ag.panicVx = ((ag.x - playerX) / (dP || 1)) * 4.4;
       ag.panicVz = ((ag.z - playerZ) / (dP || 1)) * 4.4;
+    } else if (dP < 24 && Math.sin(ag.phase * 2.1) > 0.92) {
+      ag.filmTimer = 4.5;
+      ag.filmTargetX = playerX;
+      ag.filmTargetZ = playerZ;
     }
   }
 
   // Check proximity to Warung stalls for spontaneous CROWDING social behavior
-  if (ag.panicTimer <= 0 && ag.crowdTimer <= 0) {
+  if (ag.panicTimer <= 0 && ag.crowdTimer <= 0 && (ag.filmTimer ?? 0) <= 0) {
     for (const [wx, wz] of WARUNG_STALL_LOCATIONS) {
       const dW = Math.hypot(ag.x - wx, ag.z - wz);
       if (dW < 3.4 && Math.sin(ag.phase * 1.7) > 0.96) {
@@ -130,6 +143,14 @@ export function stepPedestrianAgentInPlace(
     const facing = Math.atan2(ag.panicVx, ag.panicVz);
     ag.phase += dt * 11.5;
     return { facing, moving: true, state: ag.state };
+  }
+
+  if (ag.state === 'FILMING') {
+    ag.filmTimer = Math.max(0, (ag.filmTimer ?? 0) - dt);
+    const tx = ag.filmTargetX ?? playerX;
+    const tz = ag.filmTargetZ ?? playerZ;
+    const facing = Math.atan2(tx - ag.x, tz - ag.z);
+    return { facing, moving: false, state: ag.state };
   }
 
   if (ag.state === 'CROWDING') {
@@ -206,6 +227,7 @@ export function triggerCrowdFleeImpulse(
       const inv = 1 / (dist || 1);
       ag.panicTimer = durationSec;
       ag.crowdTimer = 0;
+      ag.filmTimer = 0;
       ag.panicVx = dx * inv * 4.5;
       ag.panicVz = dz * inv * 4.5;
       ag.state = 'FLEEING';
@@ -213,4 +235,29 @@ export function triggerCrowdFleeImpulse(
     }
   }
   return affected;
+}
+
+export function triggerCrowdSocialFilming(
+  agents: PedestrianAiAgent[],
+  worldX: number,
+  worldZ: number,
+  minRadius: number = 7,
+  maxRadius: number = 26,
+  durationSec: number = 5.5
+): number {
+  let filmers = 0;
+  for (let i = 0; i < agents.length; i++) {
+    const ag = agents[i];
+    const dist = Math.hypot(ag.x - worldX, ag.z - worldZ);
+    if (dist >= minRadius && dist <= maxRadius && ag.panicTimer <= 0) {
+      ag.filmTimer = durationSec;
+      ag.filmTargetX = worldX;
+      ag.filmTargetZ = worldZ;
+      ag.crowdTimer = 0;
+      ag.state = 'FILMING';
+      filmers++;
+      if (filmers >= 6) break;
+    }
+  }
+  return filmers;
 }

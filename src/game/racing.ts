@@ -1,6 +1,7 @@
 import type {
   ActiveWorldRoadEvent,
   BuildingFootprint,
+  CustomRaceTrackSpec,
   RoadsideSpawnLayout,
   SidewalkBounds,
   StreetRaceSpec,
@@ -163,6 +164,19 @@ export const VEHICLE_SPECS: Record<VehicleType, VehicleSpec> = {
     accentHex: 0x38bdf8,
     radius: 2.8,
     isAircraft: true,
+  },
+  speedboat: {
+    type: 'speedboat',
+    name: 'Speedboat Barracuda Maritim',
+    subtitle: 'Penyelundup Cepat Teluk Jakarta & Kepulauan Seribu',
+    maxSpeed: 40,
+    acceleration: 27,
+    turnRate: 2.8,
+    maxHp: 240,
+    colorHex: 0x0284c7,
+    accentHex: 0xf8fafc,
+    radius: 2.4,
+    isWatercraft: true,
   },
 };
 
@@ -1351,3 +1365,152 @@ export function stepTrafficVehicleAI(
   stepTrafficVehicleInPlace(next, route, aheadObstacleDist, dt, options);
   return next;
 }
+
+export function validateCustomRaceTrack(
+  name: string,
+  checkpoints: [number, number][],
+  isLoop: boolean = false
+): {
+  valid: boolean;
+  reason?: string;
+  trackDistanceM: number;
+  normalizedCheckpoints: [number, number][];
+} {
+  const cleanName = name.trim();
+  if (cleanName.length < 3) {
+    return {
+      valid: false,
+      reason: 'Nama sirkuit minimal 3 karakter.',
+      trackDistanceM: 0,
+      normalizedCheckpoints: [],
+    };
+  }
+  if (!Array.isArray(checkpoints) || checkpoints.length < 3) {
+    return {
+      valid: false,
+      reason: 'Minimal 3 checkpoint diperlukan untuk membuat sirkuit balap.',
+      trackDistanceM: 0,
+      normalizedCheckpoints: [],
+    };
+  }
+
+  const normalized: [number, number][] = [];
+  let totalDist = 0;
+
+  for (let i = 0; i < checkpoints.length; i++) {
+    const pt = checkpoints[i];
+    if (
+      !Array.isArray(pt) ||
+      pt.length < 2 ||
+      !Number.isFinite(pt[0]) ||
+      !Number.isFinite(pt[1])
+    ) {
+      return {
+        valid: false,
+        reason: `Koordinat checkpoint #${i + 1} tidak valid.`,
+        trackDistanceM: 0,
+        normalizedCheckpoints: [],
+      };
+    }
+    const cx = Math.max(-88, Math.min(88, Math.round(pt[0] * 10) / 10));
+    const cz = Math.max(-88, Math.min(88, Math.round(pt[1] * 10) / 10));
+
+    if (i > 0) {
+      const prev = normalized[i - 1];
+      const legDist = Math.hypot(cx - prev[0], cz - prev[1]);
+      if (legDist < 6) {
+        return {
+          valid: false,
+          reason: `Checkpoint #${i} dan #${i + 1} terlalu berdekatan (< 6m).`,
+          trackDistanceM: 0,
+          normalizedCheckpoints: [],
+        };
+      }
+      totalDist += legDist;
+    }
+    normalized.push([cx, cz]);
+  }
+
+  if (isLoop && normalized.length >= 3) {
+    const first = normalized[0];
+    const last = normalized[normalized.length - 1];
+    const loopBackDist = Math.hypot(first[0] - last[0], first[1] - last[1]);
+    if (loopBackDist > 4) {
+      normalized.push([first[0], first[1]]);
+      totalDist += loopBackDist;
+    }
+  }
+
+  return {
+    valid: true,
+    trackDistanceM: Math.round(totalDist),
+    normalizedCheckpoints: normalized,
+  };
+}
+
+export function createCustomRaceTrackSpec(params: {
+  name: string;
+  subtitle?: string;
+  authorName?: string;
+  checkpoints: [number, number][];
+  isLoop?: boolean;
+  entryFeeRp?: number;
+  rewardRp?: number;
+}): { track: CustomRaceTrackSpec | null; error?: string } {
+  const check = validateCustomRaceTrack(
+    params.name,
+    params.checkpoints,
+    Boolean(params.isLoop)
+  );
+  if (!check.valid) {
+    return { track: null, error: check.reason };
+  }
+  const rewardRp =
+    params.rewardRp ?? Math.max(180000, Math.round(check.trackDistanceM * 2400));
+  const entryFeeRp = params.entryFeeRp ?? Math.round(rewardRp * 0.2);
+
+  return {
+    track: {
+      id: `ugc_race_${Date.now()}_${Math.floor(Math.random() * 999)}`,
+      name: params.name.trim().slice(0, 48),
+      subtitle:
+        params.subtitle?.trim().slice(0, 72) ||
+        `Sirkuit Kustom UGC (${check.normalizedCheckpoints.length} CP · ${check.trackDistanceM}m)`,
+      authorName: (params.authorName || 'Pembalap Jakarta').trim().slice(0, 28),
+      createdAt: Date.now(),
+      isLoop: Boolean(params.isLoop),
+      entryFeeRp,
+      rewardRp,
+      checkpoints: check.normalizedCheckpoints,
+    },
+  };
+}
+
+export function exportCustomRaceTrackJson(track: CustomRaceTrackSpec): string {
+  return JSON.stringify(track, null, 2);
+}
+
+export function importCustomRaceTrackJson(
+  rawJson: string
+): { track: CustomRaceTrackSpec | null; error?: string } {
+  try {
+    const parsed = JSON.parse(rawJson) as Partial<CustomRaceTrackSpec>;
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.name !== 'string') {
+      return { track: null, error: 'Format JSON sirkuit tidak dikenali.' };
+    }
+    return createCustomRaceTrackSpec({
+      name: parsed.name,
+      subtitle: typeof parsed.subtitle === 'string' ? parsed.subtitle : undefined,
+      authorName:
+        typeof parsed.authorName === 'string' ? parsed.authorName : undefined,
+      checkpoints: Array.isArray(parsed.checkpoints) ? parsed.checkpoints : [],
+      isLoop: Boolean(parsed.isLoop),
+      entryFeeRp:
+        typeof parsed.entryFeeRp === 'number' ? parsed.entryFeeRp : undefined,
+      rewardRp: typeof parsed.rewardRp === 'number' ? parsed.rewardRp : undefined,
+    });
+  } catch {
+    return { track: null, error: 'JSON sirkuit rusak atau gagal di-parse.' };
+  }
+}
+

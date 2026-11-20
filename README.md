@@ -1,114 +1,90 @@
-# GPU: San Nabilo Open-World (Jakarta) — v0.3.0
+# GPU: San Nabilo Open-World (Jakarta) — Grand Plan 4.0 ("GTA V" Scale)
 
-Game aksi open-world 3D bertema Jakarta yang dibangun di atas Three.js, `@dimforge/rapier3d-compat` (WebAssembly Physics Engine), React 19, TypeScript, Tailwind CSS v4, WebSocket Co-Op Multiplayer (`ws`), dan Express + `@google/genai` (server-side AI dialogue & voice proxy).
+Game aksi open-world 3D bertema Jakarta yang dibangun di atas Three.js, `@dimforge/rapier3d-compat` (WebAssembly Physics Engine), React 19, TypeScript, Tailwind CSS v4, WebSocket Co-Op Multiplayer (`ws`), SQLite WAL Cloud Save, dan Express + `@google/genai` (server-side AI dialogue & voice proxy).
 
-*A 3D Jakarta-themed open-world action game engineered with a decoupled 60fps Three.js engine, fixed-timestep Rapier 3D rigid-body vehicle physics, reactive pedestrian crowd AI, 3D HRTF spatial audio, real-time WebSocket Co-Op multiplayer, Save Schema v3 with Cloud Sync, and a server-side Gemini NPC dialogue & TTS voice backend.*
+*A 3D Jakarta-themed open-world action game engineered with a decoupled 60fps Three.js engine, Chunked World Streaming (`SpatialChunkLoader`), Seamless Enterable Interiors (`InteriorManager`), Systemic Economy & BAJSA Stock Sabotage (`economy.ts`), 5-Star Jakarta Police Escalation & Flood Hydroplaning (`wantedSystem.ts`), Multi-Protagonist Heist Role Switching (`heistRoles.ts`), fixed-timestep Rapier 3D rigid-body vehicle & water buoyancy physics, reactive pedestrian crowd AI, 3D HRTF spatial audio, hardened WebSocket Co-Op multiplayer, and SQLite WAL Cloud Save Schema v3.*
 
 ---
 
-## Fitur Utama / Key Features
+## Fitur Utama / Key Features (Grand Plan 3.0 + 4.0)
 
-- **Trio Protagonis & 3 Archetype Jakarta:** Mulai sebagai *Anak Jalanan* (`anak_jalanan`), *Mantan Kurir* (`mantan_kurir`), atau *Teknisi Glodok* (`teknisi_glodok`), lalu berganti perspektif satelit antar Nabilo, Raka, dan Kirana (`[C]`).
-- **Sistem Faksi, Perang Teritori (Turf War), & 15 Babak Cerita:** Pengaruhi reputasi *Jawara Jalanan* (`jalanan`), *Eksekutif Sindikat* (`sindikat`), dan *Bela Rakyat* (`rakyat`) lintas 13 distrik Jakarta (Monas, Sudirman, SCBD, Tanah Abang, Kota Tua, Blok M, Tanjung Priok, Ancol, Halim, Senayan GBK, Kemayoran, PIK 2, TMII) serta klaim dividen pasif dari distrik yang dikuasai.
-- **Physics Engine Nyata (`@dimforge/rapier3d-compat`) & Lalu Lintas Khas Jakarta:**
-  - **Rapier 3D Rigid-Body & Raycast Suspension:** Fixed-timestep (`dt = 1/60`) dengan kurva friksi drift realistis, reaksi impuls tabrakan antar kendaraan, dan sinkronisasi collider gedung Jakarta.
-  - **TransJakarta, Angkot M-15, & Ojol AI:** Mematuhi lampu lalu lintas 4-fase (*Traffic Lights*), berhenti di halte, *ngetem* di tepi jalan, menyalip antrean (*lane-splitting*), serta menghindari insiden **World Clock Road Events** (*Proyek Jalan* & *Macet Mendadak*) dengan rute alternatif GPS.
-- **Crowd & Pedestrian AI (`src/engine/crowdAi.ts`):** Pejalan kaki terinstansiasi (`THREE.InstancedMesh`) dengan state machine (`WALKING`, `CROSSING_AT_GREEN`, `FLEEING`, `CROWDING`) yang menyeberang saat lampu hijau pejalan kaki, berlari panik saat baku tembak/buronan tinggi, dan bereaksi terhadap klakson.
-- **3D HRTF Spatial Audio & Radio FM (`src/engine/spatialAudio.ts` & `src/game/sound.ts`):** Panner 3D berbasis jarak dan arah kamera untuk klakson TransJakarta, knalpot Ojol, sirine polisi, derit ban drift, serta 5 stasiun radio FM Jakarta (*Prambors*, *Radio Koplo*, *Synth SCBD*, *Indie Senopati*, *Berita Kriminal*).
-- **AI Living City & Voice-First NPC (`server/npcDialogue.ts` & `server/npcVoice.ts`):**
-  - Mengirim `WorldContextSnapshot` (protagonis aktif, distrik, level buronan, reputasi faksi, jumlah teritori, dan 3 aksi terakhir pemain) ke `POST /api/npc/dialogue` untuk menghasilkan dialog Bahasa Indonesia khas jalanan Jakarta.
-  - Sintesis suara informan via `POST /api/npc/voice` (`gemini-3.8-flash-lite-tts`) dengan *in-memory LRU cache* dan teks subtitle yang disinkronkan di `StoryDialogueModal`.
-- **Co-Op Multiplayer & Cloud Save Schema v3 (`server/multiplayer.ts`, `src/engine/netSync.ts`, `src/game/save.ts`):**
-  - Sinkronisasi WebSocket 20Hz -> 60fps interpolasi mulus untuk lobi **Free-Roam**, **Street Racing**, dan **Co-Op Grand Heist** (hingga 8 pemain per ruangan).
-  - **Save Schema v3:** Manajemen 3 slot penyimpanan, ekspor/impor file JSON, migrasi otomatis dari Save Schema v1/v2 -> v3, serta sinkronisasi Cloud Save (`GET/POST /api/saves/:slotId`).
-- **Photo Mode Sinematik, Kontrol Layar Sentuh Mobile, & Optimasi 60 FPS:** Mode foto dengan filter warna & aturan sepertiga (`[N]`), virtual joystick + HTML5 Gamepad untuk perangkat mobile, `THREE.LOD` 3-tingkat, Web Worker simulasi (`src/engine/sim.worker.ts`), serta overlay telemetri performa (`[F3]`).
+- **Fase A — Chunked World Streaming & 3 Zona Ekspansi Baru (`src/engine/chunkLoader.ts`):**
+  - **SpatialChunkLoader (250m × 250m Grid):** Memuat dan melepas geometri distrik (`THREE.Group`), cincin LOD (`lodBuilder.ts`), dan collider statis Rapier3D (`physicsWorld.ts`) secara dinamis berdasarkan radius posisi pemain (`activeRadius = 2`, `preloadRadius = 3`) dengan anggaran frame (`maxOpsPerStep = 2`) agar FPS tetap 60fps stabil.
+  - **3 Zona Ekspansi Jakarta Baru:**
+    1. **Pelabuhan Tanjung Priok:** Tumpukan kontainer kargo, gantry crane pelabuhan, dan misi penyelundupan kontainer.
+    2. **Tol Layang & Simpang Susun Semanggi:** Koridor jalan layang bertingkat untuk balap liar berkecepatan tinggi dan penghindaran helikopter polisi.
+    3. **Teluk Jakarta & Kepulauan Seribu:** Kawasan perairan utara dengan dermaga Ancol/PIK, pulau karang, dan fisika apung (*buoyancy*) untuk kendaraan baru **`speedboat`**.
+- **Fase B — Seamless Enterable Interiors & Safehouse Trio (`src/engine/interiorManager.ts`):**
+  - Transisi portal instan tanpa *reload* halaman untuk masuk ke **Safehouse Trio** (`safehouse_trio`), **Markas Faksi** (`faction_hq_jalanan`, `faction_hq_sindikat`, `faction_hq_rakyat`), **Toko Siber Glodok** (`glodok_tech_shop`), **Warung Kopi**, **Garasi Modifikasi**, dan **Lobi Bank Sentral**.
+  - Fitur **Istirahat Safehouse** memajukan jam dunia Jakarta +6 jam, memulihkan HP/Armor penuh, meredakan level buronan, dan menyimpan otomatis ke Save Schema v3.
+- **Fase C — Ekonomi Sistemik: Turf War × Bisnis Bawah Tanah × Bursa Saham BAJSA (`src/game/economy.ts`):**
+  - Perebutan teritori distrik (*Turf War*), insiden jalan raya (*World Clock Road Events*), dan sabotase bisnis secara langsung mengguncang harga saham **BAJSA** (*supply/demand shock* + kurva pemulihan *mean-reversion* menuju `basePrice`).
+  - **4 Bisnis Bawah Tanah Jakarta** (*Bengkel Modifikasi Blok M*, *Armada Ojol Tanah Abang*, *Gudang Kontainer Tanjung Priok*, *Server Farm Glodok*) yang bisa dibeli dan di-upgrade (Lv. 1–5) untuk menghasilkan pendapatan pasif dan operasi sabotase kompetitor.
+- **Fase D — Eskalasi Polisi 5 Bintang Jakarta & Cuaca Banjir (`src/game/wantedSystem.ts`, `src/engine/physicsWorld.ts`):**
+  - **★1:** Kejaran motor Patwal (`ojek`).
+  - **★★2:** Mobil patroli (`polisi`) dengan prediksi lintasan **Manuver PIT** (*lead-target intercept*).
+  - **★★★3:** Barikade jalan raya (*roadblock*) + **Paku Ranjau** (*spike strips*) yang mengempiskan ban & memangkas kecepatan.
+  - **★★★★4:** Pengerahan unit taktis lapis baja Brimob (`barracuda`).
+  - **★★★★★5:** Helikopter polisi (`heli`) dengan lampu sorot (`SpotLight`) pelacak & penyekatan total distrik (*district lockdown*).
+  - **Genangan Banjir & Hydroplaning:** Saat cuaca hujan deras (`hujan`), zona cekungan jalan mengalami reduksi traksi ban lateral dan gaya hambat air (*hydroplaning drag*).
+- **Fase E — Multi-Protagonis Heist Switching, Side-Jobs Lokal & Custom Race UGC (`src/game/heistRoles.ts`, `src/game/racing.ts`):**
+  - **Pergantian Peran Trio (`[C]`):** **Nabilo** (*Heavy Enforcer & Getaway Driver*, reduksi damage +25%), **Raka** (*High-Speed Courier & Flanker*, akselerasi motor/sprint +22%), dan **Kirana** (*Glodok Tech Hacker*, kemampuan retas lampu lalu lintas distrik jadi hijau & butakan kamera/helikopter selama 20 detik).
+  - **3 Side-Jobs Khas Jakarta:** *Ojol Express*, *Glodok Underground Arena*, dan *Priok Container Heist*.
+  - **Custom Race Track UGC & Multiplayer Sync:** Buat, validasi (3–10 checkpoint), ekspor/impor JSON sirkuit balap kustom, dan sinkronkan antar pemain di ruangan WebSocket `street_race` (`custom_race_sync`).
 
 ---
 
 ## Struktur Folder / Architecture
 
 ```text
-├── server.ts                      # Express + WebSocket entry point (API, Cloud Save, Multiplayer)
+├── server.ts                      # Express + WebSocket entry point (/api/health, /api/readyz, Cloud Save, Multiplayer)
 ├── server/
 │   ├── npcDialogue.ts             # @google/genai proxy, WorldContextSnapshot, rate-limit & fallback
 │   ├── npcDialogue.test.ts        # Unit test sanitasi, memori dunia, rate-limit & offline fallback
 │   ├── npcVoice.ts                # Gemini TTS proxy dengan LRU voice cache
-│   ├── multiplayer.ts             # WebSocket room server (Free-Roam, Street Race, Co-Op Heist)
-│   └── cloudSave.ts               # Endpoint penyimpanan Cloud Save Schema v3
+│   ├── multiplayer.ts             # Hardened WebSocket room server (8-player cap, anti-teleport, custom_race_sync)
+│   ├── multiplayer.test.ts        # Integration test WebSocket server, 20Hz broadcast, room overflow & anti-cheat
+│   ├── cloudSave.ts               # Embedded SQLite WAL store (.data/san_nabilo.db) & strict Save Schema v3 validator
+│   └── cloudSave.test.ts          # Unit/integration test SQLite WAL concurrency, player isolation & HTTP endpoints
+├── e2e/
+│   └── smoke.spec.ts              # Playwright E2E smoke test (health/readyz, WebGL canvas, Rapier3D WASM)
 ├── src/
 │   ├── App.tsx                    # Root game orchestrator (phase, jam dunia 24J, save v3, shortcuts)
 │   ├── state/
 │   │   ├── gameStore.ts           # External store (useSyncExternalStore) + 60fps engineTelemetryRef
 │   │   └── save.test.ts           # Unit test migrasi Save Schema v1/v2 -> v3 & ekspor/impor slot
 │   ├── engine/
+│   │   ├── chunkLoader.ts         # SpatialChunkLoader (250m x 250m grid, LOD ring & Rapier collider bridge)
+│   │   ├── chunkLoader.test.ts    # Unit test chunk coordinate hashing, Chebyshev radius & Rapier disposal
+│   │   ├── interiorManager.ts     # Seamless interior portal manager, Safehouse rest (+6h) & loadout swap
 │   │   ├── WorldEngine.ts         # WebGLRenderer, RoomEnvironment PMREM, rAF loop & dispose()
-│   │   ├── physicsWorld.ts        # @dimforge/rapier3d-compat fixed-timestep rigid-body physics
-│   │   ├── crowdAi.ts             # State machine pejalan kaki (WALKING, CROSSING_AT_GREEN, FLEEING, CROWDING)
-│   │   ├── spatialAudio.ts        # Web Audio API 3D HRTF PannerNode & listener sinkronisasi kamera
-│   │   ├── netSync.ts             # Client WebSocket multiplayer & interpolasi entitas 20Hz -> 60fps
-│   │   ├── lodBuilder.ts          # 3-tier THREE.LOD builder untuk gedung & kendaraan jauh
-│   │   ├── sim.worker.ts          # Web Worker simulasi berbasis Transferable Float32Array
-│   │   ├── CityRenderer.ts        # Bangunan, Tol Layang, Halte, LOD & InstancedMesh props
-│   │   ├── CrowdSystem.ts         # InstancedMesh pejalan kaki 13 distrik Jakarta
-│   │   ├── TrafficSystem.ts       # Traffic pooling, TransJakarta/Angkot/Ojol AI & insiden jalan
+│   │   ├── physicsWorld.ts        # @dimforge/rapier3d-compat rigid-body, flood hydroplaning & water buoyancy
+│   │   ├── CityRenderer.ts        # Bangunan, 3 Zona Ekspansi (Priok, Semanggi, Teluk Jakarta) & chunk streaming
+│   │   ├── TrafficSystem.ts       # Traffic AI, 5-star police PIT/spike-strip pursuit & speedboat spawns
 │   │   └── PlayerController.ts    # Kendali karakter/kendaraan, kamera orbit/TPS, drift & kombat
 │   ├── game/
-│   │   ├── types.ts               # Definisi tipe terpusat & WorldContextSnapshot
-│   │   ├── save.ts                # Save Schema v3, 3 slot, JSON export/import, migrasi v1/v2 -> v3 & cloud sync
-│   │   ├── sound.ts               # Web Audio synthesizer (Master, SFX, Radio, Ambience)
+│   │   ├── economy.ts             # Sistem ekonomi BAJSA, 4 bisnis bawah tanah, sabotase & mean-reversion
+│   │   ├── economy.test.ts        # Unit test stock shock, mean-reversion, portfolio PnL & bisnis pasif
+│   │   ├── wantedSystem.ts        # Eskalasi polisi 1-5 bintang, PIT vector, paku ranjau & cooldown LOS
+│   │   ├── wantedSystem.test.ts   # Unit test wanted escalation, PIT intercept, spike strip & cooldown decay
+│   │   ├── heistRoles.ts          # Trio Heist switching, Kirana 20s cyber hack, AI support & 3 side-jobs
+│   │   ├── racing.ts              # Street racing, speedboat specs & Custom Race Track UGC JSON import/export
 │   │   └── rules.ts               # Barrel re-export domain game & unit test (rules.test.ts)
 │   └── components/
-│       ├── GameHud.tsx            # HUD in-game, speedometer, insiden jalan & overlay performa 60fps
-│       ├── InteractiveWorldMap.tsx# Peta dunia interaktif, kontrol Turf War & jam dunia 24J
-│       ├── StoryDialogueModal.tsx # Dialog misi bercabang, obrolan AI NPC & streaming suara/subtitle
-│       ├── PhotoModeOverlay.tsx   # Studio kamera sinematik [N]
-│       ├── MobileTouchControls.tsx# Virtual D-pad & tombol aksi layar sentuh mobile
+│       ├── GameHud.tsx            # HUD in-game, speedometer, insiden jalan & overlay performa [F3]
+│       ├── InteractiveWorldMap.tsx# Peta dunia interaktif, Turf War × BAJSA shock & jam dunia 24J
+│       ├── NabiloPhoneModal.tsx   # Smartphone iFruit (BAJSA PnL, Bisnis & Sabotase, Side-Jobs, Garasi Pegasus)
 │       └── StatusModal.tsx        # Menu jeda, manajemen 3 slot Save v3, Cloud Sync & lobi Co-Op
 ```
 
 ---
 
-## Kontrol Keyboard, Mouse & Mobile
+## Verifikasi Kualitas Lengkap (Verification Gate)
 
-| Tombol | Fungsi |
-| :--- | :--- |
-| `W A S D` / Virtual Stick | Berjalan, berlari, atau mengemudikan kendaraan |
-| `Seret Mouse` | Putar kamera orbit 360° |
-| `Spasi / Klik Kiri` | Menembak / menyerang jarak dekat (atau rem tangan drift di mobil) |
-| `X / Klik Kanan` | Bidikan bahu TPS presisi |
-| `F` / `G` | Masuk / keluar kendaraan terdekat atau masuk interior gedung |
-| `K` | Bunyikan klakson (membangunkan angkot ngetem & memberi sinyal ojol) |
-| `R` | Ganti stasiun Radio FM saat mengemudi |
-| `Q` | Aktifkan Fokus khusus protagonis / Nitro kendaraan |
-| `E` | Bicara dengan pemberi misi terdekat |
-| `Y` / `1–7` | Roda senjata radial / pilih slot cepat |
-| `C` | Pindah satelit antar 3 protagonis (Nabilo, Raka, Kirana) |
-| `Tab` | Buka / tutup smartphone iFruit OS (BAJSA, Properti, Balap Liar) |
-| `H` / `B` / `J` | Papan Strategi Grand Heist / Bengkel Kustom 360° / Warung Kuliner |
-| `N` / `U` | Photo Mode Sinematik / Mode HUD Zen |
-| `F3` | Tampilkan / sembunyikan Overlay Performa 60 FPS & Jaringan Co-Op |
-| `Esc` / `P` | Menu jeda, Peta Distrik, Slot Save v3, & Pengaturan |
-
----
-
-## Setup & Verifikasi
-
-1. Salin konfigurasi lingkungan:
-   ```bash
-   cp .env.example .env
-   ```
-   Isi `GEMINI_API_KEY` di `.env` (opsional — jika kosong, dialog dan suara NPC otomatis menggunakan mode *fallback* lokal deterministik).
-
-2. Pasang dependensi & jalankan server pengembangan (port `3000`):
-   ```bash
-   npm install
-   npm run dev
-   ```
-
-3. Jalankan verifikasi kualitas (Lint, Unit Tests, & Production Build):
-   ```bash
-   npm run lint       # tsc --noEmit (0 errors)
-   npm test           # Menjalankan seluruh suite unit test (rules, spatial, save v3, npcDialogue)
-   npm run build      # Bundel produksi Vite
-   npm run start      # Menjalankan server produksi Express + WebSocket
-   ```
+```bash
+npm run lint          # tsc --noEmit (0 errors)
+npm test              # Menjalankan seluruh 9 suite unit & integration test
+npm run build         # Bundel produksi Vite (dist/)
+npm run build:server  # Bundel produksi server Express + WebSocket (dist-server/server.js)
+npm run test:e2e      # Playwright E2E smoke test di Chromium headless
+```

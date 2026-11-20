@@ -1,4 +1,8 @@
 import type {
+  BusinessId,
+  BusinessSpec,
+  DistrictId,
+  FinancialNewsItem,
   PlayerProgressState,
   PropertySpec,
   StockMarketEntry,
@@ -7,6 +11,7 @@ import type {
   WarungServeQuality,
   WarungSnackId,
   WarungSnackSpec,
+  WorldClockRoadEventKind,
 } from './types';
 
 export const WARUNG_SNACKS: WarungSnackSpec[] = [
@@ -526,3 +531,357 @@ export function stepStockMarketTick(state: PlayerProgressState): PlayerProgressS
     stockPortfolio: nextPortfolio,
   };
 }
+
+// ============================================================================
+// PHASE C: SYSTEMIC ECONOMY (TURF WAR × BUSINESS × BAJSA STOCK MARKET)
+// ============================================================================
+
+export const JAKARTA_BUSINESSES: BusinessSpec[] = [
+  {
+    id: 'biz_bengkel_modif',
+    name: 'Bengkel Modifikasi Blok M & Kemang',
+    districtId: 'blok_m',
+    basePrice: 220000,
+    upgradeCost: 110000,
+    baseIncomePerHour: 24000,
+    linkedStock: 'GATO',
+    rivalStock: 'KMYR',
+    description: 'Jaringan bengkel kustomisasi sasis tempur dan penyamaran pelat nomor jalanan.',
+  },
+  {
+    id: 'biz_armada_ojol',
+    name: 'Armada Ojol Bayangan Tanah Abang',
+    districtId: 'tanah_abang',
+    basePrice: 320000,
+    upgradeCost: 160000,
+    baseIncomePerHour: 36000,
+    linkedStock: 'HALM',
+    rivalStock: 'PRIO',
+    description: 'Jaringan kurir motor cepat untuk distribusi logistik bawah tanah lintas distrik.',
+  },
+  {
+    id: 'biz_gudang_priok',
+    name: 'Gudang Kontainer Bayangan Tanjung Priok',
+    districtId: 'priok',
+    basePrice: 540000,
+    upgradeCost: 250000,
+    baseIncomePerHour: 64000,
+    linkedStock: 'PRIO',
+    rivalStock: 'HALM',
+    description: 'Terminal penyelundupan kontainer maritim dan speedboat Teluk Jakarta.',
+  },
+  {
+    id: 'biz_server_glodok',
+    name: 'Server Farm & Siber Glodok Underground',
+    districtId: 'glodok',
+    basePrice: 680000,
+    upgradeCost: 310000,
+    baseIncomePerHour: 82000,
+    linkedStock: 'KMYR',
+    rivalStock: 'SCBD',
+    description: 'Pusat penambangan data siber Kirana dan manipulasi frekuensi bursa BAJSA.',
+  },
+];
+
+export const DISTRICT_STOCK_LINK_MAP: Record<
+  DistrictId,
+  { victimSymbol: StockSymbol; boostSymbol: StockSymbol; sectorLabel: string }
+> = {
+  scbd: { victimSymbol: 'SCBD', boostSymbol: 'BNBL', sectorLabel: 'Koridor Finansial SCBD' },
+  monas: { victimSymbol: 'BNBL', boostSymbol: 'SCBD', sectorLabel: 'Lingkar Monas & Bank Sentral' },
+  blok_m: { victimSymbol: 'HALM', boostSymbol: 'GATO', sectorLabel: 'Terminal Blok M' },
+  kota_tua: { victimSymbol: 'BNBL', boostSymbol: 'KMYR', sectorLabel: 'Kawasan Kota Tua' },
+  glodok: { victimSymbol: 'SCBD', boostSymbol: 'KMYR', sectorLabel: 'Sentra Elektronik Glodok' },
+  tanah_abang: { victimSymbol: 'PRIO', boostSymbol: 'HALM', sectorLabel: 'Grosir Tanah Abang' },
+  kemayoran: { victimSymbol: 'GATO', boostSymbol: 'KMYR', sectorLabel: 'Bandara Lama Kemayoran' },
+  senayan: { victimSymbol: 'SCBD', boostSymbol: 'GATO', sectorLabel: 'Kompleks Gelora Senayan' },
+  priok: { victimSymbol: 'PRIO', boostSymbol: 'HALM', sectorLabel: 'Pelabuhan Tanjung Priok' },
+  pik_ancol: { victimSymbol: 'SCBD', boostSymbol: 'PRIO', sectorLabel: 'Pesisir Ancol & PIK' },
+  manggarai: { victimSymbol: 'HALM', boostSymbol: 'PRIO', sectorLabel: 'Simpul Rel Manggarai' },
+  kemang: { victimSymbol: 'BNBL', boostSymbol: 'SCBD', sectorLabel: 'Hiburan Malam Kemang' },
+  halim: { victimSymbol: 'HALM', boostSymbol: 'PRIO', sectorLabel: 'Stasiun Kereta Cepat Halim' },
+};
+
+/**
+ * Purchases a business (level 1) or upgrades an owned business up to level 5.
+ */
+export function purchaseOrUpgradeBusiness(
+  state: PlayerProgressState,
+  businessId: BusinessId
+): {
+  nextState: PlayerProgressState;
+  success: boolean;
+  newLevel: number;
+  costRp: number;
+} {
+  const spec = JAKARTA_BUSINESSES.find((b) => b.id === businessId);
+  if (!spec) {
+    return { nextState: state, success: false, newLevel: 0, costRp: 0 };
+  }
+
+  const owned = { ...(state.ownedBusinesses || {}) };
+  const currentLevel = owned[businessId] || 0;
+  if (currentLevel >= 5) {
+    return { nextState: state, success: false, newLevel: currentLevel, costRp: 0 };
+  }
+
+  const costRp = currentLevel === 0 ? spec.basePrice : spec.upgradeCost * currentLevel;
+  if (state.rupiah < costRp) {
+    return { nextState: state, success: false, newLevel: currentLevel, costRp };
+  }
+
+  const newLevel = currentLevel + 1;
+  owned[businessId] = newLevel;
+
+  return {
+    nextState: {
+      ...state,
+      rupiah: state.rupiah - costRp,
+      ownedBusinesses: owned,
+      score: state.score + 300,
+      bestScore: Math.max(state.bestScore, state.score + 300),
+    },
+    success: true,
+    newLevel,
+    costRp,
+  };
+}
+
+/**
+ * Calculates hourly passive income across all owned Jakarta underground businesses.
+ */
+export function calculatePassiveBusinessIncome(
+  ownedBusinesses: Partial<Record<BusinessId, number>> | undefined,
+  negotiationLevel: number = 1
+): number {
+  if (!ownedBusinesses) return 0;
+  let total = 0;
+  for (const spec of JAKARTA_BUSINESSES) {
+    const level = ownedBusinesses[spec.id] || 0;
+    if (level > 0) {
+      const levelMultiplier = 1 + (level - 1) * 0.45;
+      total += Math.round(spec.baseIncomePerHour * levelMultiplier);
+    }
+  }
+  const negBonus = 1 + Math.max(0, negotiationLevel - 1) * 0.08;
+  return Math.round(total * negBonus);
+}
+
+/**
+ * Executes a corporate sabotage operation from an owned business, crashing its rival BAJSA ticker
+ * and boosting the business's linked ticker while generating a breaking financial news headline.
+ */
+export function executeBusinessSabotage(
+  state: PlayerProgressState,
+  businessId: BusinessId,
+  timestampLabel: string = '12:00 WIB'
+): {
+  nextState: PlayerProgressState;
+  executed: boolean;
+  news: FinancialNewsItem | null;
+} {
+  const spec = JAKARTA_BUSINESSES.find((b) => b.id === businessId);
+  const level = state.ownedBusinesses?.[businessId] || 0;
+  if (!spec || level <= 0) {
+    return { nextState: state, executed: false, news: null };
+  }
+
+  const dropPct = Math.min(0.42, 0.18 + level * 0.04);
+  const boostPct = Math.min(0.48, 0.22 + level * 0.045);
+  const shockedState = triggerStockMarketImpact(
+    state,
+    spec.rivalStock,
+    spec.linkedStock,
+    dropPct,
+    boostPct
+  );
+
+  const news: FinancialNewsItem = {
+    id: `news_sab_${businessId}_${Date.now()}`,
+    headline: `SABOTASE BISNIS: Operasi ${spec.name} mengguncang rantai pasok ${spec.rivalStock} (-${Math.round(
+      dropPct * 100
+    )}%) & melambungkan ${spec.linkedStock} (+${Math.round(boostPct * 100)}%)!`,
+    affectedSymbol: spec.rivalStock,
+    deltaPct: -Math.round(dropPct * 100),
+    timestampLabel,
+  };
+
+  return {
+    nextState: shockedState,
+    executed: true,
+    news,
+  };
+}
+
+/**
+ * Links district turf war captures directly to live BAJSA stock prices.
+ */
+export function applyTurfWarStockShock(
+  state: PlayerProgressState,
+  districtId: DistrictId,
+  timestampLabel: string = '12:00 WIB'
+): {
+  nextState: PlayerProgressState;
+  news: FinancialNewsItem;
+} {
+  const link = DISTRICT_STOCK_LINK_MAP[districtId] || {
+    victimSymbol: 'SCBD' as StockSymbol,
+    boostSymbol: 'BNBL' as StockSymbol,
+    sectorLabel: districtId.toUpperCase(),
+  };
+
+  const dropPct = 0.19;
+  const boostPct = 0.24;
+  const nextState = triggerStockMarketImpact(
+    state,
+    link.victimSymbol,
+    link.boostSymbol,
+    dropPct,
+    boostPct
+  );
+
+  const news: FinancialNewsItem = {
+    id: `news_turf_${districtId}_${Date.now()}`,
+    headline: `BURSA BAJSA: Perebutan wilayah ${link.sectorLabel} menekan saham ${link.victimSymbol} (-19%) & mengangkat ${link.boostSymbol} (+24%).`,
+    affectedSymbol: link.victimSymbol,
+    deltaPct: -19,
+    timestampLabel,
+  };
+
+  return { nextState, news };
+}
+
+/**
+ * Links dynamic Jakarta World Clock road events to live BAJSA stock tickers.
+ */
+export function applyRoadEventStockShock(
+  state: PlayerProgressState,
+  eventKind: WorldClockRoadEventKind,
+  timestampLabel: string = '12:00 WIB'
+): {
+  nextState: PlayerProgressState;
+  news: FinancialNewsItem | null;
+} {
+  if (eventKind === 'none') {
+    return { nextState: state, news: null };
+  }
+
+  let victim: StockSymbol = 'PRIO';
+  let boost: StockSymbol = 'HALM';
+  let headline = '';
+  let dropPct = 0.12;
+  let boostPct = 0.15;
+
+  switch (eventKind) {
+    case 'rush_hour_pagi':
+    case 'macet_sore':
+      victim = 'PRIO';
+      boost = 'HALM';
+      dropPct = 0.11;
+      boostPct = 0.14;
+      headline = `LALU LINTAS & BURSA: Kemacetan arteri Jakarta menghambat truk kontainer PRIO (-11%), investor beralih ke kereta cepat HALM (+14%).`;
+      break;
+    case 'konvoi_pejabat':
+      victim = 'KMYR';
+      boost = 'GATO';
+      dropPct = 0.1;
+      boostPct = 0.16;
+      headline = `KEAMANAN PROTOKOL: Konvoi VVIP meningkatkan kontrak rantis GATO (+16%).`;
+      break;
+    case 'pasar_tumpah':
+      victim = 'SCBD';
+      boost = 'BNBL';
+      dropPct = 0.09;
+      boostPct = 0.13;
+      headline = `EKONOMI JALANAN: Lonjakan transaksi tunai pasar tumpah mendongkrak likuiditas ritel BNBL (+13%).`;
+      break;
+    case 'razia_malam':
+      victim = 'PRIO';
+      boost = 'GATO';
+      dropPct = 0.14;
+      boostPct = 0.18;
+      headline = `RAZIA GABUNGAN: Penyekatan jalan protokol memicu kenaikan saham alutsista GATO (+18%).`;
+      break;
+  }
+
+  const nextState = triggerStockMarketImpact(state, victim, boost, dropPct, boostPct);
+  return {
+    nextState,
+    news: {
+      id: `news_event_${eventKind}_${Date.now()}`,
+      headline,
+      affectedSymbol: boost,
+      deltaPct: Math.round(boostPct * 100),
+      timestampLabel,
+    },
+  };
+}
+
+/**
+ * Mean-reverting BAJSA stock recovery step: nudges shocked stocks smoothly back toward their fundamental basePrice
+ * so players can buy the dip after sabotage/turf wars and profit as the market recovers.
+ */
+export function stepStockMarketMeanReversion(
+  state: PlayerProgressState,
+  reversionRate: number = 0.18
+): PlayerProgressState {
+  const clampedRate = Math.max(0.02, Math.min(0.6, reversionRate));
+  const nextPortfolio = { ...state.stockPortfolio };
+
+  for (const spec of JAKARTA_STOCKS) {
+    const entry = nextPortfolio[spec.symbol];
+    if (!entry) continue;
+    const diff = spec.basePrice - entry.currentPrice;
+    const stepDelta = Math.round(diff * clampedRate);
+    const nextPrice = Math.max(400, entry.currentPrice + stepDelta);
+    nextPortfolio[spec.symbol] = {
+      ...entry,
+      previousPrice: entry.currentPrice,
+      currentPrice: nextPrice,
+      history: [...entry.history.slice(1), nextPrice],
+    };
+  }
+
+  return {
+    ...state,
+    stockPortfolio: nextPortfolio,
+  };
+}
+
+export interface PortfolioMetrics {
+  totalMarketValueRp: number;
+  totalCostBasisRp: number;
+  unrealizedPnLRp: number;
+  unrealizedPnLPct: number;
+}
+
+/**
+ * Computes real-time portfolio valuation and unrealized profit/loss across all BAJSA holdings.
+ */
+export function calculatePortfolioMetrics(
+  portfolio: Record<StockSymbol, StockMarketEntry>
+): PortfolioMetrics {
+  let totalMarketValueRp = 0;
+  let totalCostBasisRp = 0;
+
+  for (const spec of JAKARTA_STOCKS) {
+    const entry = portfolio[spec.symbol];
+    if (!entry || entry.ownedShares <= 0) continue;
+    totalMarketValueRp += entry.ownedShares * entry.currentPrice;
+    totalCostBasisRp += entry.ownedShares * entry.avgBuyPrice;
+  }
+
+  const unrealizedPnLRp = totalMarketValueRp - totalCostBasisRp;
+  const unrealizedPnLPct =
+    totalCostBasisRp > 0
+      ? Math.round((unrealizedPnLRp / totalCostBasisRp) * 1000) / 10
+      : 0;
+
+  return {
+    totalMarketValueRp,
+    totalCostBasisRp,
+    unrealizedPnLRp,
+    unrealizedPnLPct,
+  };
+}
+

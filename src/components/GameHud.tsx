@@ -5,6 +5,7 @@ import type {
   EnterableInteriorSpec,
   PlayerProgressState,
   ProtagonistId,
+  SquadOrderMode,
   StoryChoiceOption,
   StoryMission,
   VehicleType,
@@ -12,8 +13,10 @@ import type {
   WeatherMode,
 } from '../game/types';
 import {
+  CAMERA_VIEW_LABELS,
   PROTAGONIST_PROFILES,
   RADIO_STATIONS,
+  SQUAD_ORDER_LABELS,
   VEHICLE_SPECS,
   WEATHER_MODES,
   formatJakartaClock,
@@ -74,6 +77,15 @@ interface GameHudProps {
   onToggleMute: () => void;
   onPause: () => void;
   onRestart: () => void;
+  onOpenNabiloGram?: () => void;
+  onRepairVehicle?: () => void;
+  onInteriorAction?: (action: 'hangout' | 'save' | 'repair') => void;
+  onCycleCamera?: () => void;
+  onToggleCover?: () => void;
+  onSquadOrder?: (order: SquadOrderMode) => void;
+  onCancelStreetRace?: () => void;
+  onAbortTurfWar?: () => void;
+  onOpenImperium?: () => void;
 }
 
 /** Custom SVG Weapon Silhouettes for AAA Top-Right HUD & Wheel */
@@ -163,6 +175,15 @@ export const GameHud: React.FC<GameHudProps> = ({
   onEnterOrExitInterior,
   onOpenMissionDialog,
   onPause,
+  onOpenNabiloGram,
+  onRepairVehicle,
+  onInteriorAction,
+  onCycleCamera,
+  onToggleCover,
+  onSquadOrder,
+  onCancelStreetRace,
+  onAbortTurfWar,
+  onOpenImperium,
 }) => {
   const customWaypoint = useGameStore((s) => s.customWaypoint);
   const zenHudMode = useGameStore((s) => s.zenHudMode);
@@ -175,7 +196,36 @@ export const GameHud: React.FC<GameHudProps> = ({
   const perfOverlayOpen = useGameStore((s) => s.perfOverlayOpen);
   const cloudSyncStatus = useGameStore((s) => s.cloudSyncStatus);
   const activeSaveSlot = useGameStore((s) => s.activeSaveSlot);
+  const policeTactical = useGameStore((s) => s.policeTactical);
+  const activeStreetEvent = useGameStore((s) => s.activeStreetEvent);
+  const latestViralToast = useGameStore((s) => s.latestViralToast);
+  const activeVehicleDamage = useGameStore((s) => s.activeVehicleDamage);
+  const cameraViewMode = useGameStore((s) => s.cameraViewMode);
+  const inCover = useGameStore((s) => s.inCover);
+  const squadOrder = useGameStore((s) => s.squadOrder);
+  const squadCallout = useGameStore((s) => s.squadCallout);
+  const activeRace = useGameStore((s) => s.activeRace);
+  const lastStuntBanner = useGameStore((s) => s.lastStuntBanner);
+  const activeTurfWar = useGameStore((s) => s.activeTurfWar);
+  const killCamBanner = useGameStore((s) => s.killCamBanner);
+  const dailyChallenges = useGameStore((s) => s.dailyChallenges);
   const activeRoadEvent = worldClockEventState.activeEvent;
+
+  const claimableChallengesCount = dailyChallenges.items.filter(
+    (c) => !c.claimed && c.progress >= c.target
+  ).length;
+
+  const [crosshairGapPx, setCrosshairGapPx] = useState(4);
+  const showCrosshair =
+    tpsAiming || (cameraViewMode === 'first_person' && !drivingVehicle);
+
+  useEffect(() => {
+    if (!showCrosshair) return;
+    const id = window.setInterval(() => {
+      setCrosshairGapPx(4 + Math.round(engineTelemetryRef.crosshairSpread * 14));
+    }, 33);
+    return () => clearInterval(id);
+  }, [showCrosshair]);
 
   const [perfSnap, setPerfSnap] = useState(() => ({
     ...engineTelemetryRef.perf,
@@ -452,15 +502,184 @@ export const GameHud: React.FC<GameHudProps> = ({
         </div>
       )}
 
-      {/* OVER-THE-SHOULDER TPS PRECISION RETICLE */}
-      {tpsAiming && (
-        <div className="fixed inset-0 pointer-events-none flex items-center justify-center z-10">
-          <div className="relative w-10 h-10 flex items-center justify-center">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#ef4444] shadow-[0_0_8px_#ef4444]" />
-            <span className="absolute top-0 w-0.5 h-2.5 bg-[#f4f1ea]/90" />
-            <span className="absolute bottom-0 w-0.5 h-2.5 bg-[#f4f1ea]/90" />
-            <span className="absolute left-0 h-0.5 w-2.5 bg-[#f4f1ea]/90" />
-            <span className="absolute right-0 h-0.5 w-2.5 bg-[#f4f1ea]/90" />
+      {/* DYNAMIC TACTICAL CROSSHAIR (TPS Aim & First-Person On-Foot) + HITMARKER */}
+      {showCrosshair && (
+        <div
+          data-testid="tactical-crosshair"
+          className="fixed inset-0 pointer-events-none flex items-center justify-center z-10"
+        >
+          <div className="relative w-16 h-16 flex items-center justify-center">
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                inCover
+                  ? 'bg-[#22c55e] shadow-[0_0_8px_#22c55e]'
+                  : 'bg-[#ef4444] shadow-[0_0_8px_#ef4444]'
+              }`}
+            />
+            <span
+              className="absolute w-0.5 h-2.5 bg-[#f4f1ea]/90 transition-transform duration-75"
+              style={{ transform: `translateY(-${crosshairGapPx + 7}px)` }}
+            />
+            <span
+              className="absolute w-0.5 h-2.5 bg-[#f4f1ea]/90 transition-transform duration-75"
+              style={{ transform: `translateY(${crosshairGapPx + 7}px)` }}
+            />
+            <span
+              className="absolute h-0.5 w-2.5 bg-[#f4f1ea]/90 transition-transform duration-75"
+              style={{ transform: `translateX(-${crosshairGapPx + 7}px)` }}
+            />
+            <span
+              className="absolute h-0.5 w-2.5 bg-[#f4f1ea]/90 transition-transform duration-75"
+              style={{ transform: `translateX(${crosshairGapPx + 7}px)` }}
+            />
+            {combatHitEvents.length > 0 && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="w-5 h-0.5 bg-[#f59e0b] rotate-45 absolute" />
+                <span className="w-5 h-0.5 bg-[#f59e0b] -rotate-45 absolute" />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* FIRST-PERSON VEHICLE COCKPIT TELEMETRY VISOR FRAME */}
+      {cameraViewMode === 'first_person' && drivingVehicle && (
+        <div
+          aria-hidden="true"
+          className="fixed inset-x-0 top-0 bottom-0 pointer-events-none z-10"
+        >
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-3 px-4 py-1 rounded bg-[#070b12]/80 border border-white/15 font-mono-num text-[11px] text-[#38bdf8]">
+            <span>KOKPIT 1P</span>
+            <span className="text-white/25">|</span>
+            <span className="text-[#f4f1ea] font-bold">
+              {Math.round(vehicleSpeedKmh)} KM/J
+            </span>
+            <span className="text-white/25">|</span>
+            <span className="text-[#f59e0b]">
+              {gearNumber === 'VTOL' ? 'VTOL' : gearNumber === 'N' ? 'N' : `G${gearNumber}`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* BULLET-TIME KILL-CAM CINEMATIC SLASH */}
+      {killCamBanner && (
+        <div className="fixed inset-x-0 top-28 z-30 flex justify-center pointer-events-none px-4 animate-stamp-in">
+          <div className="px-7 py-2 bg-[#070b12]/90 border-y-2 border-[#f59e0b] text-center shadow-2xl">
+            <div className="font-display text-2xl md:text-3xl font-extrabold italic uppercase tracking-wider text-[#f59e0b] hud-stroke">
+              {killCamBanner.label}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STUNT JUMP RESULT BANNER */}
+      {lastStuntBanner && (
+        <div
+          data-testid="stunt-jump-banner"
+          className="fixed inset-x-0 top-36 z-30 flex justify-center pointer-events-none px-4 animate-stamp-in"
+        >
+          <div className="px-6 py-3 rounded-xl bg-[#090d16]/95 border border-[#f59e0b]/60 text-center shadow-2xl">
+            <div className="font-mono-num text-[10px] font-bold uppercase tracking-[0.22em] text-[#38bdf8]">
+              Lompatan Stunt Jakarta {lastStuntBanner.isNewRamp ? '· Ramp Baru!' : ''}
+            </div>
+            <div className="font-display text-2xl md:text-3xl font-extrabold italic uppercase tracking-wider text-[#f59e0b] mt-0.5">
+              STUNT {lastStuntBanner.rating}! · {lastStuntBanner.distanceM}m
+            </div>
+            <div className="font-mono-num text-xs text-[#e2e8f0] mt-0.5">
+              {lastStuntBanner.rampName} · Melayang {lastStuntBanner.airTimeSec}d ·{' '}
+              <span className="text-[#22c55e] font-bold">
+                +{formatRupiah(lastStuntBanner.rewardRp)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ACTIVE STREET RACE LEADERBOARD & COUNTDOWN STRIP */}
+      {activeRace && activeRace.status !== 'finished' && (
+        <div
+          data-testid="active-street-race-hud"
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-20 pointer-events-auto animate-aaa-up"
+        >
+          <div className="bg-[#090d16]/95 border border-[#22d3ee]/50 rounded-xl px-4 py-2 shadow-2xl flex items-center gap-4">
+            <div className="text-center">
+              <div className="text-[9px] font-mono-num uppercase text-[#94a3b8]">
+                Posisi
+              </div>
+              <div className="font-display text-2xl font-extrabold italic text-[#f59e0b] leading-none font-mono-num">
+                #{activeRace.position}
+                <span className="text-xs text-[#94a3b8]">/{activeRace.totalRacers}</span>
+              </div>
+            </div>
+            <div className="h-7 w-[1px] bg-white/15" />
+            <div className="min-w-0">
+              <div className="font-display text-xs font-bold uppercase tracking-wide text-[#f4f1ea] truncate max-w-[180px]">
+                {activeRace.raceName}
+              </div>
+              <div className="font-mono-num text-[11px] text-[#22d3ee] font-bold">
+                {activeRace.status === 'countdown'
+                  ? `SIAP... ${Math.max(1, Math.ceil(activeRace.countdownSec))}`
+                  : `CP ${activeRace.playerCheckpointIndex + 1}/${activeRace.checkpoints.length} · ${activeRace.elapsedSec.toFixed(1)}d`}
+              </div>
+            </div>
+            {onCancelStreetRace && (
+              <button
+                type="button"
+                onClick={onCancelStreetRace}
+                className="px-2 py-1 rounded bg-white/10 hover:bg-[#ef4444]/30 text-[10px] font-mono-num font-bold text-[#cbd5e1] hover:text-white cursor-pointer"
+              >
+                Batal
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ACTIVE 3D TURF WAR WAVE TRACKER */}
+      {activeTurfWar && activeTurfWar.status === 'active' && (
+        <div
+          data-testid="active-turf-war-hud"
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-20 pointer-events-auto animate-aaa-up"
+        >
+          <div className="bg-[#12090d]/95 border border-[#ef4444]/60 rounded-xl px-4 py-2 shadow-2xl flex items-center gap-3.5">
+            <div>
+              <div className="font-mono-num text-[10px] font-bold uppercase tracking-wider text-[#f87171]">
+                SERANGAN WILAYAH · GELOMBANG {activeTurfWar.wave}/{activeTurfWar.totalWaves}
+              </div>
+              <div className="font-display text-sm font-extrabold uppercase text-[#f4f1ea]">
+                {activeTurfWar.districtName}
+              </div>
+              <div className="font-mono-num text-[11px] text-[#cbd5e1]">
+                Sisa Sindikat:{' '}
+                <strong className="text-[#f59e0b]">
+                  {activeTurfWar.enemiesRemaining}
+                </strong>
+                {activeTurfWar.captainAlive && (
+                  <span className="ml-2 text-[#facc15] font-bold">
+                    · KAPTEN WILAYAH AKTIF!
+                  </span>
+                )}
+              </div>
+            </div>
+            {onAbortTurfWar && (
+              <button
+                type="button"
+                onClick={onAbortTurfWar}
+                className="px-2 py-1 rounded bg-white/10 hover:bg-[#ef4444]/35 text-[10px] font-mono-num font-bold text-[#cbd5e1] cursor-pointer"
+              >
+                Mundur
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TRIO SQUAD RADIO CALLOUT STRIP */}
+      {squadCallout && (
+        <div className="fixed bottom-24 sm:bottom-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none px-4 animate-aaa-up">
+          <div className="bg-[#090d16]/92 border-l-2 border-l-[#38bdf8] px-3.5 py-1.5 rounded-lg shadow-xl max-w-md text-xs text-[#e2e8f0]">
+            {squadCallout.text}
           </div>
         </div>
       )}
@@ -707,6 +926,100 @@ export const GameHud: React.FC<GameHudProps> = ({
             </div>
           )}
 
+          {/* Tactical Police AI Status (Witness Reporting / LKP Search / Live Radio Callout) */}
+          {(policeTactical.phase !== 'clear' ||
+            (playerState.wantedLevel > 0 && policeTactical.radioCallout)) && (
+            <div
+              data-testid="police-tactical-strip"
+              className={`aaa-glass-subtle rounded-lg border-l-2 ${
+                policeTactical.phase === 'witness_reporting'
+                  ? 'border-l-[#f59e0b]'
+                  : policeTactical.phase === 'searching_lkp'
+                  ? 'border-l-[#38bdf8]'
+                  : 'border-l-[#ef4444]'
+              } px-3 py-2 flex flex-col gap-1 pointer-events-auto animate-aaa-up max-w-xs shadow-lg`}
+            >
+              <div className="flex items-center justify-between gap-2 text-[11px] font-mono-num">
+                <span
+                  className={`font-bold uppercase ${
+                    policeTactical.phase === 'witness_reporting'
+                      ? 'text-[#fbbf24]'
+                      : policeTactical.phase === 'searching_lkp'
+                      ? 'text-[#38bdf8]'
+                      : 'text-[#f87171]'
+                  }`}
+                >
+                  {policeTactical.phase === 'witness_reporting'
+                    ? 'Saksi Melapor 110'
+                    : policeTactical.phase === 'searching_lkp'
+                    ? 'Menyisir Lokasi Terakhir (LKP)'
+                    : 'Radio Taktis Metro'}
+                </span>
+                {policeTactical.phase === 'witness_reporting' && (
+                  <span className="font-bold text-[#fef08a]">
+                    {Math.round(policeTactical.witnessProgress)}%
+                  </span>
+                )}
+              </div>
+              {policeTactical.phase === 'witness_reporting' && (
+                <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#f59e0b] transition-all duration-100"
+                    style={{ width: `${Math.min(100, policeTactical.witnessProgress)}%` }}
+                  />
+                </div>
+              )}
+              {policeTactical.radioCallout && (
+                <div className="text-[11px] text-[#e2e8f0] leading-snug">
+                  {policeTactical.radioCallout}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Living Jakarta Street Random Event Card (when no Road Event banner is occupying stack) */}
+          {!activeRoadEvent &&
+            !activeMission &&
+            activeStreetEvent &&
+            activeStreetEvent.status === 'active' &&
+            playerState.currentInterior === 'exterior' && (
+              <div
+                data-testid="street-random-event-banner"
+                className="aaa-glass-subtle rounded-lg border-l-2 border-l-[#ff6b4a] px-3 py-2 flex flex-col gap-1 pointer-events-auto animate-aaa-up max-w-xs shadow-lg"
+              >
+                <div className="flex items-center justify-between gap-2 text-[11px] font-mono-num">
+                  <span className="font-bold uppercase text-[#ff6b4a] truncate">
+                    Event Jalanan · {activeStreetEvent.districtName}
+                  </span>
+                  <span className="text-[#fef08a] font-bold shrink-0">
+                    {Math.ceil(activeStreetEvent.remainingSec)}d
+                  </span>
+                </div>
+                <div className="text-xs font-semibold text-[#f4f1ea] truncate">
+                  {activeStreetEvent.title}
+                </div>
+                <div className="flex items-center justify-between gap-2 pt-0.5 text-[10px] font-mono-num">
+                  <span className="text-[#22c55e] font-bold">
+                    +{formatRupiah(activeStreetEvent.rewardRp)} · +{activeStreetEvent.cloutXp} Clout
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      gameStore.setCustomWaypoint({
+                        x: activeStreetEvent.x,
+                        z: activeStreetEvent.z,
+                        label: activeStreetEvent.title,
+                        category: 'custom',
+                      })
+                    }
+                    className="text-[#38bdf8] hover:text-white font-bold cursor-pointer"
+                  >
+                    Pin GPS ›
+                  </button>
+                </div>
+              </div>
+            )}
+
           {/* Transient District Toast when moving across Jakarta */}
           {districtToast && activeMission && (
             <div className="animate-aaa-up aaa-glass-subtle rounded-lg px-3 py-1.5 border-l-2 border-l-[#38bdf8]">
@@ -838,18 +1151,34 @@ export const GameHud: React.FC<GameHudProps> = ({
                 <span className="hidden sm:inline font-mono-num text-[11px]">N</span>
               </button>
             )}
+            {onOpenImperium && (
+              <button
+                type="button"
+                onClick={onOpenImperium}
+                data-testid="open-imperium-btn"
+                title="Imperium, Tantangan Harian, Balap Liar & Stunt Ramp"
+                className="relative px-2 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-[11px] font-mono-num font-bold text-[#f59e0b] transition-colors cursor-pointer whitespace-nowrap"
+              >
+                Imperium
+                {claimableChallengesCount > 0 && (
+                  <span className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-[#22c55e] text-[#090c12] text-[10px] font-extrabold">
+                    {claimableChallengesCount}
+                  </span>
+                )}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => gameStore.togglePerfOverlay()}
               data-testid="toggle-perf-overlay-btn"
-              title="Overlay Telemetri 60FPS, Rapier3D & Co-Op Multiplayer [F3]"
+              title="Overlay Telemetri 60FPS, Rapier3D & Co-Op Multiplayer [F8]"
               className={`px-2 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-[11px] font-mono-num transition-colors cursor-pointer whitespace-nowrap ${
                 perfOverlayOpen
                   ? 'text-[#22c55e] border border-[#22c55e]/50'
                   : 'text-[#94a3b8] hover:text-white'
               }`}
             >
-              [F3]
+              [F8]
             </button>
             <button
               type="button"
@@ -898,11 +1227,51 @@ export const GameHud: React.FC<GameHudProps> = ({
             </button>
           </div>
 
+          {/* Clickable NabiloGram Live Viral Notification Toast */}
+          {latestViralToast && (
+            <div
+              data-testid="nabilogram-viral-toast"
+              className="aaa-glass-subtle rounded-xl border-r-2 border-r-[#ff6b4a] p-2.5 mt-1 w-72 shadow-2xl animate-aaa-up text-left flex flex-col gap-1.5"
+            >
+              <div className="flex items-center justify-between gap-2 text-[10px] font-mono-num">
+                <span className="font-bold text-[#ff6b4a] uppercase tracking-wider">
+                  NabiloGram · Trending
+                </span>
+                <button
+                  type="button"
+                  onClick={() => gameStore.dismissViralToast()}
+                  className="text-[#94a3b8] hover:text-white cursor-pointer"
+                >
+                  ×
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  gameStore.dismissViralToast();
+                  onOpenNabiloGram?.();
+                }}
+                className="text-left cursor-pointer group"
+              >
+                <div className="text-[11px] font-mono-num font-bold text-[#38bdf8]">
+                  {latestViralToast.authorHandle} ·{' '}
+                  {(latestViralToast.views / 1000).toFixed(1)}k views
+                </div>
+                <p className="text-xs text-[#f4f1ea] group-hover:text-white line-clamp-2 mt-0.5 leading-snug">
+                  {latestViralToast.caption}
+                </p>
+                <div className="text-[10px] text-[#ff6b4a] font-semibold mt-1">
+                  Buka di NabiloGram ›
+                </div>
+              </button>
+            </div>
+          )}
+
           {/* Phase 4: 60FPS Engine, Rapier3D Physics, Co-Op WS & Cloud Save v3 Telemetry Overlay [F3] */}
           {perfOverlayOpen && (
             <div
               data-testid="engine-perf-overlay"
-              className="aaa-glass-subtle rounded-lg border border-[#38bdf8]/40 px-3 py-2 mt-1 w-64 text-[11px] font-mono-num text-[#e2e8f0] shadow-2xl animate-aaa-up"
+              className="aaa-glass-subtle rounded-lg border border-[#38bdf8]/40 px-3 py-2 mt-1 w-72 text-[11px] font-mono-num text-[#e2e8f0] shadow-2xl animate-aaa-up"
             >
               <div className="flex items-center justify-between border-b border-white/10 pb-1 mb-1.5">
                 <span className="font-bold text-[#38bdf8] uppercase tracking-wider">
@@ -934,13 +1303,25 @@ export const GameHud: React.FC<GameHudProps> = ({
                 <div className="flex justify-between">
                   <span className="text-[#94a3b8]">Co-Op Lobby:</span>
                   <span className="font-bold text-[#22c55e]">
-                    {perfSnap.connectedPeers + 1}/8
+                    {perfSnap.connectedPeers}/8
                   </span>
                 </div>
               </div>
-              <div className="mt-1.5 pt-1 border-t border-white/10 flex items-center justify-between text-[10px] text-[#94a3b8]">
-                <span>
-                  LOD 3-Tier · Worker:{' '}
+              <div className="mt-1.5 pt-1 border-t border-white/10 flex items-center justify-between gap-2 text-[10px] text-[#94a3b8] whitespace-nowrap">
+                <span data-testid="ws-connection-state-badge">
+                  WS:{' '}
+                  <strong
+                    className={
+                      perfSnap.connectionState === 'connected'
+                        ? 'text-[#22c55e]'
+                        : perfSnap.connectionState === 'reconnecting'
+                        ? 'text-[#f59e0b]'
+                        : 'text-[#ef4444]'
+                    }
+                  >
+                    {(perfSnap.connectionState || 'connected').toUpperCase()}
+                  </strong>{' '}
+                  · Worker:{' '}
                   <strong className="text-[#22c55e]">
                     {perfSnap.simWorkerActive ? 'ON' : 'SYNC'}
                   </strong>
@@ -1026,24 +1407,60 @@ export const GameHud: React.FC<GameHudProps> = ({
             </div>
           </div>
 
-          {/* BOTTOM-CENTER (Desktop): Single Clean Contextual Interaction Prompt */}
-          <div className="hidden sm:flex flex-col items-center justify-end pointer-events-auto min-w-0 max-w-md mx-auto pb-1">
-            {primaryPrompt && (
-              <button
-                type="button"
-                onClick={primaryPrompt.onClick}
-                className="aaa-glass hover:bg-white/10 px-3.5 py-2 rounded-lg shadow-xl flex items-center gap-2.5 cursor-pointer transition-colors animate-aaa-up"
+          {/* BOTTOM-CENTER (Desktop): Seamless Interior Action Dock OR Contextual Interaction Prompt */}
+          <div className="hidden sm:flex flex-col items-center justify-end pointer-events-auto min-w-0 max-w-lg mx-auto pb-1 gap-2">
+            {playerState.currentInterior !== 'exterior' && onInteriorAction ? (
+              <div
+                data-testid="seamless-interior-dock"
+                className="aaa-glass rounded-xl px-3 py-2 shadow-xl flex items-center gap-2 animate-aaa-up"
               >
-                <span
-                  className="w-6 h-6 rounded flex items-center justify-center font-mono-num text-xs font-bold text-[#090c12] shrink-0"
-                  style={{ backgroundColor: primaryPrompt.accent }}
+                <button
+                  type="button"
+                  onClick={() => onInteriorAction('hangout')}
+                  className="px-2.5 py-1.5 rounded-lg bg-[#ff6b4a]/20 hover:bg-[#ff6b4a]/35 text-[#ff6b4a] text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap"
                 >
-                  {primaryPrompt.keycap}
-                </span>
-                <span className="text-xs md:text-sm font-semibold text-[#f4f1ea] whitespace-nowrap truncate">
-                  {primaryPrompt.label}
-                </span>
-              </button>
+                  Nongkrong (+Sinergi & HP)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onInteriorAction('repair')}
+                  className="px-2.5 py-1.5 rounded-lg bg-[#38bdf8]/20 hover:bg-[#38bdf8]/35 text-[#7dd3fc] text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap"
+                >
+                  Servis Kendaraan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onInteriorAction('save')}
+                  className="px-2.5 py-1.5 rounded-lg bg-[#22c55e]/20 hover:bg-[#22c55e]/35 text-[#4ade80] text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap"
+                >
+                  Simpan
+                </button>
+                <button
+                  type="button"
+                  onClick={onEnterOrExitInterior}
+                  className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-[#f4f1ea] text-xs font-mono-num font-bold cursor-pointer transition-colors whitespace-nowrap"
+                >
+                  [G] Keluar
+                </button>
+              </div>
+            ) : (
+              primaryPrompt && (
+                <button
+                  type="button"
+                  onClick={primaryPrompt.onClick}
+                  className="aaa-glass hover:bg-white/10 px-3.5 py-2 rounded-lg shadow-xl flex items-center gap-2.5 cursor-pointer transition-colors animate-aaa-up"
+                >
+                  <span
+                    className="w-6 h-6 rounded flex items-center justify-center font-mono-num text-xs font-bold text-[#090c12] shrink-0"
+                    style={{ backgroundColor: primaryPrompt.accent }}
+                  >
+                    {primaryPrompt.keycap}
+                  </span>
+                  <span className="text-xs md:text-sm font-semibold text-[#f4f1ea] whitespace-nowrap truncate">
+                    {primaryPrompt.label}
+                  </span>
+                </button>
+              )
             )}
           </div>
 
@@ -1113,6 +1530,42 @@ export const GameHud: React.FC<GameHudProps> = ({
                     ? `Alt ${Math.round(aircraftAltitude)} m`
                     : `${activeRadioSpec.id === 'off' ? 'Radio Off' : activeRadioSpec.freq} · Turbo Lv.${playerState.vehicleUpgradeLevel}`}
                 </span>
+                {activeVehicleDamage &&
+                  (activeVehicleDamage.integrity < 95 ||
+                    activeVehicleDamage.puncturedTires.some(Boolean)) && (
+                    <div className="flex items-center gap-2 mt-1 text-[10px] font-mono-num">
+                      <span
+                        className={`font-bold ${
+                          activeVehicleDamage.smokeStage === 'fire'
+                            ? 'text-[#ef4444]'
+                            : activeVehicleDamage.integrity < 55
+                            ? 'text-[#f59e0b]'
+                            : 'text-[#cbd5e1]'
+                        }`}
+                      >
+                        Bodi {Math.round(activeVehicleDamage.integrity)}%
+                      </span>
+                      {activeVehicleDamage.puncturedTires.some(Boolean) && (
+                        <span className="text-[#ef4444] font-bold">
+                          · Ban Pecah!
+                        </span>
+                      )}
+                      {activeVehicleDamage.smokeStage === 'fire' && (
+                        <span className="text-[#f97316] font-bold">
+                          · Mesin Terbakar!
+                        </span>
+                      )}
+                      {onRepairVehicle && (
+                        <button
+                          type="button"
+                          onClick={onRepairVehicle}
+                          className="text-[#22c55e] hover:text-white font-bold cursor-pointer"
+                        >
+                          · Servis
+                        </button>
+                      )}
+                    </div>
+                  )}
                 <div className="flex items-center gap-1.5 sm:gap-2 mt-1.5 text-[10px] sm:text-[11px] font-mono-num">
                   <button
                     type="button"
@@ -1159,6 +1612,61 @@ export const GameHud: React.FC<GameHudProps> = ({
               </div>
             </div>
           )}
+
+          {/* Wave 2 Tactical Squad Orders, Camera Mode [V] & Cover [X] Strip */}
+          <div className="hidden sm:flex items-center gap-1.5 aaa-glass-subtle px-2 py-1 rounded-lg text-[10px] font-mono-num">
+            {onCycleCamera && (
+              <button
+                type="button"
+                onClick={onCycleCamera}
+                data-testid="hud-camera-cycle-btn"
+                title="Ganti Sudut Kamera [V]"
+                className="px-1.5 py-0.5 rounded text-[#cbd5e1] hover:bg-white/10 hover:text-white cursor-pointer"
+              >
+                [V] {CAMERA_VIEW_LABELS[cameraViewMode]}
+              </button>
+            )}
+            {!drivingVehicle && onToggleCover && (
+              <>
+                <span className="text-white/20">·</span>
+                <button
+                  type="button"
+                  onClick={onToggleCover}
+                  data-testid="hud-cover-toggle-btn"
+                  title="Masuk/Keluar Cover Taktis [X]"
+                  className={`px-1.5 py-0.5 rounded font-bold cursor-pointer transition-colors ${
+                    inCover
+                      ? 'bg-[#22c55e] text-[#090c12]'
+                      : 'text-[#94a3b8] hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  [X] {inCover ? 'Cover Aktif' : 'Cover'}
+                </button>
+              </>
+            )}
+            {!drivingVehicle && onSquadOrder && (
+              <>
+                <span className="text-white/20">·</span>
+                <span className="text-[#94a3b8]">Kru:</span>
+                {(['follow', 'attack', 'hold'] as SquadOrderMode[]).map(
+                  (ord, idx) => (
+                    <button
+                      key={ord}
+                      type="button"
+                      onClick={() => onSquadOrder(ord)}
+                      className={`px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
+                        squadOrder === ord
+                          ? 'bg-[#38bdf8] text-[#090c12] font-bold'
+                          : 'text-[#94a3b8] hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      [F{idx + 1}] {SQUAD_ORDER_LABELS[ord].split(' ')[0]}
+                    </button>
+                  )
+                )}
+              </>
+            )}
+          </div>
 
           {/* Compact Protagonist & Tactical Ability Strip */}
           <div className="flex items-center gap-1 sm:gap-2 aaa-glass-subtle px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-lg max-w-full">

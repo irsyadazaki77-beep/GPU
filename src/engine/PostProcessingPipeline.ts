@@ -44,6 +44,12 @@ const CinematicGradeShader = {
       float b = texture2D(tDiffuse, vUv - offset).b;
       vec3 col = vec3(r, g, b);
 
+      // Tropical Vice-Jakarta Split-Tone Grade (warm coral-amber highlights + cool deep indigo shadows)
+      float lumaBase = dot(col, vec3(0.299, 0.587, 0.114));
+      vec3 shadowTint = vec3(col.r * 0.96, col.g * 0.98, col.b * 1.07);
+      vec3 highlightTint = vec3(col.r * 1.06, col.g * 1.01, col.b * 0.96);
+      col = mix(shadowTint, highlightTint, smoothstep(0.18, 0.78, lumaBase));
+
       // Subtle warm golden Fokus highlight when ability active
       vec3 fokusTint = vec3(col.r * 1.08, col.g * 1.03, col.b * 0.86);
       col = mix(col, fokusTint, uFokusMix * 0.38);

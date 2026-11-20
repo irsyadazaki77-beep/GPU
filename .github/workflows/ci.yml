@@ -10,7 +10,7 @@ on:
 
 jobs:
   verify:
-    name: Lint, Unit Tests & Production Build
+    name: Lint, Unit Tests, Production Build & E2E Smoke
     runs-on: ubuntu-latest
 
     steps:
@@ -21,7 +21,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
 
       - name: Install dependencies
         run: npm install
@@ -29,8 +28,27 @@ jobs:
       - name: TypeScript typecheck (lint)
         run: npm run lint
 
-      - name: Run unit tests
+      - name: Run unit & integration tests
         run: npm test
 
-      - name: Production Vite bundle
+      - name: Production Vite client bundle
         run: npm run build
+
+      - name: Production Express + WebSocket server bundle
+        run: npm run build:server
+
+      - name: Install Playwright Chromium for E2E Smoke Test
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E Smoke Test
+        run: npm run test:e2e
+
+      - name: Upload Playwright trace & screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-e2e-diagnostics
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

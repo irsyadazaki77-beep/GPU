@@ -1,5 +1,5 @@
 import type { Server as HttpServer } from 'node:http';
-import { WebSocket, WebSocketServer } from 'ws';
+import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import type {
   MultiplayerRoomMode,
   NetPeerSnapshot,
@@ -9,6 +9,8 @@ import type {
 
 export const MAX_PLAYERS_PER_ROOM = 8;
 export const SERVER_TICK_MS = 50; // 20Hz authoritative broadcast tick
+export const MAX_WS_FRAME_BYTES = 8 * 1024; // 8KB strict incoming frame cap
+export const MAX_STEP_DELTA_UNITS = 16; // Anti-teleport per-tick distance clamp
 const PEER_STALE_TIMEOUT_MS = 18_000;
 
 interface ConnectedClient {
@@ -17,6 +19,7 @@ interface ConnectedClient {
   mode: MultiplayerRoomMode;
   ws: WebSocket | null;
   isAlive: boolean;
+  lastSeenAt: number;
   state: NetPeerSnapshot;
 }
 
@@ -34,13 +37,154 @@ const VALID_MODES: MultiplayerRoomMode[] = [
 
 const VALID_PROTAGONISTS: ProtagonistId[] = ['nabilo', 'raka', 'kirana'];
 
+const VALID_VEHICLES: Set<string> = new Set([
+  'bajaj',
+  'ojek',
+  'angkot',
+  'sedan',
+  'metromini',
+  'transjakarta',
+  'polisi',
+  'barracuda',
+  'heli',
+  'supercar',
+  'vtol_jet',
+  'speedboat',
+]);
+
+// Known spawn points (initial spawn + protagonist home coordinates) allowed for instant respawn/sky-switch
+const KNOWN_RESPAWN_COORDS: ReadonlyArray<{ x: number; z: number }> = [
+  { x: 0, z: 26 },
+  { x: -12, z: 28 },
+  { x: -24, z: 18 },
+  { x: -34, z: -28 },
+];
+
+function isNearKnownRespawn(x: number, z: number): boolean {
+  return KNOWN_RESPAWN_COORDS.some(
+    (pt) => Math.hypot(x - pt.x, z - pt.z) <= 6.5
+  );
+}
+
 function clampWorldCoord(n: unknown, fallback: number): number {
   if (typeof n !== 'number' || !Number.isFinite(n)) return fallback;
   return Math.max(-92, Math.min(92, n));
 }
 
+function computeRawByteLength(raw: RawData | string): number {
+  if (typeof raw === 'string') return Buffer.byteLength(raw, 'utf-8');
+  if (Buffer.isBuffer(raw)) return raw.byteLength;
+  if (Array.isArray(raw)) {
+    return raw.reduce((sum, buf) => sum + buf.byteLength, 0);
+  }
+  if (raw instanceof ArrayBuffer) return raw.byteLength;
+  return 0;
+}
+
+export interface ValidatedWsClientMessage {
+  type: 'ping' | 'room:switch' | 'peer:update' | 'custom_race_sync';
+  clientTime?: number;
+  roomId?: string;
+  mode?: MultiplayerRoomMode;
+  state?: Partial<NetPeerSnapshot>;
+  track?: Record<string, unknown>;
+}
+
+export function validateIncomingWsFrame(
+  rawBuf: RawData | string
+):
+  | { ok: true; msg: ValidatedWsClientMessage }
+  | { ok: false; reason: 'oversized_frame' | 'malformed_json' | 'invalid_schema' } {
+  const byteLength = computeRawByteLength(rawBuf);
+  if (byteLength <= 0 || byteLength > MAX_WS_FRAME_BYTES) {
+    return { ok: false, reason: 'oversized_frame' };
+  }
+
+  let parsed: unknown;
+  try {
+    const text = typeof rawBuf === 'string' ? rawBuf : String(rawBuf);
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, reason: 'malformed_json' };
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, reason: 'invalid_schema' };
+  }
+
+  const candidate = parsed as Record<string, unknown>;
+  const msgType = candidate.type;
+  if (
+    msgType !== 'ping' &&
+    msgType !== 'room:switch' &&
+    msgType !== 'peer:update' &&
+    msgType !== 'custom_race_sync'
+  ) {
+    return { ok: false, reason: 'invalid_schema' };
+  }
+
+  if (msgType === 'room:switch') {
+    if (
+      typeof candidate.roomId !== 'string' ||
+      candidate.roomId.trim().length === 0 ||
+      candidate.roomId.length > 64
+    ) {
+      return { ok: false, reason: 'invalid_schema' };
+    }
+  }
+
+  if (msgType === 'peer:update') {
+    if (
+      !candidate.state ||
+      typeof candidate.state !== 'object' ||
+      Array.isArray(candidate.state)
+    ) {
+      return { ok: false, reason: 'invalid_schema' };
+    }
+  }
+
+  if (msgType === 'custom_race_sync') {
+    if (
+      !candidate.track ||
+      typeof candidate.track !== 'object' ||
+      Array.isArray(candidate.track) ||
+      !Array.isArray((candidate.track as Record<string, unknown>).checkpoints) ||
+      ((candidate.track as Record<string, unknown>).checkpoints as unknown[]).length < 3 ||
+      ((candidate.track as Record<string, unknown>).checkpoints as unknown[]).length > 10
+    ) {
+      return { ok: false, reason: 'invalid_schema' };
+    }
+  }
+
+  return {
+    ok: true,
+    msg: {
+      type: msgType,
+      clientTime:
+        typeof candidate.clientTime === 'number' &&
+        Number.isFinite(candidate.clientTime)
+          ? candidate.clientTime
+          : undefined,
+      roomId:
+        typeof candidate.roomId === 'string' ? candidate.roomId : undefined,
+      mode: VALID_MODES.includes(candidate.mode as MultiplayerRoomMode)
+        ? (candidate.mode as MultiplayerRoomMode)
+        : undefined,
+      state:
+        candidate.state && typeof candidate.state === 'object'
+          ? (candidate.state as Partial<NetPeerSnapshot>)
+          : undefined,
+      track:
+        candidate.track && typeof candidate.track === 'object'
+          ? (candidate.track as Record<string, unknown>)
+          : undefined,
+    },
+  };
+}
+
 export class MultiplayerRoomHub {
   private readonly rooms = new Map<string, RoomInstance>();
+  private antiCheatClampCount = 0;
 
   public joinOrSelectRoom(
     requestedRoomId: string,
@@ -81,6 +225,7 @@ export class MultiplayerRoomHub {
       this.rooms.set(targetRoomId, room);
     }
 
+    const now = Date.now();
     const initialSnap: NetPeerSnapshot = {
       peerId,
       displayName: displayName.slice(0, 24) || `Kru-${peerId.slice(0, 4)}`,
@@ -91,7 +236,7 @@ export class MultiplayerRoomHub {
       heading: Math.PI,
       speed: 0,
       vehicleType: null,
-      updatedAt: Date.now(),
+      updatedAt: now,
     };
 
     room.clients.set(peerId, {
@@ -100,16 +245,25 @@ export class MultiplayerRoomHub {
       mode: room.mode,
       ws,
       isAlive: true,
+      lastSeenAt: now,
       state: initialSnap,
     });
 
     return { roomId: targetRoomId, mode: room.mode, snapshot: initialSnap };
   }
 
+  public markPeerAlive(roomId: string, peerId: string, nowMs: number = Date.now()): void {
+    const client = this.rooms.get(roomId)?.clients.get(peerId);
+    if (!client) return;
+    client.isAlive = true;
+    client.lastSeenAt = nowMs;
+  }
+
   public updatePeerState(
     roomId: string,
     peerId: string,
-    patch: Partial<NetPeerSnapshot>
+    patch: Partial<NetPeerSnapshot>,
+    nowMs: number = Date.now()
   ): NetPeerSnapshot | null {
     const room = this.rooms.get(roomId);
     const client = room?.clients.get(peerId);
@@ -122,7 +276,36 @@ export class MultiplayerRoomHub {
       ? (patch.protagonist as ProtagonistId)
       : prev.protagonist;
 
+    let nextX = clampWorldCoord(patch.x, prev.x);
+    let nextZ = clampWorldCoord(patch.z, prev.z);
+
+    // Server-side anti-teleport / speed sanity check per tick
+    const dtSec = Math.max(0.05, Math.min(0.5, (nowMs - prev.updatedAt) / 1000));
+    const maxAllowedDelta = Math.max(MAX_STEP_DELTA_UNITS, 80 * dtSec);
+    const dx = nextX - prev.x;
+    const dz = nextZ - prev.z;
+    const dist = Math.hypot(dx, dz);
+
+    const isLegitimateRespawnOrSwitch =
+      protagonist !== prev.protagonist || isNearKnownRespawn(nextX, nextZ);
+
+    if (!isLegitimateRespawnOrSwitch && dist > maxAllowedDelta) {
+      const scale = maxAllowedDelta / dist;
+      nextX = clampWorldCoord(prev.x + dx * scale, prev.x);
+      nextZ = clampWorldCoord(prev.z + dz * scale, prev.z);
+      this.antiCheatClampCount++;
+    }
+
+    const nextVehicleType: VehicleType | null =
+      patch.vehicleType === null
+        ? null
+        : typeof patch.vehicleType === 'string' &&
+          VALID_VEHICLES.has(patch.vehicleType)
+        ? (patch.vehicleType as VehicleType)
+        : prev.vehicleType;
+
     client.isAlive = true;
+    client.lastSeenAt = nowMs;
     client.state = {
       ...prev,
       displayName:
@@ -130,9 +313,17 @@ export class MultiplayerRoomHub {
           ? patch.displayName.trim().slice(0, 24)
           : prev.displayName,
       protagonist,
-      x: clampWorldCoord(patch.x, prev.x),
-      y: Math.max(0, Math.min(72, Number(patch.y ?? prev.y) || 0)),
-      z: clampWorldCoord(patch.z, prev.z),
+      x: nextX,
+      y: Math.max(
+        0,
+        Math.min(
+          72,
+          typeof patch.y === 'number' && Number.isFinite(patch.y)
+            ? patch.y
+            : prev.y
+        )
+      ),
+      z: nextZ,
       heading:
         typeof patch.heading === 'number' && Number.isFinite(patch.heading)
           ? patch.heading
@@ -141,11 +332,8 @@ export class MultiplayerRoomHub {
         typeof patch.speed === 'number' && Number.isFinite(patch.speed)
           ? Math.max(-40, Math.min(70, patch.speed))
           : prev.speed,
-      vehicleType:
-        patch.vehicleType !== undefined
-          ? (patch.vehicleType as VehicleType | null)
-          : prev.vehicleType,
-      updatedAt: Date.now(),
+      vehicleType: nextVehicleType,
+      updatedAt: nowMs,
     };
 
     return client.state;
@@ -166,28 +354,64 @@ export class MultiplayerRoomHub {
     return Array.from(room.clients.values()).map((c) => c.state);
   }
 
-  public pruneStalePeers(nowMs: number = Date.now()): void {
+  public getRoomCount(): number {
+    return this.rooms.size;
+  }
+
+  public getAntiCheatClampCount(): number {
+    return this.antiCheatClampCount;
+  }
+
+  public pruneStalePeers(
+    nowMs: number = Date.now(),
+    staleTimeoutMs: number = PEER_STALE_TIMEOUT_MS
+  ): number {
+    let pruned = 0;
     for (const [roomId, room] of this.rooms.entries()) {
       for (const [peerId, client] of room.clients.entries()) {
-        if (nowMs - client.state.updatedAt > PEER_STALE_TIMEOUT_MS) {
+        const isStale =
+          !client.isAlive || nowMs - client.lastSeenAt > staleTimeoutMs;
+        if (isStale) {
           try {
             client.ws?.terminate();
           } catch {
             // Ignore close errors
           }
           room.clients.delete(peerId);
+          pruned++;
         }
       }
       if (room.clients.size === 0) {
         this.rooms.delete(roomId);
       }
     }
+    return pruned;
+  }
+
+  public pingConnectedSockets(nowMs: number = Date.now()): void {
+    for (const room of this.rooms.values()) {
+      for (const client of room.clients.values()) {
+        if (client.ws && client.ws.readyState === WebSocket.OPEN) {
+          if (nowMs - client.lastSeenAt > PEER_STALE_TIMEOUT_MS) {
+            client.isAlive = false;
+          }
+          try {
+            client.ws.ping();
+          } catch {
+            // Ignore ping errors
+          }
+        }
+      }
+    }
   }
 
   public broadcastRoomTicks(): void {
     const now = Date.now();
-    for (const room of this.rooms.values()) {
-      if (room.clients.size === 0) continue;
+    for (const [roomId, room] of this.rooms.entries()) {
+      if (room.clients.size === 0) {
+        this.rooms.delete(roomId);
+        continue;
+      }
       const peers = Array.from(room.clients.values()).map((c) => c.state);
       const payload = JSON.stringify({
         type: 'room:state',
@@ -208,11 +432,36 @@ export class MultiplayerRoomHub {
       }
     }
   }
+
+  public broadcastCustomRaceTrack(
+    roomId: string,
+    senderPeerId: string,
+    track: Record<string, unknown>
+  ): void {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+    const payload = JSON.stringify({
+      type: 'custom_race_sync',
+      roomId,
+      senderPeerId,
+      track,
+      serverTime: Date.now(),
+    });
+    for (const client of room.clients.values()) {
+      if (client.ws && client.ws.readyState === WebSocket.OPEN) {
+        try {
+          client.ws.send(payload);
+        } catch {
+          // Ignore send errors
+        }
+      }
+    }
+  }
 }
 
 export function attachMultiplayerWebSocketServer(
   httpServer: HttpServer
-): { wss: WebSocketServer; hub: MultiplayerRoomHub } {
+): { wss: WebSocketServer; hub: MultiplayerRoomHub; close: () => Promise<void> } {
   const hub = new MultiplayerRoomHub();
   const wss = new WebSocketServer({
     server: httpServer,
@@ -250,17 +499,22 @@ export function attachMultiplayerWebSocketServer(
       })
     );
 
-    ws.on('message', (rawBuf) => {
-      try {
-        const msg = JSON.parse(String(rawBuf)) as {
-          type?: string;
-          clientTime?: number;
-          roomId?: string;
-          mode?: MultiplayerRoomMode;
-          state?: Partial<NetPeerSnapshot>;
-        };
+    ws.on('pong', () => {
+      hub.markPeerAlive(currentRoomId, peerId);
+    });
 
-        if (msg.type === 'ping') {
+    ws.on('message', (rawBuf) => {
+      const validation = validateIncomingWsFrame(rawBuf);
+      if (!validation.ok) {
+        // Silently drop malformed JSON or oversized (> 8KB) frames
+        return;
+      }
+
+      const msg = validation.msg;
+      hub.markPeerAlive(currentRoomId, peerId);
+
+      if (msg.type === 'ping') {
+        if (ws.readyState === WebSocket.OPEN) {
           ws.send(
             JSON.stringify({
               type: 'pong',
@@ -268,19 +522,21 @@ export function attachMultiplayerWebSocketServer(
               serverTime: Date.now(),
             })
           );
-          return;
         }
+        return;
+      }
 
-        if (msg.type === 'room:switch' && msg.roomId) {
-          hub.removePeer(currentRoomId, peerId);
-          const switched = hub.joinOrSelectRoom(
-            msg.roomId,
-            msg.mode || 'free_roam',
-            peerId,
-            displayName,
-            ws
-          );
-          currentRoomId = switched.roomId;
+      if (msg.type === 'room:switch' && msg.roomId) {
+        hub.removePeer(currentRoomId, peerId);
+        const switched = hub.joinOrSelectRoom(
+          msg.roomId,
+          msg.mode || 'free_roam',
+          peerId,
+          displayName,
+          ws
+        );
+        currentRoomId = switched.roomId;
+        if (ws.readyState === WebSocket.OPEN) {
           ws.send(
             JSON.stringify({
               type: 'room:init',
@@ -291,14 +547,16 @@ export function attachMultiplayerWebSocketServer(
               serverTime: Date.now(),
             })
           );
-          return;
         }
+        return;
+      }
 
-        if (msg.type === 'peer:update' && msg.state) {
-          hub.updatePeerState(currentRoomId, peerId, msg.state);
-        }
-      } catch {
-        // Ignore malformed JSON frames
+      if (msg.type === 'peer:update' && msg.state) {
+        hub.updatePeerState(currentRoomId, peerId, msg.state);
+      }
+
+      if (msg.type === 'custom_race_sync' && msg.track) {
+        hub.broadcastCustomRaceTrack(currentRoomId, peerId, msg.track);
       }
     });
 
@@ -314,15 +572,32 @@ export function attachMultiplayerWebSocketServer(
   const tickTimer = setInterval(() => {
     hub.broadcastRoomTicks();
   }, SERVER_TICK_MS);
+  tickTimer.unref?.();
 
   const pruneTimer = setInterval(() => {
     hub.pruneStalePeers();
+    hub.pingConnectedSockets();
   }, 5000);
+  pruneTimer.unref?.();
 
   wss.on('close', () => {
     clearInterval(tickTimer);
     clearInterval(pruneTimer);
   });
 
-  return { wss, hub };
+  const close = () =>
+    new Promise<void>((resolve) => {
+      clearInterval(tickTimer);
+      clearInterval(pruneTimer);
+      for (const client of wss.clients) {
+        try {
+          client.terminate();
+        } catch {
+          // Ignore terminate errors
+        }
+      }
+      wss.close(() => resolve());
+    });
+
+  return { wss, hub, close };
 }

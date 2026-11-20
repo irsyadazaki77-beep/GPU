@@ -369,6 +369,9 @@ export function createInitialPlayerState(origin: OriginArchetype): PlayerProgres
       gatotkaca: [],
     },
     districtTurf: createInitialDistrictTurf(),
+    unlockedSafehouses: ['safehouse_menteng'],
+    ownedBusinesses: {},
+    customRaceTracks: [],
   };
 
   if (origin === 'anak_jalanan') {

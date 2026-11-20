@@ -5,6 +5,10 @@ export * from './economy';
 export * from './heists';
 export * from './racing';
 export * from './combat';
+export * from './wantedSystem';
+export * from './heistRoles';
+export * from './nextGenSystems';
+export * from './wave2Systems';
 export {
   WORLD_MAX_BOUND,
   CITY_BUILDINGS,

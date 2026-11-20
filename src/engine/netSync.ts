@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PROTAGONIST_PROFILES, getGroundElevationAt } from '../game/rules';
 import type {
+  MultiplayerConnectionState,
   MultiplayerRoomMode,
   NetPeerSnapshot,
   ProtagonistId,
@@ -16,6 +17,15 @@ export interface InterpolatedPeerPose {
   y: number;
   z: number;
   heading: number;
+}
+
+/**
+ * Exponential backoff delay calculator (1s -> 2s -> 4s -> 8s -> max 15s)
+ * for automatic WebSocket multiplayer reconnection.
+ */
+export function computeReconnectBackoffSec(attempt: number): number {
+  const cleanAttempt = Math.max(0, Math.floor(attempt));
+  return Math.min(15, Math.pow(2, cleanAttempt));
 }
 
 /**
@@ -80,10 +90,13 @@ export class MultiplayerClientSync {
   private localPeerId = '';
   private roomId = 'jakarta_1';
   private roomMode: MultiplayerRoomMode = 'free_roam';
+  private connectionState: MultiplayerConnectionState = 'connected';
   private pingMs = 12;
   private sendAccumulator = 0;
   private pingAccumulator = 0;
   private reconnectTimer = 0;
+  private reconnectAttempt = 0;
+  private nextReconnectDelaySec = 1;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -95,6 +108,7 @@ export class MultiplayerClientSync {
     mode: MultiplayerRoomMode = this.roomMode
   ): void {
     if (this.disposed || typeof window === 'undefined' || !window.WebSocket) {
+      this.connectionState = 'offline';
       return;
     }
 
@@ -103,10 +117,16 @@ export class MultiplayerClientSync {
 
     try {
       if (this.ws) {
+        this.ws.onopen = null;
         this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.onmessage = null;
         this.ws.close();
         this.ws = null;
       }
+
+      this.connectionState =
+        this.reconnectAttempt > 0 ? 'reconnecting' : 'connected';
 
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${proto}//${window.location.host}/ws/multiplayer?room=${encodeURIComponent(
@@ -115,6 +135,14 @@ export class MultiplayerClientSync {
 
       const socket = new WebSocket(wsUrl);
       this.ws = socket;
+
+      socket.onopen = () => {
+        if (this.disposed) return;
+        this.connectionState = 'connected';
+        this.reconnectAttempt = 0;
+        this.reconnectTimer = 0;
+        this.nextReconnectDelaySec = computeReconnectBackoffSec(0);
+      };
 
       socket.onmessage = (evt) => {
         if (this.disposed) return;
@@ -129,6 +157,9 @@ export class MultiplayerClientSync {
           };
 
           if (data.type === 'room:init') {
+            this.connectionState = 'connected';
+            this.reconnectAttempt = 0;
+            this.reconnectTimer = 0;
             if (data.peerId) this.localPeerId = data.peerId;
             if (data.roomId) this.roomId = data.roomId;
             if (data.mode) this.roomMode = data.mode;
@@ -139,6 +170,7 @@ export class MultiplayerClientSync {
           }
 
           if (data.type === 'room:state' && Array.isArray(data.peers)) {
+            this.connectionState = 'connected';
             if (data.roomId) this.roomId = data.roomId;
             if (data.mode) this.roomMode = data.mode;
             this.ingestPeerList(data.peers);
@@ -156,13 +188,25 @@ export class MultiplayerClientSync {
       socket.onclose = () => {
         if (this.disposed) return;
         this.ws = null;
+        const navigatorOnline =
+          typeof navigator === 'undefined' || navigator.onLine !== false;
+        this.connectionState = navigatorOnline ? 'reconnecting' : 'offline';
+        this.nextReconnectDelaySec = computeReconnectBackoffSec(
+          this.reconnectAttempt
+        );
+        this.reconnectAttempt++;
+        this.reconnectTimer = 0;
       };
 
       socket.onerror = () => {
-        // Ignore transient WS errors; auto-reconnect handles recovery
+        // Ignore transient WS errors; exponential backoff onclose handles recovery
       };
     } catch {
-      // Ignore connection errors when offline
+      this.connectionState = 'offline';
+      this.nextReconnectDelaySec = computeReconnectBackoffSec(
+        this.reconnectAttempt
+      );
+      this.reconnectAttempt++;
     }
   }
 
@@ -178,6 +222,7 @@ export class MultiplayerClientSync {
         })
       );
     } else {
+      this.reconnectAttempt = 0;
       this.connect(this.roomId, this.roomMode);
     }
   }
@@ -248,12 +293,12 @@ export class MultiplayerClientSync {
   ): void {
     if (this.disposed) return;
 
-    // Reconnect automatically if disconnected
+    // Exponential backoff auto-reconnect (1s -> 2s -> 4s -> 8s -> max 15s)
     if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
       this.reconnectTimer += dt;
-      if (this.reconnectTimer >= 4.0) {
+      if (this.reconnectTimer >= this.nextReconnectDelaySec) {
         this.reconnectTimer = 0;
-        this.connect();
+        this.connect(this.roomId, this.roomMode);
       }
     }
 
@@ -330,12 +375,16 @@ export class MultiplayerClientSync {
     connectedPeers: number;
     roomId: string;
     roomMode: MultiplayerRoomMode;
+    connectionState: MultiplayerConnectionState;
   } {
+    const isSocketOpen =
+      Boolean(this.ws) && this.ws!.readyState === WebSocket.OPEN;
     return {
       networkPingMs: this.pingMs,
       connectedPeers: this.peerSlots.size + 1,
       roomId: this.roomId,
       roomMode: this.roomMode,
+      connectionState: isSocketOpen ? 'connected' : this.connectionState,
     };
   }
 
@@ -355,6 +404,7 @@ export class MultiplayerClientSync {
   public dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.connectionState = 'offline';
     for (const slot of this.peerSlots.values()) {
       this.disposeSlot(slot);
     }
@@ -362,7 +412,10 @@ export class MultiplayerClientSync {
     this.scene.remove(this.peersGroup);
     if (this.ws) {
       try {
+        this.ws.onopen = null;
         this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.onmessage = null;
         this.ws.close();
       } catch {
         // Ignore close errors

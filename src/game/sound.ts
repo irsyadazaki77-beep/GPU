@@ -1015,6 +1015,22 @@ class SoundEngine {
     }, 180);
   }
 
+  public playVictoryFanfare(): void {
+    this.playTone(523.25, 0.14, 'triangle', 0.16, 1.0, 'sfx');
+    window.setTimeout(
+      () => this.playTone(659.25, 0.16, 'triangle', 0.17, 1.0, 'sfx'),
+      110
+    );
+    window.setTimeout(
+      () => this.playTone(783.99, 0.24, 'triangle', 0.18, 1.0, 'sfx'),
+      230
+    );
+    window.setTimeout(
+      () => this.playTone(1046.5, 0.36, 'sine', 0.16, 1.0, 'sfx'),
+      360
+    );
+  }
+
   public playDefeatSting() {
     this.playTone(260, 0.25, 'sawtooth', 0.18, 0.7, 'sfx');
     setTimeout(() => this.playTone(175, 0.45, 'sawtooth', 0.2, 0.5, 'sfx'), 200);

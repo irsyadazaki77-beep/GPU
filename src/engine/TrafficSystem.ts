@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import {
   BuildingFootprint,
   PlayerProgressState,
+  PoliceVisionCone,
+  RACE_RIVAL_PROFILES,
+  RaceRivalTelemetry,
   SpatialHashGrid,
   TRAFFIC_ROUTES,
   TrafficAISteppable,
@@ -10,13 +13,21 @@ import {
   TrafficSignalState,
   VEHICLE_SPECS,
   VehicleCustomConfig,
+  VehicleDamageState,
+  VehicleDamageZone,
   VehicleType,
+  applyTirePuncture,
+  applyVehicleImpactDamage,
+  computePoliceInterceptVector,
   createInitialTrafficSignalState,
+  createInitialVehicleDamage,
+  evaluateSpikeStripHit,
   generateInitialTrafficSpawns,
   getGroundElevationAt,
   resolveCircleAABBCollision,
   stepTrafficSignals,
   stepTrafficVehicleInPlace,
+  stepVehicleDamageTick,
 } from '../game/rules';
 import { soundEngine } from '../game/sound';
 import {
@@ -38,6 +49,8 @@ export interface VehicleEntity extends TrafficAISteppable {
   isDrifting: boolean;
   pitchAngle: number;
   rollAngle: number;
+  damage: VehicleDamageState;
+  smokeParticleAccum: number;
 }
 
 export class TrafficSystem {
@@ -46,6 +59,7 @@ export class TrafficSystem {
   public readonly sirenLight: THREE.PointLight;
   public readonly policeHeliMesh: THREE.Group;
   public readonly chopperSpotLight: THREE.SpotLight;
+  public readonly chopperBeamMesh: THREE.Mesh;
   public signalState: TrafficSignalState;
 
   private readonly scene: THREE.Scene;
@@ -60,6 +74,21 @@ export class TrafficSystem {
   private roadblockZ = -42;
   private roadblockCooldown = 0;
   private pendingHornPulse = false;
+  private readonly raceRivals: {
+    id: string;
+    name: string;
+    colorHex: number;
+    baseSpeed: number;
+    mesh: THREE.Group;
+    x: number;
+    y: number;
+    z: number;
+    heading: number;
+    speed: number;
+    checkpointIndex: number;
+    finished: boolean;
+    finishTimeSec: number | null;
+  }[] = [];
 
   constructor(
     scene: THREE.Scene,
@@ -99,6 +128,7 @@ export class TrafficSystem {
       { type: 'supercar', x: 28, z: -26, heading: -Math.PI / 2 },
       { type: 'angkot', x: -5.4, z: 45.5, heading: Math.PI },
       { type: 'sedan', x: 5.4, z: -15.0, heading: 0 },
+      { type: 'speedboat', x: -195, z: -232, heading: 0 },
     ];
 
     parkedVehicles.forEach((vCfg, idx) => {
@@ -127,6 +157,8 @@ export class TrafficSystem {
         isDrifting: false,
         pitchAngle: 0,
         rollAngle: 0,
+        damage: createInitialVehicleDamage(),
+        smokeParticleAccum: 0,
       });
     });
 
@@ -176,14 +208,30 @@ export class TrafficSystem {
         isDrifting: false,
         pitchAngle: 0,
         rollAngle: 0,
+        damage: createInitialVehicleDamage(),
+        smokeParticleAccum: 0,
       });
     });
 
-    // Police Chopper + Real Searchlight SpotLight
+    // Police Chopper + Real Searchlight SpotLight + Visible Volumetric Searchlight Cone
     this.policeHeliMesh = buildPolicePursuitHeliWithSpotlight();
     this.policeHeliMesh.position.set(0, 24, -30);
     this.policeHeliMesh.visible = false;
     scene.add(this.policeHeliMesh);
+
+    const beamGeo = new THREE.ConeGeometry(6.8, 25, 16, 1, true);
+    beamGeo.translate(0, -12.5, 0);
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: 0xfef08a,
+      transparent: true,
+      opacity: 0.14,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.chopperBeamMesh = new THREE.Mesh(beamGeo, beamMat);
+    this.chopperBeamMesh.position.set(0, -0.8, 0.9);
+    this.policeHeliMesh.add(this.chopperBeamMesh);
 
     this.chopperSpotLight = new THREE.SpotLight(
       0xfef08a,
@@ -219,6 +267,18 @@ export class TrafficSystem {
       stripe.position.set(bx, 0.65, 0);
       this.roadblockGroup.add(stripe);
     }
+    // Paku Ranjau (Spike Strip) metallic teeth strip in front of police roadblock
+    const spikeBaseMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      metalness: 0.75,
+      roughness: 0.35,
+    });
+    const spikeStripMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(11.5, 0.08, 0.45),
+      spikeBaseMat
+    );
+    spikeStripMesh.position.set(0, 0.04, 2.2);
+    this.roadblockGroup.add(spikeStripMesh);
     this.roadblockGroup.visible = false;
     scene.add(this.roadblockGroup);
 
@@ -382,9 +442,122 @@ export class TrafficSystem {
       isDrifting: false,
       pitchAngle: 0,
       rollAngle: 0,
+      damage: createInitialVehicleDamage(),
+      smokeParticleAccum: 0,
     });
 
     return { x: safe.x, y: gY, z: safe.z };
+  }
+
+  public applyVehicleImpact(
+    veh: VehicleEntity,
+    impactForce: number,
+    zone: VehicleDamageZone
+  ): {
+    justCaughtFire: boolean;
+    damageApplied: number;
+  } {
+    const res = applyVehicleImpactDamage(veh.damage, impactForce, zone);
+    veh.damage = res.next;
+    if (res.damageApplied > 0) {
+      this.applyVisualDeformation(veh);
+    }
+    return {
+      justCaughtFire: res.justCaughtFire,
+      damageApplied: res.damageApplied,
+    };
+  }
+
+  public applyVisualDeformation(veh: VehicleEntity): void {
+    const dmg = veh.damage;
+    const frontCrumple = Math.min(0.14, dmg.zones.front * 0.045);
+    const sideCrumple = Math.min(
+      0.1,
+      (dmg.zones.left + dmg.zones.right) * 0.024
+    );
+    const rearCrumple = Math.min(0.11, dmg.zones.rear * 0.036);
+    veh.mesh.scale.set(
+      1 - sideCrumple,
+      1 + frontCrumple * 0.18,
+      1 - frontCrumple - rearCrumple * 0.6
+    );
+    if (dmg.exploded) {
+      veh.mesh.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+          obj.material.color.setHex(0x1e293b);
+          obj.material.roughness = 0.95;
+          obj.material.metalness = 0.1;
+        }
+      });
+    }
+  }
+
+  public repairVehicle(veh: VehicleEntity): void {
+    veh.damage = createInitialVehicleDamage();
+    veh.smokeParticleAccum = 0;
+    veh.mesh.scale.set(1, 1, 1);
+  }
+
+  public stepVehicleDamageAndExplosions(
+    dt: number,
+    spawnParticles: (
+      x: number,
+      y: number,
+      z: number,
+      count: number,
+      colorHex: number,
+      speed?: number
+    ) => void,
+    onChainExplosion: (x: number, y: number, z: number, veh: VehicleEntity) => void
+  ): void {
+    for (let i = 0; i < this.vehicles.length; i++) {
+      const v = this.vehicles[i];
+      if (v.damage.smokeStage === 'none' && !v.damage.exploded) continue;
+
+      const tick = stepVehicleDamageTick(v.damage, dt);
+      v.damage = tick.next;
+
+      if (tick.triggeredExplosion) {
+        v.speed = 0;
+        this.applyVisualDeformation(v);
+        spawnParticles(v.x, v.y + 1.4, v.z, 34, 0xf97316, 15);
+        spawnParticles(v.x, v.y + 2.0, v.z, 18, 0xfef08a, 11);
+        soundEngine.playPropCrash(0);
+        onChainExplosion(v.x, v.y, v.z, v);
+
+        // Chain-reaction blast damages nearby vehicles within 13m
+        for (let j = 0; j < this.vehicles.length; j++) {
+          if (i === j) continue;
+          const other = this.vehicles[j];
+          const d = Math.hypot(other.x - v.x, other.z - v.z);
+          if (d < 13 && !other.damage.exploded) {
+            this.applyVehicleImpact(other, Math.max(6, (13 - d) * 1.3), 'front');
+          }
+        }
+        continue;
+      }
+
+      v.smokeParticleAccum += dt;
+      const emitInterval =
+        v.damage.smokeStage === 'fire'
+          ? 0.08
+          : v.damage.smokeStage === 'heavy_smoke'
+          ? 0.16
+          : 0.28;
+      if (v.smokeParticleAccum >= emitInterval) {
+        v.smokeParticleAccum = 0;
+        const hoodX = v.x + Math.sin(v.heading) * 1.4;
+        const hoodZ = v.z + Math.cos(v.heading) * 1.4;
+        if (v.damage.smokeStage === 'fire') {
+          spawnParticles(hoodX, v.y + 1.25, hoodZ, 3, 0xf97316, 5.2);
+          spawnParticles(hoodX, v.y + 1.45, hoodZ, 2, 0x1e293b, 3.6);
+        } else if (v.damage.smokeStage === 'heavy_smoke') {
+          spawnParticles(hoodX, v.y + 1.2, hoodZ, 2, 0x334155, 3.2);
+        } else if (v.damage.smokeStage === 'steam') {
+          spawnParticles(hoodX, v.y + 1.15, hoodZ, 1, 0xcbd5e1, 2.4);
+        }
+      }
+    }
   }
 
   public updateVisualsAndAircraft(
@@ -556,19 +729,37 @@ export class TrafficSystem {
       }
       this.roadblockGroup.visible = this.roadblockActive;
 
-      // Check collision if player rams through barricade
-      if (
-        this.roadblockActive &&
-        activeVehicle &&
-        activeVehicle.y < 2.2 &&
-        Math.abs(playerX - this.roadblockX) < 5.0 &&
-        Math.abs(playerZ - this.roadblockZ) < 1.6
-      ) {
-        activeVehicle.speed *= 0.45;
-        this.roadblockActive = false;
-        this.roadblockGroup.visible = false;
-        this.roadblockCooldown = 10;
-        soundEngine.playPropCrash(0);
+      // Check collision if player rams through barricade or hits spike strip (paku ranjau)
+      if (this.roadblockActive && activeVehicle && activeVehicle.y < 2.2) {
+        const spikeEval = evaluateSpikeStripHit(
+          playerX,
+          playerZ,
+          this.roadblockX,
+          this.roadblockZ,
+          this.roadblockActive,
+          pState.wantedLevel
+        );
+        if (spikeEval.hit) {
+          activeVehicle.speed *= spikeEval.speedMultiplier;
+          activeVehicle.driftAngle += spikeEval.angularImpulse * 0.25;
+          activeVehicle.damage = applyTirePuncture(activeVehicle.damage, [0, 1]);
+          this.applyVisualDeformation(activeVehicle);
+          this.roadblockActive = false;
+          this.roadblockGroup.visible = false;
+          this.roadblockCooldown = 10;
+          soundEngine.playPropCrash(0);
+          gameStore.setState((prev) => ({
+            policeTactical: {
+              ...prev.policeTactical,
+              spikeStripsHitCount: prev.policeTactical.spikeStripsHitCount + 1,
+              radioCallout:
+                'Unit Barikade: Ban suspek pecah kena paku ranjau! Rapatkan formasi!',
+              radioCalloutStamp: Date.now(),
+            },
+            lastOutcomeText:
+              'AWAS! Ban depan pecah terkena paku ranjau polisi — handling berat & kecepatan turun!',
+          }));
+        }
       }
     } else {
       this.roadblockActive = false;
@@ -591,28 +782,41 @@ export class TrafficSystem {
       }
     }
 
+    const playerVx = activeVehicle
+      ? Math.sin(activeVehicle.heading) * activeVehicle.speed
+      : 0;
+    const playerVz = activeVehicle
+      ? Math.cos(activeVehicle.heading) * activeVehicle.speed
+      : 0;
+
     for (let vi = 0; vi < this.vehicles.length; vi++) {
       const v = this.vehicles[vi];
       if (!v.isTraffic || v.id === drivingVehicleId) continue;
 
       if (
         (v.type === 'polisi' && pState.wantedLevel > 0) ||
-        (v.type === 'barracuda' && pState.wantedLevel >= 3)
+        (v.type === 'barracuda' && pState.wantedLevel >= 4)
       ) {
         const kiranaEmp =
           pState.activeProtagonist === 'kirana' && pState.fokusActive;
         const pSpeed = kiranaEmp ? 1.5 : 13.5 + pState.wantedLevel * 1.4;
-        const dxP = playerX - v.x;
-        const dzP = playerZ - v.z;
-        const distP = Math.hypot(dxP, dzP) || 1;
-        if (distP < 32) {
+        const intercept = computePoliceInterceptVector(
+          v.x,
+          v.z,
+          playerX,
+          playerZ,
+          playerVx,
+          playerVz,
+          pState.wantedLevel
+        );
+        if (intercept.distance < 32) {
           spottedByPolice = true;
         }
-        if (distP > 4.5) {
-          v.heading = Math.atan2(dxP, dzP);
+        if (intercept.distance > 4.5) {
+          v.heading = Math.atan2(intercept.dirX, intercept.dirZ);
           v.speed = pSpeed;
-          const nx = v.x + (dxP / distP) * pSpeed * simDt;
-          const nz = v.z + (dzP / distP) * pSpeed * simDt;
+          const nx = v.x + intercept.dirX * pSpeed * simDt;
+          const nz = v.z + intercept.dirZ * pSpeed * simDt;
           const col = resolveCircleAABBCollision(
             nx,
             nz,
@@ -712,7 +916,20 @@ export class TrafficSystem {
           activeVehicle.y + 0.1,
           activeVehicle.z + hFwdZ * 16
         );
-        this.vehicleHeadlight.intensity = nightFactor * 4.6;
+        const brokenCount =
+          (activeVehicle.damage.headlightsBroken[0] ? 1 : 0) +
+          (activeVehicle.damage.headlightsBroken[1] ? 1 : 0);
+        const flicker =
+          brokenCount === 1
+            ? Math.sin(nowMs * 0.042) > -0.35
+              ? 0.58
+              : 0.14
+            : brokenCount >= 2
+            ? Math.sin(nowMs * 0.065) > 0.72
+              ? 0.28
+              : 0
+            : 1.0;
+        this.vehicleHeadlight.intensity = nightFactor * 4.6 * flicker;
       } else {
         this.vehicleHeadlight.intensity = 0;
       }
@@ -788,6 +1005,235 @@ export class TrafficSystem {
     }
   }
 
+  public writePoliceVisionCones(
+    out: PoliceVisionCone[],
+    wantedLevel: number
+  ): void {
+    let count = 0;
+    if (wantedLevel > 0) {
+      for (let i = 0; i < this.vehicles.length; i++) {
+        const v = this.vehicles[i];
+        if (v.type !== 'polisi' && v.type !== 'barracuda') continue;
+        const range = v.type === 'barracuda' ? 32 : 26;
+        if (!out[count]) {
+          out[count] = {
+            id: v.id,
+            x: v.x,
+            z: v.z,
+            heading: v.heading,
+            range,
+            halfAngleRad: 0.44,
+            isHeli: false,
+          };
+        } else {
+          out[count].id = v.id;
+          out[count].x = v.x;
+          out[count].z = v.z;
+          out[count].heading = v.heading;
+          out[count].range = range;
+          out[count].halfAngleRad = 0.44;
+          out[count].isHeli = false;
+        }
+        count++;
+      }
+      if (this.policeHeliMesh.visible) {
+        const tgt = this.chopperSpotLight.target.position;
+        if (!out[count]) {
+          out[count] = {
+            id: 'heli_searchlight',
+            x: tgt.x,
+            z: tgt.z,
+            heading: 0,
+            range: 9.5,
+            halfAngleRad: Math.PI,
+            isHeli: true,
+          };
+        } else {
+          out[count].id = 'heli_searchlight';
+          out[count].x = tgt.x;
+          out[count].z = tgt.z;
+          out[count].heading = 0;
+          out[count].range = 9.5;
+          out[count].halfAngleRad = Math.PI;
+          out[count].isHeli = true;
+        }
+        count++;
+      }
+    }
+    out.length = count;
+  }
+
+  public startRaceRivals(
+    checkpoints: [number, number][],
+    startX: number,
+    startZ: number,
+    startHeading: number
+  ): void {
+    this.clearRaceRivals();
+    const rightX = Math.cos(startHeading);
+    const rightZ = -Math.sin(startHeading);
+    const fwdX = Math.sin(startHeading);
+    const fwdZ = Math.cos(startHeading);
+
+    RACE_RIVAL_PROFILES.forEach((profile, idx) => {
+      const mesh = buildIndonesianVehicleMesh('supercar');
+      mesh.traverse((child) => {
+        if (
+          child instanceof THREE.Mesh &&
+          child.material instanceof THREE.MeshStandardMaterial &&
+          child.userData.isBodyPaint
+        ) {
+          child.material = child.material.clone();
+          child.material.color.setHex(profile.colorHex);
+          child.material.metalness = 0.72;
+          child.material.roughness = 0.22;
+        }
+      });
+      const laneOffset = idx === 0 ? -3.4 : idx === 1 ? 3.4 : 0;
+      const rowOffset = idx === 2 ? -5.8 : -2.2;
+      const rx = startX + rightX * laneOffset + fwdX * rowOffset;
+      const rz = startZ + rightZ * laneOffset + fwdZ * rowOffset;
+      const ry = getGroundElevationAt(rx, rz);
+      mesh.position.set(rx, ry, rz);
+      mesh.rotation.y = startHeading;
+      this.scene.add(mesh);
+
+      this.raceRivals.push({
+        id: profile.id,
+        name: profile.name,
+        colorHex: profile.colorHex,
+        baseSpeed: profile.baseSpeed,
+        mesh,
+        x: rx,
+        y: ry,
+        z: rz,
+        heading: startHeading,
+        speed: 0,
+        checkpointIndex: 0,
+        finished: false,
+        finishTimeSec: null,
+      });
+    });
+    void checkpoints;
+  }
+
+  public stepRaceRivals(
+    dt: number,
+    checkpoints: [number, number][],
+    elapsedSec: number,
+    isRacing: boolean
+  ): void {
+    if (this.raceRivals.length === 0 || checkpoints.length === 0) return;
+
+    for (let i = 0; i < this.raceRivals.length; i++) {
+      const rv = this.raceRivals[i];
+      if (!isRacing) {
+        rv.speed = 0;
+        rv.mesh.position.set(rv.x, rv.y, rv.z);
+        continue;
+      }
+      if (rv.finished) {
+        rv.speed = Math.max(0, rv.speed - dt * 16);
+      } else {
+        const target = checkpoints[Math.min(rv.checkpointIndex, checkpoints.length - 1)];
+        const dx = target[0] - rv.x;
+        const dz = target[1] - rv.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 7.2) {
+          rv.checkpointIndex += 1;
+          if (rv.checkpointIndex >= checkpoints.length) {
+            rv.finished = true;
+            rv.finishTimeSec = elapsedSec;
+          }
+        }
+        const desiredHeading = Math.atan2(dx, dz);
+        const angleDiff = Math.atan2(
+          Math.sin(desiredHeading - rv.heading),
+          Math.cos(desiredHeading - rv.heading)
+        );
+        rv.heading += THREE.MathUtils.clamp(angleDiff, -4.2 * dt, 4.2 * dt);
+        const cornerPenalty = Math.abs(angleDiff) > 0.55 ? 0.65 : 1.0;
+        const targetSpeed =
+          rv.baseSpeed * cornerPenalty * (0.94 + Math.sin(elapsedSec * 1.3 + i * 2) * 0.08);
+        rv.speed = THREE.MathUtils.damp(rv.speed, targetSpeed, 3.2, dt);
+      }
+
+      const nx = rv.x + Math.sin(rv.heading) * rv.speed * dt;
+      const nz = rv.z + Math.cos(rv.heading) * rv.speed * dt;
+      const col = resolveCircleAABBCollision(nx, nz, 2.0, undefined, this.buildingGrid);
+      rv.x = col.x;
+      rv.z = col.z;
+      rv.y = getGroundElevationAt(rv.x, rv.z);
+      rv.mesh.position.set(rv.x, rv.y, rv.z);
+      rv.mesh.rotation.y = rv.heading;
+    }
+  }
+
+  public writeRaceRivalsTelemetry(out: RaceRivalTelemetry[]): void {
+    out.length = this.raceRivals.length;
+    for (let i = 0; i < this.raceRivals.length; i++) {
+      const rv = this.raceRivals[i];
+      if (!out[i]) {
+        out[i] = {
+          id: rv.id,
+          name: rv.name,
+          colorHex: rv.colorHex,
+          x: rv.x,
+          z: rv.z,
+          heading: rv.heading,
+          checkpointIndex: rv.checkpointIndex,
+          finished: rv.finished,
+          finishTimeSec: rv.finishTimeSec,
+        };
+      } else {
+        out[i].id = rv.id;
+        out[i].name = rv.name;
+        out[i].colorHex = rv.colorHex;
+        out[i].x = rv.x;
+        out[i].z = rv.z;
+        out[i].heading = rv.heading;
+        out[i].checkpointIndex = rv.checkpointIndex;
+        out[i].finished = rv.finished;
+        out[i].finishTimeSec = rv.finishTimeSec;
+      }
+    }
+  }
+
+  public clearRaceRivals(): void {
+    for (const rv of this.raceRivals) {
+      this.scene.remove(rv.mesh);
+      rv.mesh.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry?.dispose();
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+          mats.forEach((m) => m?.dispose());
+        }
+      });
+    }
+    this.raceRivals.length = 0;
+  }
+
+  public applyEmpPulseAt(
+    x: number,
+    z: number,
+    radius: number,
+    drivingVehicleId: string | null
+  ): number {
+    let disrupted = 0;
+    for (let i = 0; i < this.vehicles.length; i++) {
+      const v = this.vehicles[i];
+      if (v.id === drivingVehicleId) continue;
+      if (Math.hypot(v.x - x, v.z - z) <= radius) {
+        if (v.type === 'polisi' || v.type === 'barracuda' || v.isTraffic) {
+          v.speed *= 0.15;
+          v.stopTimer = Math.max(v.stopTimer, 4.2);
+          disrupted++;
+        }
+      }
+    }
+    return disrupted;
+  }
+
   public dispose(): void {
     const disposeGroup = (grp: THREE.Object3D) => {
       grp.traverse((obj) => {
@@ -800,6 +1246,7 @@ export class TrafficSystem {
         }
       });
     };
+    this.clearRaceRivals();
     for (const v of this.vehicles) {
       disposeGroup(v.mesh);
     }

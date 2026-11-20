@@ -99,23 +99,45 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({
     >
       {/* LEFT THUMB ZONE: Virtual Analog Movement / Steering Stick */}
       <div className="flex flex-col items-center gap-2 pointer-events-auto">
-        {!drivingVehicle && (
+        <div className="flex items-center gap-1.5">
+          {!drivingVehicle && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = !sprintLocked;
+                setSprintLocked(next);
+                virtualInputRef.sprintHeld = next;
+              }}
+              className={`min-h-[34px] px-2.5 rounded-lg font-mono-num text-[10px] font-bold border transition-colors cursor-pointer ${
+                sprintLocked
+                  ? 'bg-[#f59e0b] text-[#090c12] border-[#f59e0b]'
+                  : 'bg-[#090c12]/85 text-[#cbd5e1] border-white/15'
+              }`}
+            >
+              {sprintLocked ? 'Lari: On' : 'Lari'}
+            </button>
+          )}
+          {!drivingVehicle && (
+            <button
+              type="button"
+              onClick={() => {
+                virtualInputRef.coverTap = true;
+              }}
+              className="min-h-[34px] px-2.5 rounded-lg font-mono-num text-[10px] font-bold border bg-[#090c12]/85 text-[#38bdf8] border-[#38bdf8]/40 active:scale-95 cursor-pointer"
+            >
+              Cover
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
-              const next = !sprintLocked;
-              setSprintLocked(next);
-              virtualInputRef.sprintHeld = next;
+              virtualInputRef.cameraTap = true;
             }}
-            className={`min-h-[36px] px-3 rounded-lg font-mono-num text-[11px] font-bold border transition-colors cursor-pointer ${
-              sprintLocked
-                ? 'bg-[#f59e0b] text-[#090c12] border-[#f59e0b]'
-                : 'bg-[#090c12]/85 text-[#cbd5e1] border-white/15'
-            }`}
+            className="min-h-[34px] px-2.5 rounded-lg font-mono-num text-[10px] font-bold border bg-[#090c12]/85 text-[#f4f1ea] border-white/20 active:scale-95 cursor-pointer"
           >
-            {sprintLocked ? 'Lari Cepat: Aktif' : 'Kunci Lari'}
+            Kamera
           </button>
-        )}
+        </div>
 
         <div
           onPointerDown={(e) => {

@@ -10,6 +10,7 @@ import {
   PedestrianAiAgent,
   stepPedestrianAgentInPlace,
   triggerCrowdFleeImpulse,
+  triggerCrowdSocialFilming,
 } from './crowdAi';
 
 const MAX_PEDESTRIANS = 52;
@@ -34,6 +35,7 @@ export class CrowdSystem {
   private readonly leftLegMesh: THREE.InstancedMesh;
   private readonly rightLegMesh: THREE.InstancedMesh;
   private readonly umbrellaMesh: THREE.InstancedMesh;
+  private readonly phoneMesh: THREE.InstancedMesh;
 
   private readonly _dummy = new THREE.Object3D();
   private readonly _color = new THREE.Color();
@@ -85,6 +87,7 @@ export class CrowdSystem {
         crowdTimer: 0,
         crowdAnchorX: sx,
         crowdAnchorZ: sz,
+        filmTimer: 0,
         torsoColor: BATIK_SHIRT_COLORS[i % BATIK_SHIRT_COLORS.length],
       });
     }
@@ -143,6 +146,14 @@ export class CrowdSystem {
     this.umbrellaMesh.frustumCulled = false;
     this.group.add(this.umbrellaMesh);
 
+    // Glowing smartphone screens raised by NPCs filming viral events
+    const phoneGeo = new THREE.BoxGeometry(0.14, 0.24, 0.04);
+    const phoneMat = new THREE.MeshBasicMaterial({ color: 0x67e8f9 });
+    this.phoneMesh = new THREE.InstancedMesh(phoneGeo, phoneMat, MAX_PEDESTRIANS);
+    this.phoneMesh.frustumCulled = false;
+    this.phoneMesh.count = 0;
+    this.group.add(this.phoneMesh);
+
     for (let i = 0; i < MAX_PEDESTRIANS; i++) {
       this._color.setHex(this.agents[i].torsoColor);
       this.torsoMesh.setColorAt(i, this._color);
@@ -169,6 +180,14 @@ export class CrowdSystem {
     triggerCrowdFleeImpulse(this.agents, worldX, worldZ, radius, 4.2);
   }
 
+  public triggerSocialFilmingNear(
+    worldX: number,
+    worldZ: number,
+    maxRadius: number = 26
+  ): number {
+    return triggerCrowdSocialFilming(this.agents, worldX, worldZ, 6.5, maxRadius, 5.5);
+  }
+
   public getAgents(): readonly PedestrianAiAgent[] {
     return this.agents;
   }
@@ -186,7 +205,7 @@ export class CrowdSystem {
       12,
       Math.min(MAX_PEDESTRIANS, Math.round(MAX_PEDESTRIANS * crowdRatio))
     );
-    const showUmbrellas = wetnessFactor > 0.38;
+    const showUmbrellas = wetnessFactor > 0.65;
     this.umbrellaMesh.visible = showUmbrellas;
 
     this.torsoMesh.count = activeCount;
@@ -205,9 +224,11 @@ export class CrowdSystem {
       buildingGrid: this.buildingGrid,
     };
 
+    let filmingPhoneCount = 0;
+
     for (let i = 0; i < activeCount; i++) {
       const ag = this.agents[i];
-      const { facing, moving } = stepPedestrianAgentInPlace(ag, stepCtx);
+      const { facing, moving, state } = stepPedestrianAgentInPlace(ag, stepCtx);
 
       const swing = moving ? Math.sin(ag.phase) * 0.45 : 0;
       const baseY = 0.14;
@@ -244,7 +265,22 @@ export class CrowdSystem {
         dummy.updateMatrix();
         this.umbrellaMesh.setMatrixAt(i, dummy.matrix);
       }
+
+      if (state === 'FILMING' && filmingPhoneCount < MAX_PEDESTRIANS) {
+        dummy.position.set(
+          ag.x + sinF * 0.42,
+          baseY + 1.34,
+          ag.z + cosF * 0.42
+        );
+        dummy.rotation.set(-0.15, facing, 0);
+        dummy.scale.setScalar(1);
+        dummy.updateMatrix();
+        this.phoneMesh.setMatrixAt(filmingPhoneCount++, dummy.matrix);
+      }
     }
+
+    this.phoneMesh.count = filmingPhoneCount;
+    this.phoneMesh.visible = filmingPhoneCount > 0;
 
     this.torsoMesh.instanceMatrix.needsUpdate = true;
     this.headMesh.instanceMatrix.needsUpdate = true;
@@ -252,6 +288,9 @@ export class CrowdSystem {
     this.rightLegMesh.instanceMatrix.needsUpdate = true;
     if (showUmbrellas) {
       this.umbrellaMesh.instanceMatrix.needsUpdate = true;
+    }
+    if (filmingPhoneCount > 0) {
+      this.phoneMesh.instanceMatrix.needsUpdate = true;
     }
   }
 
@@ -265,5 +304,7 @@ export class CrowdSystem {
     this.rightLegMesh.geometry.dispose();
     this.umbrellaMesh.geometry.dispose();
     (this.umbrellaMesh.material as THREE.Material).dispose();
+    this.phoneMesh.geometry.dispose();
+    (this.phoneMesh.material as THREE.Material).dispose();
   }
 }

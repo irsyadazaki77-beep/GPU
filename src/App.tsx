@@ -11,7 +11,6 @@ import {
   ProtagonistId,
   RadioStationId,
   STORY_MISSIONS,
-  STREET_RACES,
   StockSymbol,
   StoryChoiceOption,
   StoryMission,
@@ -28,6 +27,7 @@ import {
   calculatePassivePropertyIncome,
   calculateTurfWarsIncome,
   completeMissionReward,
+  computeTrioSynergyPerks,
   consumeWarungSnack,
   formatJakartaClock,
   formatRupiah,
@@ -55,6 +55,7 @@ import { NabiloPhoneModal } from './components/NabiloPhoneModal';
 import { StatusModal } from './components/StatusModal';
 import { RadialWheelOverlay } from './components/RadialWheelOverlay';
 import { HeistPlanningModal } from './components/HeistPlanningModal';
+import { HeistBreachOverlay } from './components/HeistBreachOverlay';
 import { CustomsGarageModal } from './components/CustomsGarageModal';
 import { WarungSnackModal } from './components/WarungSnackModal';
 import { CinematicOverlay } from './components/CinematicOverlay';
@@ -116,6 +117,8 @@ export default function App() {
   const playerHitFlash = useGameStore((s) => s.playerHitFlash);
   const cutsceneOverlay = useGameStore((s) => s.cutsceneOverlay);
   const completedDynamicQuests = useGameStore((s) => s.completedDynamicQuests);
+  const activeHeistBreach = useGameStore((s) => s.activeHeistBreach);
+  const trioSynergy = useGameStore((s) => s.trioSynergy);
 
   const controllerRef = useRef<WorldControllerHandle | null>(null);
   const cutsceneTimerRef = useRef<number | null>(null);
@@ -301,6 +304,7 @@ export default function App() {
           worldClockEventState: eventStep.nextState,
         };
       });
+      gameStore.tickStreetRandomEvent(1);
     }, 1000);
     return () => clearInterval(interval);
   }, [gameState]);
@@ -579,6 +583,10 @@ export default function App() {
           gameStore.setState({ wheelMode: null });
           return;
         }
+        if (s.activeHeistBreach) {
+          gameStore.closeHeistBreach();
+          return;
+        }
         if (s.heistBoardOpen) {
           gameStore.setState({ heistBoardOpen: false });
           return;
@@ -612,6 +620,7 @@ export default function App() {
         e.preventDefault();
         gameStore.setState((prev) => ({
           phoneOpen: !prev.phoneOpen,
+          phoneTargetScreen: 'home',
           wheelMode: null,
           heistBoardOpen: false,
           customsGarageOpen: false,
@@ -632,7 +641,10 @@ export default function App() {
       } else if (e.code === 'KeyU') {
         e.preventDefault();
         gameStore.setState((prev) => ({ zenHudMode: !prev.zenHudMode }));
-      } else if (e.code === 'F3') {
+      } else if (e.code === 'F1' || e.code === 'F2' || e.code === 'F3') {
+        // Prevent browser help/search shortcuts; PlayerController handles F1/F2/F3 Squad Orders
+        e.preventDefault();
+      } else if (e.code === 'F8') {
         e.preventDefault();
         gameStore.togglePerfOverlay();
       } else if (e.code === 'KeyY') {
@@ -677,14 +689,14 @@ export default function App() {
           heistBoardOpen: false,
           customsGarageOpen: false,
         }));
-      } else if (e.code === 'KeyX') {
+      } else if (e.code === 'KeyT') {
         e.preventDefault();
         gameStore.setState((prev) => ({ tpsAiming: !prev.tpsAiming }));
       } else if (e.code === 'KeyQ') {
         handleToggleFokus();
       } else if (e.code === 'KeyZ') {
         handleToggleDrone();
-      } else if (e.code === 'KeyV') {
+      } else if (e.code === 'KeyO') {
         cycleWeather();
       } else if (e.code === 'KeyM') {
         gameStore.toggleMute();
@@ -784,131 +796,122 @@ export default function App() {
     soundEngine.playMissionFanfare();
   }, []);
 
-  const handleLaunchHeistFinale = useCallback((heistId: HeistId) => {
-    const heist =
-      GRAND_HEISTS.find((h) => h.id === heistId) || GRAND_HEISTS[0];
-    const plan = gameStore.getState().playerState.activeHeistPlan;
-    const breakdown = calculateHeistBreakdown(
-      heist.id,
-      plan.hackerId,
-      plan.driverId,
-      plan.gunmanId
-    );
-    const isStealth = plan.approach === 'stealth_cyber';
-
-    const finaleMission: StoryMission = {
-      id: `heist_finale:${heist.id}`,
-      stageNumber: 5,
-      chapterNumber: 99,
-      title: `GRAND HEIST: ${heist.title}`,
-      giverName: 'Trio Protagonis Jakarta',
-      giverRole: isStealth
-        ? 'Operasi Siluman Siber'
-        : 'Serbuan Taktis Lapis Baja',
-      locationName: heist.targetLocation,
-      markerX: heist.vaultX,
-      markerZ: heist.vaultZ,
-      briefing: isStealth ? heist.stealthDesc : heist.assaultDesc,
-      choices: [],
-    };
-
-    const finaleChoice: StoryChoiceOption = {
-      id: `choice_finale_${heist.id}`,
-      label: isStealth ? 'Infiltrasi Siber Brankas' : 'Serbuan Penuh Brankas',
-      faction: isStealth ? 'sindikat' : 'jalanan',
-      description: isStealth
-        ? `Bobol sistem keamanan ${heist.targetLocation} dan bawa kabur hasil bersih ${formatRupiah(breakdown.netPlayerTakeRp)}!`
-        : `Gempur penjaga brankas ${heist.targetLocation} dan rebut hasil bersih ${formatRupiah(breakdown.netPlayerTakeRp)}!`,
-      objectiveType: isStealth ? 'heist_escape' : 'combat_wave',
-      targetX: isStealth ? heist.escapeX : heist.vaultX,
-      targetZ: isStealth ? heist.escapeZ : heist.vaultZ,
-      objectiveTargetCount: isStealth ? 2 : 5,
-      rewardRp: breakdown.netPlayerTakeRp,
-      reputationDelta: { rakyat: 12, jalanan: 18, sindikat: 15 },
-      wantedDelta: isStealth ? 2 : 4,
-      nextMissionId: 'm1_bayangan_monas',
-      outcomeNarrative: `GRAND HEIST SUKSES! Trio Jakarta membawa pulang ${formatRupiah(breakdown.netPlayerTakeRp)}. Saham ${heist.victimStock} anjlok & saham ${heist.targetStockRival} meroket di Bursa BAJSA!`,
-    };
-
-    gameStore.setState((prev) => ({
-      activeMission: finaleMission,
-      activeChoice: finaleChoice,
-      playerState: {
-        ...prev.playerState,
-        wantedLevel: Math.min(
-          5,
-          prev.playerState.wantedLevel + (isStealth ? 1 : 3)
-        ),
-      },
-    }));
-    controllerRef.current?.startMissionObjective(finaleMission, finaleChoice);
-    soundEngine.playMissionFanfare();
-    triggerCinematicShot(
-      'heist',
-      finaleMission.title,
-      'Trio Protagonis Jakarta',
-      finaleChoice.description,
-      finaleChoice.targetX,
-      finaleChoice.targetZ,
-      3.4
-    );
-    const curS = gameStore.getState();
-    if (curS.gameSettings.voiceActingEnabled && !curS.muted) {
-      void speakDialogueLine(
-        {
-          text: finaleChoice.description,
-          speakerName: 'Kirana Larasati',
-          tone: 'Operasi Rahasia Mendesak',
-        },
-        true,
-        curS.audioVolumes.master
+  const executeHeistGetawayFinale = useCallback(
+    (heistId: HeistId, synergyMultiplier: number = 1) => {
+      const heist =
+        GRAND_HEISTS.find((h) => h.id === heistId) || GRAND_HEISTS[0];
+      const plan = gameStore.getState().playerState.activeHeistPlan;
+      const breakdown = calculateHeistBreakdown(
+        heist.id,
+        plan.hackerId,
+        plan.driverId,
+        plan.gunmanId
       );
-    }
-  }, [triggerCinematicShot]);
+      const netTakeRp = Math.round(breakdown.netPlayerTakeRp * synergyMultiplier);
+      const isStealth = plan.approach === 'stealth_cyber';
+
+      const finaleMission: StoryMission = {
+        id: `heist_finale:${heist.id}`,
+        stageNumber: 5,
+        chapterNumber: 99,
+        title: `GRAND HEIST: ${heist.title}`,
+        giverName: 'Trio Protagonis Jakarta',
+        giverRole: isStealth
+          ? 'Operasi Siluman Siber'
+          : 'Serbuan Taktis Lapis Baja',
+        locationName: heist.targetLocation,
+        markerX: heist.vaultX,
+        markerZ: heist.vaultZ,
+        briefing: isStealth ? heist.stealthDesc : heist.assaultDesc,
+        choices: [],
+      };
+
+      const finaleChoice: StoryChoiceOption = {
+        id: `choice_finale_${heist.id}`,
+        label: isStealth ? 'Infiltrasi Siber Brankas' : 'Serbuan Penuh Brankas',
+        faction: isStealth ? 'sindikat' : 'jalanan',
+        description: isStealth
+          ? `Brankas jebol! Bawa kabur hasil bersih ${formatRupiah(netTakeRp)} dari ${heist.targetLocation}!`
+          : `Pintu brankas tembus! Gempur penjaga ${heist.targetLocation} dan rebut ${formatRupiah(netTakeRp)}!`,
+        objectiveType: isStealth ? 'heist_escape' : 'combat_wave',
+        targetX: isStealth ? heist.escapeX : heist.vaultX,
+        targetZ: isStealth ? heist.escapeZ : heist.vaultZ,
+        objectiveTargetCount: isStealth ? 2 : 5,
+        rewardRp: netTakeRp,
+        reputationDelta: { rakyat: 12, jalanan: 18, sindikat: 15 },
+        wantedDelta: isStealth ? 2 : 4,
+        nextMissionId: 'm1_bayangan_monas',
+        outcomeNarrative: `GRAND HEIST SUKSES! Trio Jakarta membawa pulang ${formatRupiah(netTakeRp)}. Saham ${heist.victimStock} anjlok & saham ${heist.targetStockRival} meroket di Bursa BAJSA!`,
+      };
+
+      gameStore.closeHeistBreach();
+      gameStore.boostTrioSynergy(
+        10,
+        'Pembobolan brankas sukses! Sinergi Trio Jakarta meningkat pesat!'
+      );
+      gameStore.setState((prev) => ({
+        activeMission: finaleMission,
+        activeChoice: finaleChoice,
+        playerState: {
+          ...prev.playerState,
+          wantedLevel: Math.min(
+            5,
+            prev.playerState.wantedLevel + (isStealth ? 1 : 3)
+          ),
+        },
+      }));
+      controllerRef.current?.startMissionObjective(finaleMission, finaleChoice);
+      soundEngine.playMissionFanfare();
+      triggerCinematicShot(
+        'heist',
+        finaleMission.title,
+        'Trio Protagonis Jakarta',
+        finaleChoice.description,
+        finaleChoice.targetX,
+        finaleChoice.targetZ,
+        3.4
+      );
+      const curS = gameStore.getState();
+      if (curS.gameSettings.voiceActingEnabled && !curS.muted) {
+        void speakDialogueLine(
+          {
+            text: finaleChoice.description,
+            speakerName: 'Kirana Larasati',
+            tone: 'Operasi Rahasia Mendesak',
+          },
+          true,
+          curS.audioVolumes.master
+        );
+      }
+    },
+    [triggerCinematicShot]
+  );
+
+  const handleLaunchHeistFinale = useCallback((heistId: HeistId) => {
+    gameStore.startHeistBreach(heistId);
+  }, []);
 
   const handleStartStreetRace = useCallback((raceId: string) => {
-    const race = STREET_RACES.find((r) => r.id === raceId) || STREET_RACES[0];
-    const startPt = race.checkpoints[0] || [0, -26];
-    const finishPt =
-      race.checkpoints[race.checkpoints.length - 1] || [0, 18];
-
-    const raceMission: StoryMission = {
-      id: `street_race:${race.id}`,
-      stageNumber: 5,
-      chapterNumber: 88,
-      title: `Balap Liar: ${race.name}`,
-      giverName: 'Raka Wijaya (Sirkuit Malam)',
-      giverRole: 'Raja Aspal Kemayoran',
-      locationName: race.subtitle,
-      markerX: startPt[0],
-      markerZ: startPt[1],
-      briefing: `Pacu kendaraan melewati ${race.checkpoints.length} gerbang sirkuit jalan raya dan menangkan hadiah ${formatRupiah(race.rewardRp)}!`,
-      choices: [],
-    };
-    const raceChoice: StoryChoiceOption = {
-      id: `choice_race_${race.id}`,
-      label: race.name,
-      faction: 'jalanan',
-      description: `Lintasi seluruh ${race.checkpoints.length} titik checkpoint balap liar dengan kecepatan tinggi!`,
-      objectiveType: 'checkpoint_drive',
-      targetX: finishPt[0],
-      targetZ: finishPt[1],
-      objectiveTargetCount: race.checkpoints.length,
-      rewardRp: race.rewardRp,
-      reputationDelta: { rakyat: 4, jalanan: 12, sindikat: 2 },
-      wantedDelta: 0,
-      nextMissionId: 'm1_bayangan_monas',
-      outcomeNarrative: `JUARA SIRKUIT JALANAN! Anda menaklukkan ${race.name} dan mengantongi hadiah ${formatRupiah(race.rewardRp)}!`,
-    };
-
-    controllerRef.current?.teleportPlayerTo(startPt[0], startPt[1]);
-    controllerRef.current?.spawnVehicleNearPlayer('supercar');
-    gameStore.setState({
-      activeMission: raceMission,
-      activeChoice: raceChoice,
-    });
-    controllerRef.current?.startMissionObjective(raceMission, raceChoice);
+    controllerRef.current?.startStreetRace(raceId);
     soundEngine.playNitroBoost();
+  }, []);
+
+  // Auto-dismiss transient Wave 2 cinematic banners & squad radio callouts
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const s = gameStore.getState();
+      const now = Date.now();
+      if (s.lastStuntBanner && now - s.lastStuntBanner.timestampMs > 3800) {
+        gameStore.dismissStuntBanner();
+      }
+      if (s.killCamBanner && now - s.killCamBanner.stamp > 2100) {
+        gameStore.setState({ killCamBanner: null });
+      }
+      if (s.squadCallout && now - s.squadCallout.stamp > 4200) {
+        gameStore.setState({ squadCallout: null });
+      }
+    }, 350);
+    return () => clearInterval(id);
   }, []);
 
   const handleCompleteActiveObjective = useCallback(() => {
@@ -961,6 +964,14 @@ export default function App() {
             ? afterImpact.completedHeists
             : [...afterImpact.completedHeists, heistId],
         };
+      });
+      const heistSnap =
+        controllerRef.current?.captureViralThumbnailDataUrl() || null;
+      gameStore.publishViralEvent({
+        triggerKind: 'heist_complete',
+        snapshotDataUrl: heistSnap,
+        summaryNote: `${heistSpec.title} sukses dibobol Trio Jakarta! Valuasi ${heistSpec.victimStock} langsung anjlok di BAJSA!`,
+        cloutGain: 110,
       });
       return;
     }
@@ -1362,6 +1373,7 @@ export default function App() {
   }, []);
 
   const handleRepairAndClearWanted = useCallback(() => {
+    const repaired = controllerRef.current?.repairCurrentVehicle() ?? false;
     gameStore.updatePlayerState((prev) => {
       if (prev.rupiah < 75000) return prev;
       soundEngine.playCashRegister();
@@ -1374,7 +1386,59 @@ export default function App() {
         wantedEvadeTimer: 0,
       };
     });
+    if (repaired) {
+      gameStore.setState({
+        activeVehicleDamage: null,
+        lastOutcomeText: 'Bengkel Blok M: Bodi mobil mulus 100%, ban baru & buronan bersih!',
+      });
+    }
   }, []);
+
+  const handleCaptureViralSnap = useCallback(() => {
+    const thumb = controllerRef.current?.captureViralThumbnailDataUrl() || null;
+    gameStore.publishViralEvent({
+      triggerKind: 'manual_snap',
+      snapshotDataUrl: thumb,
+      cloutGain: 35,
+    });
+  }, []);
+
+  const handleInteriorQuickAction = useCallback(
+    (action: 'hangout' | 'save' | 'repair') => {
+      if (action === 'hangout') {
+        gameStore.updatePlayerState((prev) => ({
+          ...prev,
+          hp: Math.min(prev.maxHp, prev.hp + 35),
+          fokusEnergy: Math.min(100, prev.fokusEnergy + 35),
+        }));
+        gameStore.boostTrioSynergy(
+          8,
+          'Nongkrong santai di dalam ruangan: HP pulih & Sinergi Trio +8%!'
+        );
+        const thumb = controllerRef.current?.captureViralThumbnailDataUrl() || null;
+        gameStore.publishViralEvent({
+          triggerKind: 'warung_viral',
+          snapshotDataUrl: thumb,
+          cloutGain: 25,
+        });
+      } else if (action === 'repair') {
+        const ok = controllerRef.current?.repairCurrentVehicle() ?? false;
+        gameStore.setState({
+          activeVehicleDamage: null,
+          lastOutcomeText: ok
+            ? 'Kendaraan terdekat berhasil diservis ke kondisi 100%!'
+            : 'Parkir kendaraan di dekat pintu untuk servis cepat.',
+        });
+      } else if (action === 'save') {
+        persistCurrentSave();
+        soundEngine.playPickup();
+        gameStore.setState({
+          lastOutcomeText: 'Progres permainan berhasil disimpan ke slot aktif & Cloud!',
+        });
+      }
+    },
+    [persistCurrentSave]
+  );
 
   const passiveIncome =
     calculatePassivePropertyIncome(playerState.ownedProperties) +
@@ -1501,8 +1565,44 @@ export default function App() {
             gameStore.updatePlayerState((prev) => ({ ...prev, activeWeapon: w }))
           }
           onTogglePhone={() =>
-            gameStore.setState((prev) => ({ phoneOpen: !prev.phoneOpen }))
+            gameStore.setState((prev) => ({
+              phoneOpen: !prev.phoneOpen,
+              phoneTargetScreen: 'home',
+            }))
           }
+          onOpenNabiloGram={() =>
+            gameStore.setState({
+              phoneTargetScreen: 'feed',
+              phoneOpen: true,
+              wheelMode: null,
+              heistBoardOpen: false,
+              customsGarageOpen: false,
+              warungModalOpen: false,
+            })
+          }
+          onOpenImperium={() =>
+            gameStore.setState({
+              phoneTargetScreen: 'imperium',
+              phoneOpen: true,
+              wheelMode: null,
+              heistBoardOpen: false,
+              customsGarageOpen: false,
+              warungModalOpen: false,
+            })
+          }
+          onCycleCamera={() => controllerRef.current?.cycleCameraViewMode()}
+          onToggleCover={() => controllerRef.current?.toggleCover()}
+          onSquadOrder={(ord) => controllerRef.current?.setSquadOrder(ord)}
+          onCancelStreetRace={() => controllerRef.current?.cancelStreetRace()}
+          onAbortTurfWar={() => controllerRef.current?.abortTurfWar()}
+          onRepairVehicle={() => {
+            controllerRef.current?.repairCurrentVehicle();
+            gameStore.setState({
+              activeVehicleDamage: null,
+              lastOutcomeText: 'Servis darurat selesai — bodi & ban kembali 100%!',
+            });
+          }}
+          onInteriorAction={handleInteriorQuickAction}
           onToggleVehicle={() => controllerRef.current?.toggleEnterExitVehicle()}
           onHonk={() => controllerRef.current?.triggerHorn()}
           onToggleFokus={handleToggleFokus}
@@ -1609,6 +1709,16 @@ export default function App() {
         />
       )}
 
+      {/* GRAND HEIST MULTI-STAGE VAULT BREACH MINIGAME */}
+      {gameState === 'playing' && activeHeistBreach && (
+        <HeistBreachOverlay
+          session={activeHeistBreach}
+          synergyBonusPct={computeTrioSynergyPerks(trioSynergy).heistBonusPercent}
+          onCompleteBreach={(hId, mult) => executeHeistGetawayFinale(hId, mult)}
+          onCancel={() => gameStore.closeHeistBreach()}
+        />
+      )}
+
       {/* LOS SANTOS CUSTOMS 360° VEHICLE CUSTOMIZATION GARAGE */}
       {gameState === 'playing' && customsGarageOpen && (
         <CustomsGarageModal
@@ -1707,6 +1817,13 @@ export default function App() {
           }
           onEnterInterior={handleEnterInteriorById}
           onStartStreetRace={handleStartStreetRace}
+          onCaptureViralSnap={handleCaptureViralSnap}
+          onStartTurfWar={(districtId) =>
+            controllerRef.current?.startTurfWar(districtId)
+          }
+          onWarpToRamp={(rampId) =>
+            controllerRef.current?.teleportToStuntRamp(rampId)
+          }
         />
       )}
 

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   BuildingFootprint,
+  CITY_BUILDINGS,
   ENEMY_ARCHETYPES,
   ENTERABLE_INTERIORS,
   EnemyBehaviorPolicy,
@@ -13,15 +14,23 @@ import {
   SpatialHashGrid,
   StoryChoiceOption,
   StoryMission,
+  StuntRampSpec,
   VEHICLE_SPECS,
   WARUNG_STALL_LOCATIONS,
+  applyCoverDamageMitigation,
   checkPlayerDetourProgress,
+  evaluateCoverAvailability,
+  evaluateFloodZoneAt,
   evaluateRoadEventImpactAt,
+  evaluateStuntRampContact,
+  getActiveWingmanIds,
   getEffectiveWeaponSpec,
   getGroundElevationAt,
   getPlayerStaminaSpeedMultiplier,
+  getVehicleHandlingPenalty,
   resolveCameraWallPullIn,
   resolveCircleAABBCollision,
+  scoreStuntJump,
   stepEnemyMovementPolicy,
 } from '../game/rules';
 import { soundEngine } from '../game/sound';
@@ -35,6 +44,7 @@ import type {
   TrafficSignalPhase,
 } from '../game/types';
 import {
+  engineTelemetryRef,
   gameStore,
   virtualInputRef,
   type RadarEnemyBlip,
@@ -103,6 +113,10 @@ export interface PlayerControllerCallbacks {
   onCombatHitFeedback?: (evt: CombatHitFeedbackEvent) => void;
   onPlayerHitAngle?: (angleRad: number) => void;
   onWeaponNoise?: (x: number, z: number, radius: number, isBlast: boolean) => void;
+  onViralMoment?: (
+    kind: 'drift_stunt' | 'chain_explosion',
+    summaryNote?: string
+  ) => void;
 }
 
 const PARTICLE_CAP = 112;
@@ -192,6 +206,64 @@ export class PlayerController {
   private lastAppliedOutfitId = '';
   private prevParticleCount = -1;
   private prevTracerCount = -1;
+
+  // Wave 2: Tactical Gunplay, Cover, Trio Squad AI, Stunt Physics, Kill-Cam & Turf War
+  private crosshairSpread = 0;
+  private killCamTimer = 0;
+  private floodSplashAccum = 0;
+  private coverNormalX = 0;
+  private coverNormalZ = 1;
+  private readonly turfWarEnemyIds = new Set<string>();
+  private captainEnemyId: string | null = null;
+  private readonly stuntJump = {
+    airborne: false,
+    ramp: null as StuntRampSpec | null,
+    launchX: 0,
+    launchZ: 0,
+    airTime: 0,
+    vy: 0,
+    slowMoTimer: 0,
+  };
+  private readonly trioSquadRuntime: Record<
+    ProtagonistId,
+    {
+      x: number;
+      z: number;
+      facing: number;
+      walkDist: number;
+      fireCooldown: number;
+      abilityCooldown: number;
+      actionLabel: string;
+    }
+  > = {
+    nabilo: {
+      x: -2.4,
+      z: 28,
+      facing: Math.PI,
+      walkDist: 0,
+      fireCooldown: 0.4,
+      abilityCooldown: 4,
+      actionLabel: 'Mengawal',
+    },
+    raka: {
+      x: -3.2,
+      z: 28.5,
+      facing: Math.PI,
+      walkDist: 0,
+      fireCooldown: 0.5,
+      abilityCooldown: 5,
+      actionLabel: 'Mengawal',
+    },
+    kirana: {
+      x: 3.2,
+      z: 28.5,
+      facing: Math.PI,
+      walkDist: 0,
+      fireCooldown: 0.6,
+      abilityCooldown: 6,
+      actionLabel: 'Siap EMP',
+    },
+  };
 
   private readonly particleGeo: THREE.BoxGeometry;
   private readonly particleMat: THREE.MeshBasicMaterial;
@@ -679,6 +751,130 @@ export class PlayerController {
     }
   }
 
+  public spawnTurfWarWave(
+    centerX: number,
+    centerZ: number,
+    wave: 1 | 2 | 3
+  ): void {
+    this.clearTurfWarEnemies();
+    const count = wave === 2 ? 5 : 4;
+    const policies: EnemyBehaviorPolicy[] = [
+      'rusher',
+      'ranged_kiter',
+      'charger_enforcer',
+    ];
+    for (let i = 0; i < count; i++) {
+      const isCaptain = wave === 3 && i === count - 1;
+      const policy: EnemyBehaviorPolicy = isCaptain
+        ? 'charger_enforcer'
+        : policies[(i + wave) % policies.length];
+      const spec = ENEMY_ARCHETYPES[policy];
+      const rig = buildCharacterRig(policy);
+      const ang = (i / count) * Math.PI * 2 + wave * 0.4;
+      const radius = isCaptain ? 5.2 : 9.5;
+      const safePos = resolveCircleAABBCollision(
+        centerX + Math.cos(ang) * radius,
+        centerZ + Math.sin(ang) * radius,
+        0.95,
+        undefined,
+        this.buildingGrid
+      );
+      const ex = safePos.x;
+      const ez = safePos.z;
+      rig.group.position.set(ex, getGroundElevationAt(ex, ez), ez);
+      if (isCaptain) {
+        rig.group.scale.setScalar(1.24);
+        const rMat = rig.telegraphRing.material as THREE.MeshBasicMaterial;
+        rMat.color.setHex(0xf59e0b);
+      }
+      this.scene.add(rig.group);
+      const id = `turf_w${wave}_${Date.now()}_${i}`;
+      const maxHp = isCaptain ? Math.round(spec.maxHp * 2.5) : Math.round(spec.maxHp * (1 + (wave - 1) * 0.18));
+      this.turfWarEnemyIds.add(id);
+      if (isCaptain) {
+        this.captainEnemyId = id;
+      }
+      this.enemies.push({
+        id,
+        policy,
+        rig,
+        x: ex,
+        z: ez,
+        vx: 0,
+        vz: 0,
+        facing: 0,
+        hp: maxHp,
+        maxHp,
+        state: 'alive',
+        koTimer: 0,
+        hitFlashTimer: 0,
+        windupTimer: 0,
+        cooldownTimer: 0.45 + i * 0.2,
+        phaseTimer: i * 0.9,
+      });
+    }
+    this.spawnParticles(centerX, getGroundElevationAt(centerX, centerZ) + 1.8, centerZ, 22, 0xef4444, 9);
+  }
+
+  public clearTurfWarEnemies(): void {
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      if (this.turfWarEnemyIds.has(this.enemies[i].id)) {
+        this.scene.remove(this.enemies[i].rig.group);
+        this.enemies.splice(i, 1);
+      }
+    }
+    this.turfWarEnemyIds.clear();
+    this.captainEnemyId = null;
+  }
+
+  public getRemainingTurfWarEnemyCount(): {
+    remaining: number;
+    captainAlive: boolean;
+  } {
+    let remaining = 0;
+    let captainAlive = false;
+    for (let i = 0; i < this.enemies.length; i++) {
+      const en = this.enemies[i];
+      if (en.state === 'alive' && this.turfWarEnemyIds.has(en.id)) {
+        remaining++;
+        if (en.id === this.captainEnemyId) captainAlive = true;
+      }
+    }
+    return { remaining, captainAlive };
+  }
+
+  public toggleCover(): void {
+    if (this.playerPhys.drivingVehicleId) {
+      gameStore.setCoverState(false, 'none');
+      return;
+    }
+    const store = gameStore.getState();
+    if (store.inCover) {
+      gameStore.setCoverState(false, 'none');
+      soundEngine.playTone(190, 0.06, 'sine', 0.08);
+      return;
+    }
+    const avail = evaluateCoverAvailability(
+      this.playerPhys.x,
+      this.playerPhys.z,
+      CITY_BUILDINGS,
+      this.traffic.vehicles
+    );
+    const kind = avail.canTakeCover ? avail.coverKind : 'barrier';
+    this.coverNormalX = avail.normalX;
+    this.coverNormalZ = avail.normalZ;
+    gameStore.setCoverState(true, kind);
+    soundEngine.playTone(260, 0.08, 'triangle', 0.11, 0.85);
+    this.spawnParticles(
+      this.playerPhys.x,
+      this.playerPhys.y + 0.5,
+      this.playerPhys.z,
+      6,
+      0x94a3b8,
+      3.5
+    );
+  }
+
   public triggerHorn(): void {
     soundEngine.playHorn();
     this.traffic.notifyHorn(this.playerPhys.x, this.playerPhys.z);
@@ -729,6 +925,7 @@ export class PlayerController {
       nearest.isTraffic = false;
       this.playerPhys.drivingVehicleId = nearest.id;
       this.playerRig.group.visible = false;
+      gameStore.setCoverState(false, 'none');
       soundEngine.playVehicleDoor();
     }
   }
@@ -899,6 +1096,10 @@ export class PlayerController {
     }
 
     this.playerPhys.attackCooldown = wSpec.cooldown;
+    this.crosshairSpread = Math.min(
+      1.0,
+      this.crosshairSpread + (wSpec.isMelee ? 0.1 : 0.28)
+    );
     soundEngine.playShoot(wSpec.id);
     this.playerRig.rightArm.rotation.x = -Math.PI * 0.75;
 
@@ -1089,7 +1290,8 @@ export class PlayerController {
 
   private markEnemyKo(
     en: EnemyEntity,
-    activeChoice: StoryChoiceOption | null
+    activeChoice: StoryChoiceOption | null,
+    bySquad: boolean = false
   ): void {
     en.state = 'ko';
     en.koTimer = 0.42;
@@ -1097,8 +1299,29 @@ export class PlayerController {
     this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.45);
     soundEngine.playHit(true);
 
+    const isCaptain = en.id === this.captainEnemyId;
+    if (isCaptain || en.policy === 'charger_enforcer') {
+      this.killCamTimer = 0.65;
+      gameStore.triggerKillCamBanner(
+        isCaptain ? 'KAPTEN WILAYAH TUMBANG!' : 'TAKEDOWN SINEMATIK!'
+      );
+    }
+    if (isCaptain) {
+      this.captainEnemyId = null;
+    }
+    if (this.turfWarEnemyIds.has(en.id)) {
+      this.turfWarEnemyIds.delete(en.id);
+    }
+
+    if (bySquad || gameStore.getState().inCover) {
+      gameStore.recordDailyProgress('squad_takedown', 1);
+    }
+
     const arch = ENEMY_ARCHETYPES[en.policy];
-    this.callbacks.onEnemyDefeated(arch.rewardRp, arch.scoreValue);
+    this.callbacks.onEnemyDefeated(
+      isCaptain ? arch.rewardRp * 3 : arch.rewardRp,
+      isCaptain ? arch.scoreValue * 3 : arch.scoreValue
+    );
 
     if (activeChoice && activeChoice.objectiveType === 'combat_wave') {
       this.objectiveProgress += 1;
@@ -1138,17 +1361,19 @@ export class PlayerController {
       const rig = this.idleProtagonistRigs[pId];
       if (
         pId === pState.activeProtagonist ||
-        pState.currentInterior !== 'exterior'
+        pState.currentInterior !== 'exterior' ||
+        Boolean(this.playerPhys.drivingVehicleId)
       ) {
         rig.group.visible = false;
       } else {
         rig.group.visible = true;
-        const live = pState.protagonistRoster[pId];
+        const rt = this.trioSquadRuntime[pId];
         rig.group.position.set(
-          live.x,
-          getGroundElevationAt(live.x, live.z),
-          live.z
+          rt.x,
+          getGroundElevationAt(rt.x, rt.z),
+          rt.z
         );
+        rig.group.rotation.y = rt.facing;
       }
     });
 
@@ -1375,7 +1600,8 @@ export class PlayerController {
     pState: PlayerProgressState,
     activeChoice: StoryChoiceOption | null,
     nextStoryMission: StoryMission | null,
-    nightFactor: number
+    nightFactor: number,
+    wetnessFactor: number = 0
   ): {
     nearbyInterior: EnterableInteriorSpec | null;
     nearbyMission: StoryMission | null;
@@ -1385,6 +1611,14 @@ export class PlayerController {
     isDrifting: boolean;
   } {
     this.damagePulse = Math.max(0, this.damagePulse - dt * 2.2);
+    this.crosshairSpread = Math.max(0, this.crosshairSpread - dt * 1.65);
+    engineTelemetryRef.crosshairSpread = this.crosshairSpread;
+    if (this.killCamTimer > 0) {
+      this.killCamTimer = Math.max(0, this.killCamTimer - dt);
+    }
+    if (this.stuntJump.slowMoTimer > 0) {
+      this.stuntJump.slowMoTimer = Math.max(0, this.stuntJump.slowMoTimer - dt);
+    }
     if (this.muzzleLightTimer > 0) {
       this.muzzleLightTimer = Math.max(0, this.muzzleLightTimer - dt);
       this.muzzleFlashLight.intensity =
@@ -1402,7 +1636,15 @@ export class PlayerController {
       this.hitstopTimer = Math.max(0, this.hitstopTimer - dt);
     }
     const rawSimDt = this.hitstopTimer > 0 || isPhotoMode ? 0 : dt;
-    const simDt = isWheelSlowMo ? rawSimDt * 0.25 : rawSimDt;
+    const cineSlowMult =
+      isWheelSlowMo
+        ? 0.25
+        : this.killCamTimer > 0
+        ? 0.34
+        : this.stuntJump.slowMoTimer > 0
+        ? 0.52
+        : 1.0;
+    const simDt = rawSimDt * cineSlowMult;
 
     // Poll HTML5 Gamepad API (60Hz) and merge with Virtual Touch Input Ref
     let gpMoveX = 0;
@@ -1534,8 +1776,20 @@ export class PlayerController {
         this.toggleEnterExitVehicle();
       }
     }
-    if (this.keysJustPressed.has('KeyX')) {
-      this.callbacks.onToggleTpsAim();
+    if (this.keysJustPressed.has('KeyX') || virtualInputRef.coverTap) {
+      virtualInputRef.coverTap = false;
+      this.toggleCover();
+    }
+    if (this.keysJustPressed.has('KeyV') || virtualInputRef.cameraTap) {
+      virtualInputRef.cameraTap = false;
+      gameStore.cycleCameraViewMode();
+    }
+    if (this.keysJustPressed.has('F1')) {
+      gameStore.setSquadOrder('follow');
+    } else if (this.keysJustPressed.has('F2')) {
+      gameStore.setSquadOrder('attack');
+    } else if (this.keysJustPressed.has('F3')) {
+      gameStore.setSquadOrder('hold');
     }
     if (this.keysJustPressed.has('KeyR') && this.playerPhys.drivingVehicleId) {
       gameStore.cycleRadioStation();
@@ -1684,6 +1938,14 @@ export class PlayerController {
         (pState.fokusActive ? 1.18 : 1.0) *
         rakaBoost;
 
+      const handlingPenalty = getVehicleHandlingPenalty(activeVehicle.damage);
+      const effectiveMaxSpeed =
+        vSpec.maxSpeed * turboMult * handlingPenalty.speedMultiplier;
+      const isWetRoad =
+        storeState.weatherMode === 'hujan' || storeState.weatherMode === 'senja';
+      const wetGripMult =
+        storeState.weatherMode === 'hujan' ? 1.24 : isWetRoad ? 1.08 : 1.0;
+
       const prevSpeed = activeVehicle.speed;
       const handbrakeHeld =
         !vSpec.isAircraft &&
@@ -1696,30 +1958,43 @@ export class PlayerController {
         Math.abs(moveTurn) > 0;
       activeVehicle.isDrifting = isDrifting;
 
-      if (handbrakeHeld) {
+      if (activeVehicle.damage.exploded) {
+        activeVehicle.speed *= Math.exp(-5.0 * simDt);
+      } else if (handbrakeHeld) {
         activeVehicle.speed *= Math.exp(-1.9 * simDt);
       } else if (moveForward !== 0) {
         activeVehicle.speed +=
-          moveForward * vSpec.acceleration * turboMult * simDt;
+          moveForward *
+          vSpec.acceleration *
+          turboMult *
+          handlingPenalty.speedMultiplier *
+          simDt;
       } else {
         activeVehicle.speed *= Math.exp(-3.5 * simDt);
       }
       activeVehicle.speed = THREE.MathUtils.clamp(
         activeVehicle.speed,
-        -vSpec.maxSpeed * turboMult * 0.45,
-        vSpec.maxSpeed * turboMult
+        -effectiveMaxSpeed * 0.45,
+        effectiveMaxSpeed
       );
 
       if (vSpec.isAircraft || Math.abs(activeVehicle.speed) > 0.4) {
         const dirSign =
           vSpec.isAircraft || activeVehicle.speed >= 0 ? 1 : -1;
-        const driftTurnBoost = isDrifting ? 1.52 : 1.0;
+        const driftTurnBoost = isDrifting ? 1.52 * wetGripMult : 1.0;
+        const pullYaw =
+          !vSpec.isAircraft && Math.abs(activeVehicle.speed) > 4
+            ? handlingPenalty.steeringPull *
+              Math.min(1, Math.abs(activeVehicle.speed) / 14)
+            : 0;
         activeVehicle.heading +=
-          moveTurn * vSpec.turnRate * driftTurnBoost * dirSign * simDt;
+          (moveTurn * vSpec.turnRate * driftTurnBoost + pullYaw) *
+          dirSign *
+          simDt;
       }
 
-      // Slip angle & lateral skid motion while handbrake drifting
-      const targetDriftAngle = isDrifting ? -moveTurn * 0.38 : 0;
+      // Slip angle & lateral skid motion while handbrake drifting (amplified on wet Vice-Jakarta asphalt)
+      const targetDriftAngle = isDrifting ? -moveTurn * 0.38 * wetGripMult : 0;
       activeVehicle.driftAngle = THREE.MathUtils.damp(
         activeVehicle.driftAngle,
         targetDriftAngle,
@@ -1737,6 +2012,25 @@ export class PlayerController {
         Math.cos(travelAngle) * activeVehicle.speed * simDt;
 
       const surfaceElev = getGroundElevationAt(nextVX, nextVZ);
+      let rampPitchBoost = 0;
+
+      // Monsoon Flood Zone hydroplaning & splash physics
+      if (!vSpec.isAircraft && !this.stuntJump.airborne) {
+        const floodEval = evaluateFloodZoneAt(nextVX, nextVZ, wetnessFactor);
+        if (floodEval.inFlood && Math.abs(activeVehicle.speed) > 4.5) {
+          activeVehicle.speed *= Math.exp(-0.55 * floodEval.hydroplaneStrength * simDt);
+          const wobble = Math.sin(nowMs * 0.012) * floodEval.hydroplaneStrength * 0.45;
+          activeVehicle.heading += wobble * simDt;
+          this.floodSplashAccum += simDt;
+          if (this.floodSplashAccum >= 0.065) {
+            this.floodSplashAccum = 0;
+            const backX = activeVehicle.x - Math.sin(activeVehicle.heading) * 1.4;
+            const backZ = activeVehicle.z - Math.cos(activeVehicle.heading) * 1.4;
+            this.spawnParticles(backX, surfaceElev + 0.3, backZ, 3, 0x7dd3fc, 5.2);
+          }
+        }
+      }
+
       if (vSpec.isAircraft) {
         const climbDir =
           (this.keysHeld.has('Space') ? 1 : 0) -
@@ -1746,8 +2040,71 @@ export class PlayerController {
           surfaceElev,
           38
         );
+      } else if (this.stuntJump.airborne) {
+        this.stuntJump.airTime += simDt;
+        this.stuntJump.vy -= 18.5 * simDt;
+        activeVehicle.y += this.stuntJump.vy * simDt;
+        rampPitchBoost = THREE.MathUtils.clamp(-this.stuntJump.vy * 0.028, -0.35, 0.25);
+        engineTelemetryRef.stuntAirTimeSec = this.stuntJump.airTime;
+
+        if (activeVehicle.y <= surfaceElev && this.stuntJump.vy < 0) {
+          activeVehicle.y = surfaceElev;
+          const distM = Math.hypot(
+            nextVX - this.stuntJump.launchX,
+            nextVZ - this.stuntJump.launchZ
+          );
+          const launchedRamp = this.stuntJump.ramp;
+          const totalAir = this.stuntJump.airTime;
+          this.stuntJump.airborne = false;
+          this.stuntJump.ramp = null;
+          this.stuntJump.vy = 0;
+          this.stuntJump.airTime = 0;
+          this.stuntJump.slowMoTimer = 0;
+          engineTelemetryRef.stuntAirTimeSec = 0;
+          this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.34);
+          this.spawnParticles(nextVX, surfaceElev + 0.35, nextVZ, 18, 0xf59e0b, 8);
+          soundEngine.playPropCrash(0);
+
+          if (launchedRamp && distM >= 8) {
+            const stuntRes = scoreStuntJump(
+              launchedRamp,
+              distM,
+              totalAir,
+              gameStore.getState().stuntCompletedIds
+            );
+            gameStore.recordStuntJump(stuntRes);
+            if (stuntRes.rating !== 'MANTAP') {
+              this.callbacks.onViralMoment?.(
+                'drift_stunt',
+                `Lompatan Stunt ${stuntRes.rating} sejauh ${stuntRes.distanceM}m di ${stuntRes.rampName}!`
+              );
+            }
+          }
+        }
       } else {
-        activeVehicle.y = surfaceElev;
+        const rampEval = evaluateStuntRampContact(
+          nextVX,
+          nextVZ,
+          activeVehicle.speed,
+          activeVehicle.heading
+        );
+        if (rampEval.onRamp && rampEval.ramp) {
+          activeVehicle.y = surfaceElev + rampEval.surfaceHeight;
+          rampPitchBoost = -0.26;
+          if (rampEval.launchReady) {
+            this.stuntJump.airborne = true;
+            this.stuntJump.ramp = rampEval.ramp;
+            this.stuntJump.launchX = nextVX;
+            this.stuntJump.launchZ = nextVZ;
+            this.stuntJump.airTime = 0.05;
+            this.stuntJump.vy = Math.max(9.2, Math.abs(activeVehicle.speed) * 0.44);
+            this.stuntJump.slowMoTimer = 0.8;
+            soundEngine.playTone(420, 0.22, 'sawtooth', 0.14, 1.45);
+            this.spawnParticles(nextVX, activeVehicle.y + 0.4, nextVZ, 14, 0x38bdf8, 8);
+          }
+        } else {
+          activeVehicle.y = surfaceElev;
+        }
       }
 
       const col =
@@ -1766,6 +2123,22 @@ export class PlayerController {
             );
 
       if (col.collided) {
+        const wallImpact = Math.abs(activeVehicle.speed);
+        if (wallImpact > 4.5) {
+          this.traffic.applyVehicleImpact(
+            activeVehicle,
+            wallImpact * 0.65,
+            activeVehicle.speed >= 0 ? 'front' : 'rear'
+          );
+          this.spawnParticles(
+            activeVehicle.x,
+            activeVehicle.y + 0.8,
+            activeVehicle.z,
+            9,
+            0xfbbf24,
+            7
+          );
+        }
         activeVehicle.speed *= -0.35;
         this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.25);
         soundEngine.playHit(false);
@@ -1832,6 +2205,18 @@ export class PlayerController {
             other.mesh.position.set(other.x, other.y, other.z);
 
             const impactSpeed = Math.abs(activeVehicle.speed);
+            if (impactSpeed > 4.5) {
+              this.traffic.applyVehicleImpact(
+                activeVehicle,
+                impactSpeed * 0.52,
+                activeVehicle.speed >= 0 ? 'front' : 'rear'
+              );
+              this.traffic.applyVehicleImpact(
+                other,
+                impactSpeed * 0.72,
+                'left'
+              );
+            }
             if (impactSpeed > 6) {
               activeVehicle.speed *= 0.58;
               other.stopTimer = Math.max(other.stopTimer, 0.9);
@@ -1856,7 +2241,7 @@ export class PlayerController {
       const accelDelta = (activeVehicle.speed - prevSpeed) / Math.max(0.008, simDt);
       const targetPitch = vSpec.isAircraft
         ? -moveForward * 0.08
-        : THREE.MathUtils.clamp(-accelDelta * 0.0028, -0.075, 0.075);
+        : THREE.MathUtils.clamp(-accelDelta * 0.0028, -0.075, 0.075) + rampPitchBoost;
       activeVehicle.pitchAngle = THREE.MathUtils.damp(
         activeVehicle.pitchAngle,
         targetPitch,
@@ -1925,6 +2310,7 @@ export class PlayerController {
         if (this.driftChainScore >= 120) {
           const bonusRp = Math.round(this.driftChainScore * 35);
           const pts = Math.round(this.driftChainScore);
+          const wasViralDrift = this.driftChainTimer >= 2.2 || pts >= 260;
           this.driftChainScore = 0;
           this.driftChainTimer = 0;
           soundEngine.playPickup();
@@ -1939,6 +2325,13 @@ export class PlayerController {
             driftMultiplier: 1,
             lastOutcomeText: `Kombo Drift Malam Tuntas: +${pts.toLocaleString('id-ID')} Poin (+Rp ${bonusRp.toLocaleString('id-ID')})`,
           });
+          gameStore.recordDailyProgress('drift_combo', 1);
+          if (wasViralDrift) {
+            this.callbacks.onViralMoment?.(
+              'drift_stunt',
+              `Kombo drift ${pts.toLocaleString('id-ID')} poin di aspal basah Jakarta! Netizen langsung heboh!`
+            );
+          }
         } else if (this.driftChainScore > 0) {
           this.driftChainScore = 0;
           this.driftChainTimer = 0;
@@ -1984,14 +2377,21 @@ export class PlayerController {
         );
       }
       const rollBoost = this.playerPhys.combatRollTimer > 0 ? 1.85 : 1.0;
+      const inCover = storeState.inCover;
+      if (inCover && ((sprinting && (moveForward !== 0 || moveTurn !== 0)) || this.playerPhys.combatRollTimer > 0)) {
+        gameStore.setCoverState(false, 'none');
+      }
+      const coverSpeedMult = inCover ? 0.56 : 1.0;
       const walkSpeed =
         (sprinting ? 12.5 : 8.5) *
         (pState.fokusActive ? 1.22 : 1.0) *
         staminaMult *
-        rollBoost;
+        rollBoost *
+        coverSpeedMult;
       const inputX = camFwdX * moveForward + camRightX * strafeRight;
       const inputZ = camFwdZ * moveForward + camRightZ * strafeRight;
       const mag = Math.hypot(inputX, inputZ);
+      const isFirstPerson = storeState.cameraViewMode === 'first_person';
 
       if (mag > 0.01) {
         const nx = inputX / mag;
@@ -2008,7 +2408,7 @@ export class PlayerController {
             3.5
           );
         }
-        const targetAngle = isTpsAim ? this.camYaw : Math.atan2(nx, nz);
+        const targetAngle = isTpsAim || isFirstPerson ? this.camYaw : Math.atan2(nx, nz);
         const diff =
           ((targetAngle - this.playerPhys.facing + Math.PI * 3) %
             (Math.PI * 2)) -
@@ -2017,7 +2417,7 @@ export class PlayerController {
       } else {
         this.playerPhys.vx *= Math.exp(-12 * simDt);
         this.playerPhys.vz *= Math.exp(-12 * simDt);
-        if (isTpsAim) {
+        if (isTpsAim || isFirstPerson) {
           const diff =
             ((this.camYaw - this.playerPhys.facing + Math.PI * 3) %
               (Math.PI * 2)) -
@@ -2066,6 +2466,14 @@ export class PlayerController {
         simDt
       );
 
+      const targetScaleY =
+        storeState.inCover && this.playerPhys.attackCooldown <= 0.08 ? 0.8 : 1.0;
+      this.playerRig.group.scale.y = THREE.MathUtils.damp(
+        this.playerRig.group.scale.y,
+        targetScaleY,
+        12,
+        simDt
+      );
       this.playerRig.group.position.set(
         this.playerPhys.x,
         this.playerPhys.y,
@@ -2205,6 +2613,180 @@ export class PlayerController {
       comp.rig.group.rotation.y = comp.facing;
     }
 
+    // Wave 2: Autonomous 3D Trio Squad AI (Raka & Kirana / Active Wingmen)
+    const wingmen = getActiveWingmanIds(pState.activeProtagonist);
+    const squadOrder = storeState.squadOrder;
+    engineTelemetryRef.squadMembers.length = wingmen.length;
+    for (let wIdx = 0; wIdx < wingmen.length; wIdx++) {
+      const wId = wingmen[wIdx];
+      const rt = this.trioSquadRuntime[wId];
+      const rig = this.idleProtagonistRigs[wId];
+      const showWingman =
+        pState.currentInterior === 'exterior' &&
+        !this.playerPhys.drivingVehicleId;
+
+      const distToPlayer = Math.hypot(
+        this.playerPhys.x - rt.x,
+        this.playerPhys.z - rt.z
+      );
+      if (distToPlayer > 34 || !showWingman) {
+        // Snap into tactical formation if player drove away or exited vehicle
+        const snapAng = this.playerPhys.facing + Math.PI + (wIdx === 0 ? -0.75 : 0.75);
+        const safeSnap = resolveCircleAABBCollision(
+          this.playerPhys.x + Math.sin(snapAng) * 3.4,
+          this.playerPhys.z + Math.cos(snapAng) * 3.4,
+          0.7,
+          undefined,
+          this.buildingGrid
+        );
+        rt.x = safeSnap.x;
+        rt.z = safeSnap.z;
+      }
+
+      if (showWingman && simDt > 0) {
+        // Find nearest live enemy
+        let targetEn: EnemyEntity | null = null;
+        let bestEnDist = squadOrder === 'attack' ? 32 : 22;
+        for (let ei = 0; ei < this.enemies.length; ei++) {
+          const en = this.enemies[ei];
+          if (en.state !== 'alive') continue;
+          const d = Math.hypot(en.x - rt.x, en.z - rt.z);
+          if (d < bestEnDist) {
+            bestEnDist = d;
+            targetEn = en;
+          }
+        }
+
+        let goalX = rt.x;
+        let goalZ = rt.z;
+        if (squadOrder === 'hold') {
+          rt.actionLabel = targetEn ? 'Tahan & Tembak' : 'Jaga Perimeter';
+        } else if (squadOrder === 'attack' && targetEn) {
+          const keepDist = wId === 'raka' ? 5.2 : 9.5;
+          const ang = Math.atan2(rt.x - targetEn.x, rt.z - targetEn.z);
+          goalX = targetEn.x + Math.sin(ang) * keepDist;
+          goalZ = targetEn.z + Math.cos(ang) * keepDist;
+          rt.actionLabel = wId === 'raka' ? 'Menyerbu!' : 'Taktis Serang';
+        } else {
+          const formAng =
+            this.playerPhys.facing + Math.PI + (wIdx === 0 ? -0.7 : 0.7);
+          goalX = this.playerPhys.x + Math.sin(formAng) * 3.4;
+          goalZ = this.playerPhys.z + Math.cos(formAng) * 3.4;
+          rt.actionLabel = targetEn ? 'Kawal & Tembak' : 'Mengawal';
+        }
+
+        const dxW = goalX - rt.x;
+        const dzW = goalZ - rt.z;
+        const distW = Math.hypot(dxW, dzW);
+        if (distW > 0.45) {
+          const stepW = Math.min(distW, (squadOrder === 'attack' ? 10.6 : 9.4) * simDt);
+          const safeW = resolveCircleAABBCollision(
+            rt.x + (dxW / distW) * stepW,
+            rt.z + (dzW / distW) * stepW,
+            0.7,
+            undefined,
+            this.buildingGrid
+          );
+          rt.x = safeW.x;
+          rt.z = safeW.z;
+          rt.facing = Math.atan2(dxW, dzW);
+          rt.walkDist += stepW;
+          const sw = Math.sin(rt.walkDist * 2.3) * 0.52;
+          rig.leftLeg.rotation.x = sw;
+          rig.rightLeg.rotation.x = -sw;
+        } else {
+          rig.leftLeg.rotation.x *= 0.8;
+          rig.rightLeg.rotation.x *= 0.8;
+        }
+
+        // Wingman gunfire & signature abilities (Raka Breach Burst / Kirana EMP Pulse)
+        rt.fireCooldown -= simDt;
+        rt.abilityCooldown -= simDt;
+        const wGroundY = getGroundElevationAt(rt.x, rt.z);
+
+        if (targetEn && rt.fireCooldown <= 0) {
+          rt.facing = Math.atan2(targetEn.x - rt.x, targetEn.z - rt.z);
+          rig.rightArm.rotation.x = -Math.PI * 0.72;
+          const isRaka = wId === 'raka';
+          rt.fireCooldown = isRaka ? 0.95 : 0.78;
+          const dmg = isRaka ? 34 : 24;
+          targetEn.hp -= dmg;
+          targetEn.hitFlashTimer = 0.07;
+          this.spawnTracer(
+            rt.x,
+            wGroundY + 1.35,
+            rt.z,
+            targetEn.x,
+            getGroundElevationAt(targetEn.x, targetEn.z) + 1.2,
+            targetEn.z,
+            isRaka ? 0xf97316 : 0x38bdf8
+          );
+          this.spawnParticles(targetEn.x, 1.25, targetEn.z, 7, isRaka ? 0xf97316 : 0x38bdf8, 7);
+          if (targetEn.hp <= 0) {
+            this.markEnemyKo(targetEn, activeChoice, true);
+          }
+        }
+
+        // Kirana EMP Pulse slows nearby police/traffic vehicles & stuns nearby enemies
+        if (wId === 'kirana' && rt.abilityCooldown <= 0 && (targetEn || pState.wantedLevel >= 1)) {
+          rt.abilityCooldown = 11.0;
+          rt.actionLabel = 'EMP PULSE!';
+          const slowedCount = this.traffic.applyEmpPulseAt(
+            rt.x,
+            rt.z,
+            24,
+            this.playerPhys.drivingVehicleId
+          );
+          this.spawnParticles(rt.x, wGroundY + 1.2, rt.z, 22, 0x22d3ee, 10);
+          soundEngine.playTone(540, 0.25, 'sine', 0.14, 0.45);
+          for (let ei = 0; ei < this.enemies.length; ei++) {
+            const en = this.enemies[ei];
+            if (en.state === 'alive' && Math.hypot(en.x - rt.x, en.z - rt.z) < 15) {
+              en.cooldownTimer = Math.max(en.cooldownTimer, 1.8);
+              en.hp -= 18;
+              en.hitFlashTimer = 0.1;
+              if (en.hp <= 0) this.markEnemyKo(en, activeChoice, true);
+            }
+          }
+          if (slowedCount > 0 || targetEn) {
+            gameStore.triggerSquadCallout(
+              `Kirana: "Pulsa EMP aktif! ${slowedCount > 0 ? `${slowedCount} kendaraan lumpuh` : 'Sistem lawan terganggu'}!"`
+            );
+          }
+        }
+
+        rig.rightArm.rotation.x = THREE.MathUtils.damp(
+          rig.rightArm.rotation.x,
+          0,
+          10,
+          simDt
+        );
+        rig.group.position.set(rt.x, wGroundY, rt.z);
+        rig.group.rotation.y = rt.facing;
+      }
+
+      const prevT = engineTelemetryRef.squadMembers[wIdx];
+      if (!prevT) {
+        engineTelemetryRef.squadMembers[wIdx] = {
+          id: wId,
+          name: PROTAGONIST_PROFILES[wId].name,
+          x: rt.x,
+          z: rt.z,
+          facing: rt.facing,
+          active: true,
+          actionLabel: rt.actionLabel,
+        };
+      } else {
+        prevT.id = wId;
+        prevT.name = PROTAGONIST_PROFILES[wId].name;
+        prevT.x = rt.x;
+        prevT.z = rt.z;
+        prevT.facing = rt.facing;
+        prevT.active = true;
+        prevT.actionLabel = rt.actionLabel;
+      }
+    }
+
     const trafficRes = this.traffic.stepTrafficAI(
       simDt,
       nowMs,
@@ -2323,9 +2905,16 @@ export class PlayerController {
             distToPlayer <= spec.attackRange + 1.2 &&
             this.playerPhys.combatRollTimer <= 0
           ) {
-            this.callbacks.onPlayerDamage(spec.damage);
-            this.damagePulse = 1.0;
-            this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.35);
+            const mitigatedDmg = applyCoverDamageMitigation(
+              spec.damage,
+              storeState.inCover
+            );
+            this.callbacks.onPlayerDamage(mitigatedDmg);
+            this.damagePulse = storeState.inCover ? 0.45 : 1.0;
+            this.cameraTrauma = Math.min(
+              1,
+              this.cameraTrauma + (storeState.inCover ? 0.14 : 0.35)
+            );
             const hitAngle = Math.atan2(
               en.x - this.playerPhys.x,
               en.z - this.playerPhys.z
@@ -2451,10 +3040,19 @@ export class PlayerController {
         )
       : 0;
     const photoCfg = storeState.photoConfig;
+    const camMode = storeState.cameraViewMode;
     const targetFov = isPhotoMode
       ? photoCfg.fov
+      : this.stuntJump.airborne
+      ? 54
       : isTpsAim
       ? 46
+      : camMode === 'first_person'
+      ? isDriving
+        ? 72 + speedRatio * 10
+        : 70
+      : camMode === 'cinematic'
+      ? 56 + speedRatio * 8
       : isDriving
       ? 60 + speedRatio * 12 + (pState.fokusActive ? 4.5 : 0)
       : 60;
@@ -2620,6 +3218,60 @@ export class PlayerController {
       camera.position.y = THREE.MathUtils.damp(camera.position.y, targetCamY, 8.5, dt);
       camera.position.z = THREE.MathUtils.damp(camera.position.z, targetCamZ, 8.5, dt);
       camera.lookAt(vx, lookY, vz);
+    } else if (this.stuntJump.airborne && activeVehicle) {
+      // Dramatic Stunt Jump Slow-Mo Side Camera
+      const sideAng = activeVehicle.heading + Math.PI * 0.42;
+      const sx = activeVehicle.x + Math.sin(sideAng) * 11.5;
+      const sz = activeVehicle.z + Math.cos(sideAng) * 11.5;
+      const sy = activeVehicle.y + 2.8;
+      camera.position.x = THREE.MathUtils.damp(camera.position.x, sx, 6, dt);
+      camera.position.y = THREE.MathUtils.damp(camera.position.y, sy, 6, dt);
+      camera.position.z = THREE.MathUtils.damp(camera.position.z, sz, 6, dt);
+      camera.lookAt(activeVehicle.x, activeVehicle.y + 0.9, activeVehicle.z);
+    } else if (camMode === 'first_person') {
+      // Immersive First-Person On-Foot & Vehicle Cockpit Camera
+      this.playerRig.group.visible = false;
+      if (isDriving && activeVehicle) {
+        const sinH = Math.sin(activeVehicle.heading);
+        const cosH = Math.cos(activeVehicle.heading);
+        const camX = activeVehicle.x + sinH * 0.35;
+        const camY = activeVehicle.y + 1.38;
+        const camZ = activeVehicle.z + cosH * 0.35;
+        camera.position.set(camX, camY, camZ);
+        this._v2.set(
+          camX + sinH * 24,
+          camY - 0.18 + (0.28 - this.camPitch) * 6.5,
+          camZ + cosH * 24
+        );
+        camera.lookAt(this._v2);
+      } else {
+        const orbitFwdX = Math.sin(this.camYaw);
+        const orbitFwdZ = Math.cos(this.camYaw);
+        const walkBob =
+          Math.hypot(this.playerPhys.vx, this.playerPhys.vz) > 0.6
+            ? Math.sin(this.playerPhys.walkDist * 4.4) * 0.045
+            : 0;
+        const eyeY =
+          this.playerPhys.y + (storeState.inCover ? 1.12 : 1.62) + walkBob;
+        camera.position.set(
+          this.playerPhys.x + orbitFwdX * 0.12,
+          eyeY,
+          this.playerPhys.z + orbitFwdZ * 0.12
+        );
+        const lookPitchShift = (0.28 - this.camPitch) * 12;
+        this._v2.set(
+          this.playerPhys.x + orbitFwdX * 18,
+          eyeY + lookPitchShift,
+          this.playerPhys.z + orbitFwdZ * 18
+        );
+        camera.lookAt(this._v2);
+      }
+      if (this.cameraTrauma > 0) {
+        const shake = this.cameraTrauma * this.cameraTrauma * 0.2;
+        camera.position.x += (Math.random() - 0.5) * shake;
+        camera.position.y += (Math.random() - 0.5) * shake;
+        this.cameraTrauma = Math.max(0, this.cameraTrauma - dt * 2.2);
+      }
     } else {
       if (!this.playerPhys.drivingVehicleId && !this.playerRig.group.visible) {
         this.playerRig.group.visible = true;
@@ -2639,23 +3291,29 @@ export class PlayerController {
         this.camYaw += diff * (1 - Math.exp(-3.4 * dt));
       }
 
+      const isCinematic = camMode === 'cinematic';
+      const cineSway = isCinematic ? Math.sin(nowMs * 0.00055) * 0.42 : 0;
+      const effectiveYaw = this.camYaw + cineSway;
       const baseElevY = activeVehicle ? activeVehicle.y : this.playerPhys.y;
-      const orbitFwdX = Math.sin(this.camYaw);
-      const orbitFwdZ = Math.cos(this.camYaw);
-      const orbitRightX = -Math.cos(this.camYaw);
-      const orbitRightZ = Math.sin(this.camYaw);
+      const orbitFwdX = Math.sin(effectiveYaw);
+      const orbitFwdZ = Math.cos(effectiveYaw);
+      const orbitRightX = -Math.cos(effectiveYaw);
+      const orbitRightZ = Math.sin(effectiveYaw);
 
       const camDist = isTpsAim
         ? 4.4
+        : isCinematic
+        ? (isDriving ? 14.2 : 11.4) + speedRatio * 1.6
         : isDriving
         ? 12.2 + speedRatio * 1.4
         : 9.8;
-      const horizDist = camDist * Math.cos(this.camPitch);
-      const vertOffset = camDist * Math.sin(this.camPitch);
+      const effectivePitch = isCinematic ? 0.16 : this.camPitch;
+      const horizDist = camDist * Math.cos(effectivePitch);
+      const vertOffset = camDist * Math.sin(effectivePitch);
 
       let desiredX = this.playerPhys.x - orbitFwdX * horizDist;
       let desiredZ = this.playerPhys.z - orbitFwdZ * horizDist;
-      let desiredY = baseElevY + (isTpsAim ? 1.55 : 1.75) + vertOffset;
+      let desiredY = baseElevY + (isTpsAim ? 1.55 : isCinematic ? 1.35 : 1.75) + vertOffset;
 
       if (isTpsAim) {
         desiredX += orbitRightX * 1.1;
@@ -2675,7 +3333,7 @@ export class PlayerController {
         this.cameraNeedsSnap ||
         Math.abs(camera.position.y - pulledCam.y) > 25
           ? 1
-          : 1 - Math.exp(-(isTpsAim ? 14 : 9.5) * dt);
+          : 1 - Math.exp(-(isTpsAim ? 14 : isCinematic ? 5.5 : 9.5) * dt);
       this.cameraNeedsSnap = false;
 
       camera.position.x = THREE.MathUtils.lerp(

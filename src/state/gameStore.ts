@@ -1,40 +1,80 @@
 import { useSyncExternalStore } from 'react';
 import {
   ActiveStreetContractState,
+  ActiveStreetRaceSession,
+  ActiveTurfWarSession,
   AudioChannelVolumes,
+  CameraViewMode,
   CashLedgerEntry,
   CombatHitFeedbackEvent,
   CustomWaypointState,
   CutsceneOverlayState,
+  DailyChallengeKind,
+  DailyChallengesState,
   DistrictZone,
   EnterableInteriorSpec,
+  GRAND_HEISTS,
   GameSettings,
   GameState,
   GarageCameraPreset,
   GraphicsQualityTier,
+  HeistBreachSession,
+  HeistId,
   JAKARTA_DISTRICTS,
+  NabiloGramPost,
+  NabiloGramTriggerKind,
   NpcDynamicSideQuest,
   OriginArchetype,
+  PROTAGONIST_PROFILES,
   PhotoModeConfig,
   PlayerProgressState,
+  PoliceTacticalState,
+  PoliceVisionCone,
   ProtagonistId,
   RADIO_STATIONS,
+  RaceRivalTelemetry,
   STORY_MISSIONS,
   SaveSlotId,
+  SquadOrderMode,
   StreetBountySpec,
   StreetContractKind,
+  StreetRandomEvent,
   StoryChoiceOption,
   StoryMission,
+  StuntJumpResult,
   TrafficSignalPhase,
+  TrioSquadTelemetryMember,
+  TrioSynergyState,
+  VehicleDamageState,
   VehicleType,
+  ViralCloutState,
+  ViralPostResponse,
   WeaponId,
   WeatherMode,
   WorldClockEventTickerState,
   WorldRoadEventKind,
+  advanceDailyChallengeProgress,
+  buildLocalViralPost,
+  calculateStreetRacePayout,
+  captureDistrictTurf,
+  claimDailyChallengeReward,
+  computeViralCloutState,
+  createDailyChallengesForDate,
   createInitialPlayerState,
+  createInitialPoliceTacticalState,
+  createInitialTrioSynergy,
   createInitialWorldClockEventState,
+  createSeedNabiloGramPosts,
+  createStreetRaceSession,
+  createTurfWarSession,
+  cycleCameraViewMode as cycleCameraModePure,
   formatJakartaClock,
+  incrementTrioSynergy,
+  resolveSquadOrderCallout,
+  spawnNextStreetRandomEvent,
+  stepPoliceTacticalState,
   triggerManualWorldRoadEvent,
+  triggerWitnessCrimeReport,
 } from '../game/rules';
 import {
   DEFAULT_AUDIO_VOLUMES,
@@ -149,6 +189,13 @@ export interface EngineTelemetrySnapshot {
   drivingVehicleId: string | null;
   vehicles: RadarVehicleBlip[];
   enemies: RadarEnemyBlip[];
+  policeCones: PoliceVisionCone[];
+  squadMembers: TrioSquadTelemetryMember[];
+  raceRivals: RaceRivalTelemetry[];
+  crosshairSpread: number;
+  inCover: boolean;
+  stuntAirTimeSec: number;
+  activeVehicleDamage: VehicleDamageState | null;
   nearbyMission: StoryMission | null;
   activeChoice: StoryChoiceOption | null;
   perf: {
@@ -161,6 +208,7 @@ export interface EngineTelemetrySnapshot {
     roomId: string;
     roomMode: 'free_roam' | 'street_race' | 'coop_heist';
     simWorkerActive: boolean;
+    connectionState: 'connected' | 'reconnecting' | 'offline';
   };
 }
 
@@ -176,6 +224,13 @@ export const engineTelemetryRef: EngineTelemetrySnapshot = {
   drivingVehicleId: null,
   vehicles: [],
   enemies: [],
+  policeCones: [],
+  squadMembers: [],
+  raceRivals: [],
+  crosshairSpread: 0,
+  inCover: false,
+  stuntAirTimeSec: 0,
+  activeVehicleDamage: null,
   nearbyMission: STORY_MISSIONS[12],
   activeChoice: null,
   perf: {
@@ -188,6 +243,7 @@ export const engineTelemetryRef: EngineTelemetrySnapshot = {
     roomId: 'jakarta_pusat',
     roomMode: 'free_roam',
     simWorkerActive: true,
+    connectionState: 'connected',
   },
 };
 
@@ -210,6 +266,8 @@ export interface VirtualInputState {
   fokusTap: boolean;
   interactTap: boolean;
   rollTap: boolean;
+  coverTap: boolean;
+  cameraTap: boolean;
   gamepadConnected: boolean;
   gamepadName: string;
 }
@@ -229,6 +287,8 @@ export const virtualInputRef: VirtualInputState = {
   fokusTap: false,
   interactTap: false,
   rollTap: false,
+  coverTap: false,
+  cameraTap: false,
   gamepadConnected: false,
   gamepadName: '',
 };
@@ -281,6 +341,7 @@ export interface GameStoreSnapshot {
   activeContract: ActiveStreetContractState | null;
   lastOutcomeText: string | null;
   phoneOpen: boolean;
+  phoneTargetScreen: 'home' | 'feed' | 'satelit' | 'imperium';
   wheelMode: 'weapon' | 'character' | null;
   heistBoardOpen: boolean;
   customsGarageOpen: boolean;
@@ -308,6 +369,27 @@ export interface GameStoreSnapshot {
   worldClockEventState: WorldClockEventTickerState;
   perfOverlayOpen: boolean;
   cloudSyncStatus: string | null;
+  nabiloGramPosts: NabiloGramPost[];
+  viralClout: ViralCloutState;
+  latestViralToast: NabiloGramPost | null;
+  policeTactical: PoliceTacticalState;
+  activeStreetEvent: StreetRandomEvent | null;
+  streetEventCounter: number;
+  trioSynergy: TrioSynergyState;
+  activeHeistBreach: HeistBreachSession | null;
+  activeVehicleDamage: VehicleDamageState | null;
+  // Wave 2 Perfection Upgrade State
+  cameraViewMode: CameraViewMode;
+  inCover: boolean;
+  coverKind: 'none' | 'building' | 'vehicle' | 'barrier';
+  squadOrder: SquadOrderMode;
+  squadCallout: { text: string; stamp: number } | null;
+  activeRace: ActiveStreetRaceSession | null;
+  stuntCompletedIds: string[];
+  lastStuntBanner: StuntJumpResult | null;
+  activeTurfWar: ActiveTurfWarSession | null;
+  dailyChallenges: DailyChallengesState;
+  killCamBanner: { label: string; stamp: number } | null;
 }
 
 export function buildInitialStateForStage(
@@ -441,6 +523,7 @@ let state: GameStoreSnapshot = {
   activeContract: null,
   lastOutcomeText: null,
   phoneOpen: false,
+  phoneTargetScreen: 'home',
   wheelMode: null,
   heistBoardOpen: false,
   customsGarageOpen: false,
@@ -468,6 +551,26 @@ let state: GameStoreSnapshot = {
   worldClockEventState: createInitialWorldClockEventState(true),
   perfOverlayOpen: false,
   cloudSyncStatus: null,
+  nabiloGramPosts: createSeedNabiloGramPosts(),
+  viralClout: computeViralCloutState(60),
+  latestViralToast: null,
+  policeTactical: createInitialPoliceTacticalState(),
+  activeStreetEvent: spawnNextStreetRandomEvent(1),
+  streetEventCounter: 1,
+  trioSynergy: createInitialTrioSynergy(),
+  activeHeistBreach: null,
+  activeVehicleDamage: null,
+  cameraViewMode: 'third_person',
+  inCover: false,
+  coverKind: 'none',
+  squadOrder: 'follow',
+  squadCallout: null,
+  activeRace: null,
+  stuntCompletedIds: [],
+  lastStuntBanner: null,
+  activeTurfWar: null,
+  dailyChallenges: createDailyChallengesForDate(),
+  killCamBanner: null,
 };
 
 const listeners = new Set<() => void>();
@@ -683,6 +786,62 @@ export const gameStore = {
           category: 'custom',
         },
         lastOutcomeText: `Kontrak Taktis: ${contract.title} (+Rp 320.000)`,
+      };
+      emitChange();
+      return;
+    }
+
+    if (kind === 'glodok_arena') {
+      const contract: ActiveStreetContractState = {
+        id: `contract_glodok_${Date.now()}`,
+        kind: 'glodok_arena',
+        title: 'Glodok Underground Arena: Gelombang Sindikat',
+        subtitle: 'Bertahan hidup di gang neon Glodok & rebut taruhan utama',
+        targetX: -34,
+        targetZ: -28,
+        rewardRp: 520000,
+        timeRemainingSec: 120,
+        totalTimeSec: 120,
+        districtId: 'glodok',
+      };
+      state = {
+        ...state,
+        activeContract: contract,
+        customWaypoint: {
+          x: contract.targetX,
+          z: contract.targetZ,
+          label: 'Arena Bawah Tanah Glodok',
+          category: 'custom',
+        },
+        lastOutcomeText: `Arena Glodok Dimulai: ${contract.title} (+Rp 520.000)`,
+      };
+      emitChange();
+      return;
+    }
+
+    if (kind === 'priok_container_heist') {
+      const contract: ActiveStreetContractState = {
+        id: `contract_priok_${Date.now()}`,
+        kind: 'priok_container_heist',
+        title: 'Priok Container Heist: Ekstraksi Kendaraan Impor',
+        subtitle: 'Retas manifest kargo Tanjung Priok & amankan kontainer VIP',
+        targetX: 42,
+        targetZ: -42,
+        rewardRp: 780000,
+        timeRemainingSec: 150,
+        totalTimeSec: 150,
+        districtId: 'priok',
+      };
+      state = {
+        ...state,
+        activeContract: contract,
+        customWaypoint: {
+          x: contract.targetX,
+          z: contract.targetZ,
+          label: 'Dermaga Kontainer Tanjung Priok',
+          category: 'custom',
+        },
+        lastOutcomeText: `Misi Penyelundupan Priok: ${contract.title} (+Rp 780.000)`,
       };
       emitChange();
       return;
@@ -911,6 +1070,668 @@ export const gameStore = {
           [quest.faction]: nextRep,
         },
       },
+    };
+    emitChange();
+    return true;
+  },
+
+  publishViralEvent: (params: {
+    triggerKind: NabiloGramTriggerKind;
+    snapshotDataUrl: string | null;
+    vehicleName?: string;
+    summaryNote?: string;
+    cloutGain?: number;
+  }) => {
+    const pState = state.playerState;
+    const protagonistName =
+      PROTAGONIST_PROFILES[pState.activeProtagonist]?.name || 'Nabilo';
+    const districtName = state.district?.name || 'Jakarta Pusat';
+    const postId = `ng_${Date.now()}_${Math.floor(Math.random() * 999)}`;
+
+    const localPost = buildLocalViralPost({
+      id: postId,
+      triggerKind: params.triggerKind,
+      districtName,
+      protagonistName,
+      wantedLevel: pState.wantedLevel,
+      vehicleName: params.vehicleName,
+      snapshotDataUrl: params.snapshotDataUrl,
+      summaryNote: params.summaryNote,
+    });
+
+    const gain = params.cloutGain ?? (params.triggerKind === 'heist_complete' ? 95 : 35);
+    const nextClout = computeViralCloutState(state.viralClout.xp + gain);
+    const dcRes = advanceDailyChallengeProgress(state.dailyChallenges, 'viral_post', 1);
+    soundEngine.playPickup();
+
+    state = {
+      ...state,
+      nabiloGramPosts: [localPost, ...state.nabiloGramPosts].slice(0, 16),
+      viralClout: nextClout,
+      latestViralToast: localPost,
+      dailyChallenges: dcRes.next,
+    };
+    emitChange();
+
+    window.setTimeout(() => {
+      if (state.latestViralToast?.id === postId) {
+        state = { ...state, latestViralToast: null };
+        emitChange();
+      }
+    }, 5200);
+
+    // Asynchronously upgrade caption & comments with live Gemini AI if available
+    if (typeof fetch === 'function') {
+      void fetch('/api/social/viral-post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          triggerKind: params.triggerKind,
+          districtName,
+          protagonistName,
+          wantedLevel: pState.wantedLevel,
+          vehicleName: params.vehicleName,
+          summaryNote: params.summaryNote,
+        }),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: ViralPostResponse | null) => {
+          if (!data || !data.caption) return;
+          const idx = state.nabiloGramPosts.findIndex((p) => p.id === postId);
+          if (idx === -1) return;
+          const existing = state.nabiloGramPosts[idx];
+          const upgraded: NabiloGramPost = {
+            ...existing,
+            authorHandle: data.authorHandle || existing.authorHandle,
+            authorTag: data.authorTag || existing.authorTag,
+            caption: data.caption,
+            hashtags:
+              Array.isArray(data.hashtags) && data.hashtags.length > 0
+                ? data.hashtags
+                : existing.hashtags,
+            comments:
+              Array.isArray(data.comments) && data.comments.length > 0
+                ? data.comments.map((c, ci) => ({
+                    id: `${postId}_ai_${ci}`,
+                    handle: c.handle,
+                    text: c.text,
+                    likes: c.likes,
+                  }))
+                : existing.comments,
+            source: data.source || 'gemini',
+          };
+          const nextPosts = [...state.nabiloGramPosts];
+          nextPosts[idx] = upgraded;
+          state = {
+            ...state,
+            nabiloGramPosts: nextPosts,
+            latestViralToast:
+              state.latestViralToast?.id === postId
+                ? upgraded
+                : state.latestViralToast,
+          };
+          emitChange();
+        })
+        .catch(() => {
+          // Local Jakarta post is already rendered immediately
+        });
+    }
+  },
+
+  toggleLikeViralPost: (postId: string) => {
+    soundEngine.playPickup();
+    let gainedXp = 0;
+    const nextPosts = state.nabiloGramPosts.map((p) => {
+      if (p.id !== postId) return p;
+      const nextLiked = !p.isLiked;
+      if (nextLiked) gainedXp = 5;
+      return {
+        ...p,
+        isLiked: nextLiked,
+        likes: p.likes + (nextLiked ? 1 : -1),
+      };
+    });
+    state = {
+      ...state,
+      nabiloGramPosts: nextPosts,
+      viralClout:
+        gainedXp > 0
+          ? computeViralCloutState(state.viralClout.xp + gainedXp)
+          : state.viralClout,
+    };
+    emitChange();
+  },
+
+  boostViralPost: (postId: string): boolean => {
+    const BOOST_COST = 25000;
+    const target = state.nabiloGramPosts.find((p) => p.id === postId);
+    if (!target || target.boosted || state.playerState.rupiah < BOOST_COST) {
+      return false;
+    }
+    soundEngine.playCashRegister();
+    const nextPosts = state.nabiloGramPosts.map((p) =>
+      p.id === postId
+        ? {
+            ...p,
+            boosted: true,
+            views: p.views + 28500,
+            likes: p.likes + 4200,
+          }
+        : p
+    );
+    const nextClout = computeViralCloutState(state.viralClout.xp + 65);
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const tx: CashLedgerEntry = {
+      id: `tx_boost_${Date.now()}`,
+      label: 'Promosi FYP NabiloGram',
+      amountRp: -BOOST_COST,
+      category: 'belanja',
+      timestampLabel: `${hh}:${mm} WIB`,
+    };
+    state = {
+      ...state,
+      nabiloGramPosts: nextPosts,
+      viralClout: nextClout,
+      cashLedger: [tx, ...state.cashLedger].slice(0, 18),
+      playerState: {
+        ...state.playerState,
+        rupiah: state.playerState.rupiah - BOOST_COST,
+        score: state.playerState.score + 200,
+        bestScore: Math.max(
+          state.playerState.bestScore,
+          state.playerState.score + 200
+        ),
+      },
+      lastOutcomeText: `Postingan melesat ke Trending Jakarta! Clout Lv.${nextClout.level} (${nextClout.tierTitle})`,
+    };
+    emitChange();
+    return true;
+  },
+
+  dismissViralToast: () => {
+    if (!state.latestViralToast) return;
+    state = { ...state, latestViralToast: null };
+    emitChange();
+  },
+
+  reportWitnessCrime: (x: number, z: number, districtName?: string) => {
+    const dName = districtName || state.district?.name || 'Jakarta Pusat';
+    const nextTac = triggerWitnessCrimeReport(
+      state.policeTactical,
+      x,
+      z,
+      dName,
+      state.playerState.wantedLevel
+    );
+    state = { ...state, policeTactical: nextTac };
+    emitChange();
+  },
+
+  stepPoliceTactical: (params: {
+    dt: number;
+    hasLineOfSight: boolean;
+    playerX: number;
+    playerZ: number;
+    districtName: string;
+  }) => {
+    const { next, escalateToStarOne } = stepPoliceTacticalState(
+      state.policeTactical,
+      {
+        ...params,
+        wantedLevel: state.playerState.wantedLevel,
+      }
+    );
+    const changed =
+      next.phase !== state.policeTactical.phase ||
+      Math.round(next.witnessProgress) !==
+        Math.round(state.policeTactical.witnessProgress) ||
+      next.radioCallout !== state.policeTactical.radioCallout ||
+      escalateToStarOne;
+    if (!changed) return;
+
+    if (escalateToStarOne) {
+      soundEngine.playPoliceSiren();
+      state = {
+        ...state,
+        policeTactical: next,
+        playerState: {
+          ...state.playerState,
+          wantedLevel: Math.max(1, state.playerState.wantedLevel),
+          wantedEvading: false,
+          wantedEvadeTimer: 0,
+        },
+        lastOutcomeText:
+          next.radioCallout ||
+          'Saksi melapor ke 110! Patroli polisi mulai mengejar.',
+      };
+    } else {
+      state = { ...state, policeTactical: next };
+    }
+    emitChange();
+  },
+
+  tickStreetRandomEvent: (dt: number) => {
+    const cur = state.activeStreetEvent;
+    if (!cur || cur.status !== 'active') {
+      const nextCounter = state.streetEventCounter + 1;
+      state = {
+        ...state,
+        streetEventCounter: nextCounter,
+        activeStreetEvent: spawnNextStreetRandomEvent(nextCounter, cur?.kind),
+      };
+      emitChange();
+      return;
+    }
+    const rem = cur.remainingSec - dt;
+    if (rem <= 0) {
+      const nextCounter = state.streetEventCounter + 1;
+      state = {
+        ...state,
+        streetEventCounter: nextCounter,
+        activeStreetEvent: spawnNextStreetRandomEvent(nextCounter, cur.kind),
+      };
+      emitChange();
+    } else if (Math.floor(rem) !== Math.floor(cur.remainingSec)) {
+      state = {
+        ...state,
+        activeStreetEvent: { ...cur, remainingSec: rem },
+      };
+      emitChange();
+    }
+  },
+
+  spawnStreetEventNow: () => {
+    soundEngine.playPickup();
+    const nextCounter = state.streetEventCounter + 1;
+    const nextEv = spawnNextStreetRandomEvent(
+      nextCounter,
+      state.activeStreetEvent?.kind
+    );
+    state = {
+      ...state,
+      streetEventCounter: nextCounter,
+      activeStreetEvent: nextEv,
+      customWaypoint: {
+        x: nextEv.x,
+        z: nextEv.z,
+        label: `Event Jalanan: ${nextEv.title}`,
+        category: 'custom',
+      },
+      lastOutcomeText: `Event Jalanan Baru di ${nextEv.districtName}: ${nextEv.title}`,
+    };
+    emitChange();
+  },
+
+  resolveActiveStreetEvent: (snapshotDataUrl: string | null = null): StreetRandomEvent | null => {
+    const ev = state.activeStreetEvent;
+    if (!ev || ev.status !== 'active') return null;
+    soundEngine.playMissionFanfare();
+    const prev = state.playerState;
+    const sponsorBonus = Math.round(
+      ev.rewardRp * (state.viralClout.sponsorBonusPercent / 100)
+    );
+    const totalRp = ev.rewardRp + sponsorBonus;
+    const nextScore = prev.score + 420;
+    const nextRep = Math.min(100, prev.reputation[ev.faction] + 8);
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const tx: CashLedgerEntry = {
+      id: `tx_sev_${Date.now()}`,
+      label: `Event Jalanan: ${ev.title}`,
+      amountRp: totalRp,
+      category: 'bounty',
+      timestampLabel: `${hh}:${mm} WIB`,
+    };
+    const nextCounter = state.streetEventCounter + 1;
+    const nextEv = spawnNextStreetRandomEvent(nextCounter, ev.kind);
+    const nextSynergy = incrementTrioSynergy(
+      state.trioSynergy,
+      prev.activeProtagonist,
+      5
+    );
+    state = {
+      ...state,
+      streetEventCounter: nextCounter,
+      activeStreetEvent: nextEv,
+      trioSynergy: nextSynergy,
+      cashLedger: [tx, ...state.cashLedger].slice(0, 18),
+      lastOutcomeText: `Event Jalanan Tuntas: ${ev.title} (+Rp ${totalRp.toLocaleString('id-ID')} & +${ev.cloutXp} Clout)`,
+      playerState: {
+        ...prev,
+        rupiah: prev.rupiah + totalRp,
+        score: nextScore,
+        bestScore: Math.max(prev.bestScore, nextScore),
+        reputation: {
+          ...prev.reputation,
+          [ev.faction]: nextRep,
+        },
+      },
+    };
+    emitChange();
+
+    gameStore.publishViralEvent({
+      triggerKind: 'street_event',
+      snapshotDataUrl,
+      summaryNote: `${ev.title} di ${ev.districtName} beres dalam hitungan detik! Warga kasih hormat!`,
+      cloutGain: ev.cloutXp,
+    });
+    return ev;
+  },
+
+  boostTrioSynergy: (amount: number = 8, toastNote?: string) => {
+    const nextSyn = incrementTrioSynergy(
+      state.trioSynergy,
+      state.playerState.activeProtagonist,
+      amount
+    );
+    soundEngine.playPickup();
+    state = {
+      ...state,
+      trioSynergy: nextSyn,
+      lastOutcomeText:
+        toastNote || nextSyn.lastBanterLine || 'Sinergi Trio Jakarta meningkat!',
+    };
+    emitChange();
+  },
+
+  startHeistBreach: (heistId: HeistId) => {
+    const spec = GRAND_HEISTS.find((h) => h.id === heistId);
+    if (!spec) return;
+    const approach = state.playerState.activeHeistPlan.approach;
+    soundEngine.playPickup();
+    state = {
+      ...state,
+      heistBoardOpen: false,
+      activeHeistBreach: {
+        heistId,
+        approach,
+        stage: approach === 'stealth_cyber' ? 'cyber_signal' : 'thermal_drill',
+        progress: 0,
+        heat: 18,
+        lockedBands: 0,
+        active: true,
+      },
+    };
+    emitChange();
+  },
+
+  updateHeistBreach: (patch: Partial<HeistBreachSession>) => {
+    if (!state.activeHeistBreach) return;
+    state = {
+      ...state,
+      activeHeistBreach: { ...state.activeHeistBreach, ...patch },
+    };
+    emitChange();
+  },
+
+  closeHeistBreach: () => {
+    if (!state.activeHeistBreach) return;
+    state = { ...state, activeHeistBreach: null };
+    emitChange();
+  },
+
+  /* ==========================================================================
+   * WAVE 2 PERFECTION UPGRADE ACTIONS
+   * ========================================================================== */
+
+  cycleCameraViewMode: () => {
+    const nextMode = cycleCameraModePure(state.cameraViewMode);
+    soundEngine.playPickup();
+    state = { ...state, cameraViewMode: nextMode };
+    emitChange();
+  },
+
+  setCameraViewMode: (mode: CameraViewMode) => {
+    if (state.cameraViewMode === mode) return;
+    state = { ...state, cameraViewMode: mode };
+    emitChange();
+  },
+
+  setCoverState: (
+    inCover: boolean,
+    coverKind: 'none' | 'building' | 'vehicle' | 'barrier' = 'none'
+  ) => {
+    if (state.inCover === inCover && state.coverKind === coverKind) return;
+    engineTelemetryRef.inCover = inCover;
+    state = { ...state, inCover, coverKind };
+    emitChange();
+  },
+
+  setSquadOrder: (order: SquadOrderMode) => {
+    const callout = resolveSquadOrderCallout(
+      order,
+      state.playerState.activeProtagonist
+    );
+    soundEngine.playPickup();
+    state = {
+      ...state,
+      squadOrder: order,
+      squadCallout: { text: callout, stamp: Date.now() },
+    };
+    emitChange();
+  },
+
+  triggerSquadCallout: (text: string) => {
+    state = {
+      ...state,
+      squadCallout: { text, stamp: Date.now() },
+    };
+    emitChange();
+  },
+
+  triggerKillCamBanner: (label: string) => {
+    state = {
+      ...state,
+      killCamBanner: { label, stamp: Date.now() },
+    };
+    emitChange();
+  },
+
+  startStreetRace: (raceId: string) => {
+    const session = createStreetRaceSession(raceId);
+    if (!session) return null;
+    soundEngine.playPickup();
+    state = {
+      ...state,
+      phoneOpen: false,
+      activeRace: session,
+      lastOutcomeText: `Balap Liar dimulai: ${session.raceName} (3 Rival AI)`,
+    };
+    emitChange();
+    return session;
+  },
+
+  updateActiveRace: (patch: Partial<ActiveStreetRaceSession>) => {
+    if (!state.activeRace) return;
+    state = {
+      ...state,
+      activeRace: { ...state.activeRace, ...patch },
+    };
+    emitChange();
+  },
+
+  finishStreetRace: (place: number) => {
+    const race = state.activeRace;
+    if (!race || race.status === 'finished') return;
+    const payout = calculateStreetRacePayout(race.rewardRp, place);
+    const nextClout = computeViralCloutState(state.viralClout.xp + payout.cloutXp);
+    const nextSyn = incrementTrioSynergy(
+      state.trioSynergy,
+      state.playerState.activeProtagonist,
+      place <= 2 ? 8 : 4
+    );
+    const dcRes =
+      place <= 3
+        ? advanceDailyChallengeProgress(state.dailyChallenges, 'street_race_win', 1)
+        : { next: state.dailyChallenges, justCompletedTitle: null };
+
+    soundEngine.playVictoryFanfare();
+    state = {
+      ...state,
+      playerState: {
+        ...state.playerState,
+        rupiah: state.playerState.rupiah + payout.rewardRp,
+        score: state.playerState.score + (place === 1 ? 650 : 320),
+        bestScore: Math.max(
+          state.playerState.bestScore,
+          state.playerState.score + (place === 1 ? 650 : 320)
+        ),
+        reputation: {
+          ...state.playerState.reputation,
+          jalanan: Math.min(100, state.playerState.reputation.jalanan + (place === 1 ? 10 : 5)),
+        },
+      },
+      viralClout: nextClout,
+      trioSynergy: nextSyn,
+      dailyChallenges: dcRes.next,
+      activeRace: {
+        ...race,
+        status: 'finished',
+        position: place,
+        finishedPlace: place,
+      },
+      lastOutcomeText: `${payout.label} · +Rp ${payout.rewardRp.toLocaleString('id-ID')}${
+        dcRes.justCompletedTitle ? ` · Tantangan Selesai: ${dcRes.justCompletedTitle}` : ''
+      }`,
+    };
+    emitChange();
+  },
+
+  cancelStreetRace: () => {
+    if (!state.activeRace) return;
+    state = { ...state, activeRace: null };
+    engineTelemetryRef.raceRivals.length = 0;
+    emitChange();
+  },
+
+  recordStuntJump: (result: StuntJumpResult) => {
+    const nextCompleted = result.isNewRamp
+      ? Array.from(new Set([...state.stuntCompletedIds, result.rampId]))
+      : state.stuntCompletedIds;
+    const nextClout = computeViralCloutState(state.viralClout.xp + result.cloutXp);
+    const dcRes = advanceDailyChallengeProgress(state.dailyChallenges, 'stunt_jump', 1);
+    soundEngine.playPickup();
+    state = {
+      ...state,
+      playerState: {
+        ...state.playerState,
+        rupiah: state.playerState.rupiah + result.rewardRp,
+        score: state.playerState.score + Math.round(result.distanceM * 12),
+        bestScore: Math.max(
+          state.playerState.bestScore,
+          state.playerState.score + Math.round(result.distanceM * 12)
+        ),
+      },
+      viralClout: nextClout,
+      stuntCompletedIds: nextCompleted,
+      lastStuntBanner: result,
+      dailyChallenges: dcRes.next,
+      lastOutcomeText: `STUNT ${result.rating}! ${result.distanceM}m (${result.airTimeSec}d) · +Rp ${result.rewardRp.toLocaleString('id-ID')}`,
+    };
+    emitChange();
+  },
+
+  dismissStuntBanner: () => {
+    if (!state.lastStuntBanner) return;
+    state = { ...state, lastStuntBanner: null };
+    emitChange();
+  },
+
+  startTurfWar: (districtId: string) => {
+    const session = createTurfWarSession(districtId);
+    if (!session) return null;
+    soundEngine.playPickup();
+    state = {
+      ...state,
+      phoneOpen: false,
+      activeTurfWar: session,
+      lastOutcomeText: `Serangan Wilayah dimulai di ${session.districtName} — Gelombang 1/3!`,
+    };
+    emitChange();
+    return session;
+  },
+
+  updateTurfWarState: (patch: Partial<ActiveTurfWarSession>) => {
+    if (!state.activeTurfWar) return;
+    state = {
+      ...state,
+      activeTurfWar: { ...state.activeTurfWar, ...patch },
+    };
+    emitChange();
+  },
+
+  completeTurfWar: () => {
+    const tw = state.activeTurfWar;
+    if (!tw || tw.status !== 'active') return;
+    const cap = captureDistrictTurf(state.playerState, tw.districtId);
+    const nextClout = computeViralCloutState(state.viralClout.xp + 90);
+    const nextSyn = incrementTrioSynergy(
+      state.trioSynergy,
+      state.playerState.activeProtagonist,
+      10
+    );
+    const dcRes = advanceDailyChallengeProgress(
+      state.dailyChallenges,
+      'turf_capture',
+      1
+    );
+    soundEngine.playVictoryFanfare();
+    state = {
+      ...state,
+      playerState: cap.nextState,
+      viralClout: nextClout,
+      trioSynergy: nextSyn,
+      dailyChallenges: dcRes.next,
+      activeTurfWar: {
+        ...tw,
+        enemiesRemaining: 0,
+        captainAlive: false,
+        progressPct: 100,
+        status: 'victory',
+      },
+      lastOutcomeText: `WILAYAH DIKUASAI: ${tw.districtName}! +Rp ${cap.rewardRp.toLocaleString('id-ID')} & Dividen Pasif Naik`,
+    };
+    emitChange();
+  },
+
+  abortTurfWar: () => {
+    if (!state.activeTurfWar) return;
+    state = { ...state, activeTurfWar: null };
+    emitChange();
+  },
+
+  recordDailyProgress: (kind: DailyChallengeKind, delta: number = 1) => {
+    const res = advanceDailyChallengeProgress(state.dailyChallenges, kind, delta);
+    if (res.next === state.dailyChallenges) return;
+    state = {
+      ...state,
+      dailyChallenges: res.next,
+      lastOutcomeText: res.justCompletedTitle
+        ? `Tantangan Harian Selesai: ${res.justCompletedTitle} — Klaim di NabiloPhone!`
+        : state.lastOutcomeText,
+    };
+    emitChange();
+  },
+
+  claimDailyChallenge: (challengeId: string) => {
+    const res = claimDailyChallengeReward(state.dailyChallenges, challengeId);
+    if (!res.claimed) return false;
+    const nextClout = computeViralCloutState(state.viralClout.xp + res.cloutXp);
+    soundEngine.playVictoryFanfare();
+    state = {
+      ...state,
+      playerState: {
+        ...state.playerState,
+        rupiah: state.playerState.rupiah + res.rewardRp,
+        score: state.playerState.score + 350,
+        bestScore: Math.max(state.playerState.bestScore, state.playerState.score + 350),
+      },
+      viralClout: nextClout,
+      dailyChallenges: res.next,
+      lastOutcomeText: `Hadiah Tantangan Harian diklaim! +Rp ${res.rewardRp.toLocaleString('id-ID')} · +${res.cloutXp} Clout`,
     };
     emitChange();
     return true;

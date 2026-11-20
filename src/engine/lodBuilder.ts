@@ -57,3 +57,47 @@ export function buildThreeTierBuildingLOD(
   lod.frustumCulled = true;
   return lod;
 }
+
+export type LodTier = 'LOD0' | 'LOD1' | 'LOD2';
+
+export interface LodRingAssignment {
+  id: string;
+  distance: number;
+  tier: LodTier;
+}
+
+/**
+ * Assigns LOD0 (< 72m), LOD1 (72–135m), or LOD2 (> 135m) to a list of building footprints
+ * relative to the active camera / player coordinate.
+ */
+export function computeLodRingAssignments(
+  buildings: BuildingFootprint[],
+  playerX: number,
+  playerZ: number
+): LodRingAssignment[] {
+  return buildings.map((b) => {
+    const distance = Math.hypot(b.x - playerX, b.z - playerZ);
+    const tier: LodTier =
+      distance < 72 ? 'LOD0' : distance < 135 ? 'LOD1' : 'LOD2';
+    return { id: b.id, distance, tier };
+  });
+}
+
+/**
+ * Builds a lightweight proxy THREE.Group for a spatial chunk's buildings used by SpatialChunkLoader.
+ */
+export function buildDistrictLodGroup(buildings: BuildingFootprint[]): THREE.Group {
+  const group = new THREE.Group();
+  for (const b of buildings) {
+    const geo = new THREE.BoxGeometry(b.width, b.height, b.depth);
+    geo.translate(0, b.height * 0.5, 0);
+    const mat = new THREE.MeshBasicMaterial({ color: b.primaryColor });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(b.x, 0, b.z);
+    mesh.userData.buildingId = b.id;
+    mesh.userData.lodProxy = true;
+    group.add(mesh);
+  }
+  return group;
+}
+

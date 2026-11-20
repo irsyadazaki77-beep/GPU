@@ -762,13 +762,26 @@ export function buildElevatedHighwayMesh(
 }
 
 export const INTERIOR_ROOM_CENTERS: Record<
-  'heist_penthouse' | 'customs_garage' | 'bank_vault' | 'warung',
+  | 'heist_penthouse'
+  | 'customs_garage'
+  | 'bank_vault'
+  | 'warung'
+  | 'safehouse_trio'
+  | 'faction_hq_jalanan'
+  | 'faction_hq_sindikat'
+  | 'faction_hq_rakyat'
+  | 'glodok_tech_shop',
   number
 > = {
   heist_penthouse: 0,
   customs_garage: 40,
   bank_vault: -40,
   warung: 80,
+  safehouse_trio: -80,
+  faction_hq_jalanan: 120,
+  faction_hq_sindikat: -120,
+  faction_hq_rakyat: 160,
+  glodok_tech_shop: -160,
 };
 
 export function buildInteriorPortalsAndStage(): {
@@ -1009,6 +1022,45 @@ export function buildInteriorPortalsAndStage(): {
     stool.position.set(sx, 0.34, -4.2);
     warungRoom.add(stool);
   }
+
+  // Room 5: Safehouse Trio Menteng (x = -80) — Bed, Weapon Stash & Wardrobe
+  const safehouseRoom = buildRoomShell(-80, 0x0f172a, 0x1e293b, 0x38bdf8);
+  const bedFrame = new THREE.Mesh(
+    new THREE.BoxGeometry(3.4, 0.65, 4.2),
+    warungWoodMat
+  );
+  bedFrame.position.set(-6.5, 0.32, -6.5);
+  safehouseRoom.add(bedFrame);
+  const weaponLocker = new THREE.Mesh(
+    new THREE.BoxGeometry(2.8, 3.6, 1.1),
+    vaultSteelMat
+  );
+  weaponLocker.position.set(6.5, 1.8, -9.5);
+  safehouseRoom.add(weaponLocker);
+
+  // Rooms 6–8: Faction HQs (jalanan x=120, sindikat x=-120, rakyat x=160)
+  for (const [cx, hex] of [
+    [120, 0xef4444],
+    [-120, 0x8b5cf6],
+    [160, 0x14b8a6],
+  ] as [number, number][]) {
+    const hqRoom = buildRoomShell(cx, 0x111827, 0x1f2937, hex);
+    const planTable = new THREE.Mesh(
+      new THREE.BoxGeometry(5.6, 0.95, 3.0),
+      tableMat
+    );
+    planTable.position.set(0, 0.48, -4.0);
+    hqRoom.add(planTable);
+  }
+
+  // Room 9: Glodok Tech & Rumor Shop (x = -160)
+  const glodokRoom = buildRoomShell(-160, 0x18181b, 0x27272a, 0xf97316);
+  const techCounter = new THREE.Mesh(
+    new THREE.BoxGeometry(7.2, 1.1, 1.6),
+    serverMat
+  );
+  techCounter.position.set(0, 0.55, -5.8);
+  glodokRoom.add(techCounter);
 
   return { portalsGroup, interiorStageGroup };
 }

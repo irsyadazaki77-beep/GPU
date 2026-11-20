@@ -8,6 +8,7 @@ import {
   clearSavedGame,
   exportSavedGameJson,
   getActiveSaveSlot,
+  getOrCreatePlayerToken,
   listSaveSlotSummaries,
   loadSavedGame,
   migrateSavedGame,
@@ -150,6 +151,13 @@ test('Multi-slot management (Slots 1-3) and JSON export/import preserve full Sav
   assert.equal(imported.gameSettings.graphicsTier, 'ultra');
   assert.deepEqual(imported.completedDynamicQuests, ['dq_glodok_99']);
 
+  const token1 = getOrCreatePlayerToken();
+  const token2 = getOrCreatePlayerToken();
+  assert.ok(/^[a-zA-Z0-9_-]{8,128}$/.test(token1));
+  assert.equal(token1, token2);
+
   clearSavedGame(2);
   assert.equal(loadSavedGame(2), null);
 });
+
+

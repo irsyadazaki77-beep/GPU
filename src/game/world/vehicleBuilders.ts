@@ -379,6 +379,60 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
     );
     rearBar.position.set(0, 0.62, -2.26);
     group.add(rearBar);
+  } else if (type === 'speedboat') {
+    const hullGeo = extrudeSideProfile(
+      [
+        [-2.35, 0.18],
+        [1.85, 0.16],
+        [2.45, 0.68],
+        [1.4, 0.86],
+        [-1.95, 0.84],
+        [-2.35, 0.66],
+      ],
+      1.92,
+      0.08
+    );
+    const hull = new THREE.Mesh(hullGeo, bodyMat);
+    hull.castShadow = true;
+    group.add(hull);
+
+    const deckStripe = new THREE.Mesh(
+      new THREE.BoxGeometry(1.62, 0.08, 3.8),
+      trimMat
+    );
+    deckStripe.position.set(0, 0.88, -0.1);
+    group.add(deckStripe);
+
+    const windshield = new THREE.Mesh(
+      new THREE.BoxGeometry(1.48, 0.42, 0.95),
+      glassMat
+    );
+    windshield.position.set(0, 1.08, 0.45);
+    windshield.rotation.x = -0.28;
+    group.add(windshield);
+
+    const radarArch = new THREE.Mesh(
+      new THREE.BoxGeometry(1.56, 0.56, 0.18),
+      alloyMat
+    );
+    radarArch.position.set(0, 1.24, -0.85);
+    group.add(radarArch);
+
+    for (const sx of [-0.46, 0.46]) {
+      const outboard = new THREE.Mesh(
+        new THREE.BoxGeometry(0.32, 0.62, 0.44),
+        darkGrilleMat
+      );
+      outboard.position.set(sx, 0.48, -2.42);
+      group.add(outboard);
+    }
+
+    const bowLamp = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42, 0.12, 0.14),
+      headlightMat
+    );
+    bowLamp.position.set(0, 0.74, 2.38);
+    group.add(bowLamp);
   } else {
     const chassisGeo = extrudeSideProfile(
       [

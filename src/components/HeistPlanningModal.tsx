@@ -6,8 +6,10 @@ import {
   HeistId,
   PlayerProgressState,
   calculateHeistBreakdown,
+  computeTrioSynergyPerks,
   formatRupiah,
 } from '../game/rules';
+import { useGameStore } from '../state/gameStore';
 
 interface HeistPlanningModalProps {
   playerState: PlayerProgressState;
@@ -32,11 +34,16 @@ export const HeistPlanningModal: React.FC<HeistPlanningModalProps> = ({
   );
   const heistCompleted = playerState.completedHeists.includes(selectedHeist.id);
 
+  const trioSynergy = useGameStore((s) => s.trioSynergy);
+  const synergyPerks = computeTrioSynergyPerks(trioSynergy);
   const breakdown = calculateHeistBreakdown(
     plan.heistId,
     plan.hackerId,
     plan.driverId,
     plan.gunmanId
+  );
+  const synergyBonusRp = Math.round(
+    breakdown.netPlayerTakeRp * (synergyPerks.heistBonusPercent / 100)
   );
 
   const hackers = HEIST_CREW_ROSTER.filter((c) => c.role === 'hacker');
@@ -350,12 +357,20 @@ export const HeistPlanningModal: React.FC<HeistPlanningModalProps> = ({
                     -{formatRupiah(breakdown.crewCutRp)}
                   </span>
                 </div>
+                <div className="py-2 flex items-center justify-between">
+                  <span className="text-[#94a3b8]">
+                    Bonus Sinergi Trio ({synergyPerks.tierLabel})
+                  </span>
+                  <span className="font-mono-num font-semibold text-[#38bdf8]">
+                    +{formatRupiah(synergyBonusRp)} (+{synergyPerks.heistBonusPercent}%)
+                  </span>
+                </div>
                 <div className="py-2.5 flex items-center justify-between">
                   <span className="font-semibold text-[#f4f1ea]">
                     Bagian Bersih Trio
                   </span>
                   <span className="font-mono-num font-extrabold text-lg text-[#22c55e]">
-                    {formatRupiah(breakdown.netPlayerTakeRp)}
+                    {formatRupiah(breakdown.netPlayerTakeRp + synergyBonusRp)}
                   </span>
                 </div>
               </div>
@@ -396,8 +411,10 @@ export const HeistPlanningModal: React.FC<HeistPlanningModalProps> = ({
                 className="w-full py-3 px-5 rounded-lg bg-[#f59e0b] hover:bg-[#fbbf24] text-[#090c12] font-display text-xl font-extrabold uppercase tracking-wider cursor-pointer transition-colors"
               >
                 {heistCompleted
-                  ? 'Eksekusi Ulang Grand Heist'
-                  : 'Luncurkan Grand Heist'}
+                  ? 'Mulai Pembobolan Ulang'
+                  : plan.approach === 'stealth_cyber'
+                  ? 'Mulai Pembobolan Siber'
+                  : 'Mulai Pembobolan Termal'}
               </button>
             </div>
           </div>

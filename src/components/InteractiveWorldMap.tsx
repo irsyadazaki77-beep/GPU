@@ -8,6 +8,7 @@ import {
   ProtagonistId,
   STORY_MISSIONS,
   STREET_RACES,
+  applyTurfWarStockShock,
   calculateTurfWarsIncome,
   captureDistrictTurf,
   formatJakartaClock,
@@ -933,10 +934,15 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
                         onClick={() => {
                           const res = captureDistrictTurf(playerState, d.id);
                           if (res.captured) {
+                            const shocked = applyTurfWarStockShock(
+                              res.nextState,
+                              d.id,
+                              `${formatJakartaClock(worldTimeMinutes)} WIB`
+                            );
                             soundEngine.playMissionFanfare();
                             gameStore.setState({
-                              playerState: res.nextState,
-                              lastOutcomeText: `Teritori Direbut: ${d.name} kini dikuasai Kru Jawara!`,
+                              playerState: shocked.nextState,
+                              lastOutcomeText: `Teritori Direbut: ${d.name} · ${shocked.news.headline}`,
                             });
                           }
                         }}

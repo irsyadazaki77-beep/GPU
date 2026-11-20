@@ -197,6 +197,16 @@ export function migrateSavedGame(raw: unknown): SavedGameSnapshot | null {
       ...fallbackState.districtTurf,
       ...(savedState.districtTurf || {}),
     },
+    unlockedSafehouses: Array.isArray(savedState.unlockedSafehouses)
+      ? savedState.unlockedSafehouses.filter((s): s is string => typeof s === 'string')
+      : fallbackState.unlockedSafehouses,
+    ownedBusinesses: {
+      ...(fallbackState.ownedBusinesses || {}),
+      ...(savedState.ownedBusinesses || {}),
+    },
+    customRaceTracks: Array.isArray(savedState.customRaceTracks)
+      ? savedState.customRaceTracks
+      : fallbackState.customRaceTracks,
   };
 
   const playerPos = {
@@ -393,6 +403,39 @@ export function parseImportedSaveJson(rawJson: string): SavedGameSnapshot | null
   }
 }
 
+export const PLAYER_TOKEN_STORAGE_KEY = 'san_nabilo_player_token_v1';
+
+function generatePlayerUuidToken(): string {
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.randomUUID === 'function'
+  ) {
+    return `plr_${crypto.randomUUID().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  }
+  const randomPart = () =>
+    Math.floor((1 + Math.random()) * 0x100000000)
+      .toString(16)
+      .slice(1);
+  return `plr_${Date.now().toString(36)}_${randomPart()}${randomPart()}`;
+}
+
+export function getOrCreatePlayerToken(): string {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return 'plr_ssr_fallback_token_v3';
+  }
+  try {
+    const existing = window.localStorage.getItem(PLAYER_TOKEN_STORAGE_KEY);
+    if (existing && /^[a-zA-Z0-9_-]{8,128}$/.test(existing.trim())) {
+      return existing.trim();
+    }
+    const created = generatePlayerUuidToken();
+    window.localStorage.setItem(PLAYER_TOKEN_STORAGE_KEY, created);
+    return created;
+  } catch {
+    return generatePlayerUuidToken();
+  }
+}
+
 export async function syncSaveToCloud(
   slotId: SaveSlotId,
   snapshot?: SavedGameSnapshot | null
@@ -400,9 +443,13 @@ export async function syncSaveToCloud(
   const payload = snapshot ?? loadSavedGame(slotId);
   if (!payload || typeof fetch !== 'function') return false;
   try {
+    const playerToken = getOrCreatePlayerToken();
     const res = await fetch(`/api/saves/${slotId}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Player-Token': playerToken,
+      },
       body: JSON.stringify(payload),
     });
     if (!res.ok) return false;
@@ -421,7 +468,12 @@ export async function fetchSaveFromCloud(
 ): Promise<SavedGameSnapshot | null> {
   if (typeof fetch !== 'function') return null;
   try {
-    const res = await fetch(`/api/saves/${slotId}`);
+    const playerToken = getOrCreatePlayerToken();
+    const res = await fetch(`/api/saves/${slotId}`, {
+      headers: {
+        'X-Player-Token': playerToken,
+      },
+    });
     if (!res.ok) return null;
     const data = (await res.json()) as {
       exists?: boolean;
@@ -437,5 +489,6 @@ export async function fetchSaveFromCloud(
     return null;
   }
 }
+
 
 

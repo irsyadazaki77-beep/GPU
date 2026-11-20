@@ -8,13 +8,18 @@ import {
   GameState,
   PlayerProgressState,
   ProtagonistId,
+  STUNT_RAMPS_CATALOG,
+  SquadOrderMode,
   StoryChoiceOption,
   StoryMission,
   TrafficSignalPhase,
   VEHICLE_SPECS,
   VehicleType,
   WeatherMode,
+  advanceTurfWarWave,
   clampDt,
+  computePlayerRacePosition,
+  isPlayerWithinStreetEvent,
   resolveDistrictAtPosition,
 } from '../game/rules';
 import { soundEngine } from '../game/sound';
@@ -55,7 +60,17 @@ export interface WorldControllerHandle {
   stopCutsceneFraming: () => void;
   getPlayerPosition: () => { x: number; z: number };
   captureSnapshotDataUrl: () => string;
+  captureViralThumbnailDataUrl: () => string | null;
+  repairCurrentVehicle: () => boolean;
   switchMultiplayerRoom?: (roomId: string, mode: MultiplayerRoomMode) => void;
+  cycleCameraViewMode: () => void;
+  toggleCover: () => void;
+  setSquadOrder: (order: SquadOrderMode) => void;
+  startStreetRace: (raceId: string) => void;
+  cancelStreetRace: () => void;
+  startTurfWar: (districtId: string) => void;
+  abortTurfWar: () => void;
+  teleportToStuntRamp: (rampId: string) => void;
 }
 
 export interface WorldHudPayload {
@@ -126,6 +141,9 @@ export class WorldEngine {
   private hudSyncAccumulator = 0;
   private rollingFps = 60;
   private readonly _camRight = new THREE.Vector3();
+  private viralThumbCanvas: HTMLCanvasElement | null = null;
+  private lastViralMomentAt = 0;
+  private lastWantedLevelSeen = 0;
 
   constructor(container: HTMLElement, initialProps: WorldEngineProps) {
     this.container = container;
@@ -240,7 +258,12 @@ export class WorldEngine {
         onPlayerHitAngle: (ang) => this.props.onPlayerHitAngle?.(ang),
         onWeaponNoise: (wx, wz, radius, isBlast) => {
           this.crowdSystem.triggerPanicNear(wx, wz, radius);
+          if (radius >= 16) {
+            const dZone = resolveDistrictAtPosition(wx, wz);
+            gameStore.reportWitnessCrime(wx, wz, dZone.name);
+          }
           if (isBlast) {
+            this.crowdSystem.triggerSocialFilmingNear(wx, wz, radius * 1.15);
             this._camRight.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
             this.destructibleProps.applyBlastImpulse(
               wx,
@@ -250,6 +273,25 @@ export class WorldEngine {
               this._camRight.z
             );
           }
+        },
+        onViralMoment: (kind, summaryNote) => {
+          const nowTs = Date.now();
+          if (nowTs - this.lastViralMomentAt < 9000) return;
+          this.lastViralMomentAt = nowTs;
+          const phys = this.playerController.playerPhys;
+          this.crowdSystem.triggerSocialFilmingNear(phys.x, phys.z, 26);
+          const thumb = this.captureViralThumbnailInternal();
+          const activeVeh = phys.drivingVehicleId
+            ? this.trafficSystem.vehicles.find(
+                (v) => v.id === phys.drivingVehicleId
+              )
+            : null;
+          gameStore.publishViralEvent({
+            triggerKind: kind,
+            snapshotDataUrl: thumb,
+            vehicleName: activeVeh ? VEHICLE_SPECS[activeVeh.type].name : undefined,
+            summaryNote,
+          });
         },
       }
     );
@@ -339,7 +381,158 @@ export class WorldEngine {
         );
         return this.renderer.domElement.toDataURL('image/png');
       },
+      captureViralThumbnailDataUrl: () => this.captureViralThumbnailInternal(),
+      repairCurrentVehicle: () => {
+        const phys = this.playerController.playerPhys;
+        const target =
+          (phys.drivingVehicleId
+            ? this.trafficSystem.vehicles.find(
+                (v) => v.id === phys.drivingVehicleId
+              )
+            : null) ||
+          this.trafficSystem.vehicles.find(
+            (v) => Math.hypot(v.x - phys.x, v.z - phys.z) < 10
+          );
+        if (!target) return false;
+        this.trafficSystem.repairVehicle(target);
+        this.playerController.spawnParticles(
+          target.x,
+          target.y + 1.2,
+          target.z,
+          18,
+          0x22c55e,
+          7
+        );
+        soundEngine.playPickup();
+        return true;
+      },
+      cycleCameraViewMode: () => {
+        gameStore.cycleCameraViewMode();
+      },
+      toggleCover: () => {
+        this.playerController.toggleCover();
+      },
+      setSquadOrder: (order: SquadOrderMode) => {
+        gameStore.setSquadOrder(order);
+      },
+      startStreetRace: (raceId: string) => {
+        const session = gameStore.startStreetRace(raceId);
+        if (!session || session.checkpoints.length === 0) return;
+        const cp0 = session.checkpoints[0];
+        const cp1 = session.checkpoints[1] || cp0;
+        const startHeading = Math.atan2(cp1[0] - cp0[0], cp1[1] - cp0[1]);
+        const startX = cp0[0] - Math.sin(startHeading) * 8;
+        const startZ = cp0[1] - Math.cos(startHeading) * 8;
+
+        this.playerController.teleportPlayerTo(startX, startZ);
+        if (!this.playerController.playerPhys.drivingVehicleId) {
+          this.trafficSystem.spawnVehicleNearPlayer(
+            'supercar',
+            startX,
+            startZ,
+            startHeading,
+            this.props.playerState.vehicleCustoms
+          );
+          this.playerController.toggleEnterExitVehicle();
+        }
+        const activeVeh = this.trafficSystem.vehicles.find(
+          (v) => v.id === this.playerController.playerPhys.drivingVehicleId
+        );
+        if (activeVeh) {
+          activeVeh.x = startX;
+          activeVeh.z = startZ;
+          activeVeh.heading = startHeading;
+          activeVeh.speed = 0;
+        }
+        this.trafficSystem.startRaceRivals(
+          session.checkpoints,
+          startX,
+          startZ,
+          startHeading
+        );
+        this.cityRenderer.setRaceCheckpointMarker(cp0[0], cp0[1], false);
+      },
+      cancelStreetRace: () => {
+        gameStore.cancelStreetRace();
+        this.trafficSystem.clearRaceRivals();
+        this.cityRenderer.setRaceCheckpointMarker(null, null);
+      },
+      startTurfWar: (districtId: string) => {
+        const session = gameStore.startTurfWar(districtId);
+        if (!session) return;
+        if (this.playerController.playerPhys.drivingVehicleId) {
+          this.playerController.toggleEnterExitVehicle();
+        }
+        this.playerController.teleportPlayerTo(
+          session.centerX,
+          session.centerZ + 12
+        );
+        this.playerController.spawnTurfWarWave(
+          session.centerX,
+          session.centerZ,
+          1
+        );
+        this.cityRenderer.setTurfWarZoneMarker(
+          session.centerX,
+          session.centerZ,
+          session.radius
+        );
+        gameStore.setSquadOrder('attack');
+      },
+      abortTurfWar: () => {
+        gameStore.abortTurfWar();
+        this.playerController.clearTurfWarEnemies();
+        this.cityRenderer.setTurfWarZoneMarker(null, null);
+      },
+      teleportToStuntRamp: (rampId: string) => {
+        const ramp = STUNT_RAMPS_CATALOG.find((r) => r.id === rampId);
+        if (!ramp) return;
+        const approachX = ramp.x - Math.sin(ramp.heading) * 20;
+        const approachZ = ramp.z - Math.cos(ramp.heading) * 20;
+        this.playerController.teleportPlayerTo(approachX, approachZ);
+        if (!this.playerController.playerPhys.drivingVehicleId) {
+          this.trafficSystem.spawnVehicleNearPlayer(
+            'supercar',
+            approachX,
+            approachZ,
+            ramp.heading,
+            this.props.playerState.vehicleCustoms
+          );
+          this.playerController.toggleEnterExitVehicle();
+        }
+        const activeVeh = this.trafficSystem.vehicles.find(
+          (v) => v.id === this.playerController.playerPhys.drivingVehicleId
+        );
+        if (activeVeh) {
+          activeVeh.x = approachX;
+          activeVeh.z = approachZ;
+          activeVeh.heading = ramp.heading;
+          activeVeh.speed = 6;
+        }
+        gameStore.setState({
+          phoneOpen: false,
+          lastOutcomeText: `Siap meluncur ke ${ramp.name}! Gas penuh & pakai Nitro!`,
+        });
+      },
     };
+  }
+
+  private captureViralThumbnailInternal(): string | null {
+    try {
+      const src = this.renderer.domElement;
+      if (!src || src.width === 0 || src.height === 0) return null;
+      if (!this.viralThumbCanvas) {
+        this.viralThumbCanvas = document.createElement('canvas');
+        this.viralThumbCanvas.width = 320;
+        this.viralThumbCanvas.height = 180;
+      }
+      const ctx = this.viralThumbCanvas.getContext('2d');
+      if (!ctx) return null;
+      ctx.drawImage(src, 0, 0, 320, 180);
+      return this.viralThumbCanvas.toDataURL('image/jpeg', 0.72);
+    } catch {
+      return null;
+    }
   }
 
   private handleResize = (): void => {
@@ -440,7 +633,8 @@ export class WorldEngine {
         pState,
         this.props.activeChoice,
         nextStoryMission,
-        nightFactor
+        nightFactor,
+        wetnessFactor
       );
 
       this.cityRenderer.setTrafficSignalPhase(stepRes.signalPhase);
@@ -516,15 +710,208 @@ export class WorldEngine {
         phys.z
       );
 
+      // Step real-time vehicle smoke, engine fire, and chain-reaction explosions
+      this.trafficSystem.stepVehicleDamageAndExplosions(
+        dt,
+        (x, y, z, count, colorHex, speed) =>
+          this.playerController.spawnParticles(x, y, z, count, colorHex, speed),
+        (bx, _by, bz, explodedVeh) => {
+          this.crowdSystem.triggerPanicNear(bx, bz, 30);
+          this.crowdSystem.triggerSocialFilmingNear(bx, bz, 34);
+          const dZone = resolveDistrictAtPosition(bx, bz);
+          gameStore.reportWitnessCrime(bx, bz, dZone.name);
+          if (explodedVeh.id === phys.drivingVehicleId) {
+            this.props.onPlayerDamage(32);
+            this.playerController.toggleEnterExitVehicle();
+          }
+          const nowTs = Date.now();
+          if (nowTs - this.lastViralMomentAt > 7500) {
+            this.lastViralMomentAt = nowTs;
+            const thumb = this.captureViralThumbnailInternal();
+            gameStore.publishViralEvent({
+              triggerKind: 'chain_explosion',
+              snapshotDataUrl: thumb,
+              vehicleName: VEHICLE_SPECS[explodedVeh.type].name,
+              cloutGain: 55,
+            });
+          }
+        }
+      );
+
+      // Update 3D Living Jakarta Street Random Event Marker
+      const activeStreetEv = gameStore.getState().activeStreetEvent;
+      if (
+        activeStreetEv &&
+        activeStreetEv.status === 'active' &&
+        pState.currentInterior === 'exterior'
+      ) {
+        this.cityRenderer.setActiveStreetEventMarker(
+          activeStreetEv.x,
+          activeStreetEv.z
+        );
+        if (isPlayerWithinStreetEvent(activeStreetEv, phys.x, phys.z, 12)) {
+          this.crowdSystem.triggerSocialFilmingNear(phys.x, phys.z, 26);
+          const thumb = this.captureViralThumbnailInternal();
+          gameStore.resolveActiveStreetEvent(thumb);
+        }
+      } else {
+        this.cityRenderer.setActiveStreetEventMarker(null, null);
+      }
+
+      // Wave 2: Step Active Street Race (3D Rival AI + Checkpoint Arch + Live Rank)
+      const activeRace = gameStore.getState().activeRace;
+      if (activeRace && activeRace.status !== 'finished') {
+        const nextCp =
+          activeRace.checkpoints[activeRace.playerCheckpointIndex] ||
+          activeRace.checkpoints[activeRace.checkpoints.length - 1];
+        const isFinalCp =
+          activeRace.playerCheckpointIndex >= activeRace.checkpoints.length - 1;
+        this.cityRenderer.setRaceCheckpointMarker(nextCp[0], nextCp[1], isFinalCp);
+
+        if (activeRace.status === 'countdown') {
+          const prevSec = Math.ceil(activeRace.countdownSec);
+          const nextCd = Math.max(0, activeRace.countdownSec - dt);
+          const curSec = Math.ceil(nextCd);
+          if (curSec < prevSec) {
+            soundEngine.playTone(curSec === 0 ? 780 : 440, 0.14, 'triangle', 0.15);
+          }
+          if (nextCd <= 0) {
+            gameStore.updateActiveRace({ countdownSec: 0, status: 'racing' });
+          } else {
+            gameStore.updateActiveRace({ countdownSec: nextCd });
+          }
+          this.trafficSystem.stepRaceRivals(
+            dt,
+            activeRace.checkpoints,
+            activeRace.elapsedSec,
+            false
+          );
+          this.trafficSystem.writeRaceRivalsTelemetry(engineTelemetryRef.raceRivals);
+        } else {
+          this.trafficSystem.stepRaceRivals(
+            dt,
+            activeRace.checkpoints,
+            activeRace.elapsedSec,
+            true
+          );
+          this.trafficSystem.writeRaceRivalsTelemetry(engineTelemetryRef.raceRivals);
+          const nextElapsed = activeRace.elapsedSec + dt;
+          const distCp = Math.hypot(phys.x - nextCp[0], phys.z - nextCp[1]);
+          let nextCpIdx = activeRace.playerCheckpointIndex;
+          if (distCp < 9.5) {
+            nextCpIdx += 1;
+            soundEngine.playPickup();
+            this.playerController.spawnParticles(
+              nextCp[0],
+              phys.y + 1.8,
+              nextCp[1],
+              18,
+              0x22d3ee,
+              8
+            );
+          }
+
+          const liveRank = computePlayerRacePosition(
+            nextCpIdx,
+            phys.x,
+            phys.z,
+            activeRace.checkpoints,
+            engineTelemetryRef.raceRivals
+          );
+
+          if (nextCpIdx >= activeRace.checkpoints.length) {
+            gameStore.finishStreetRace(liveRank);
+            this.trafficSystem.clearRaceRivals();
+            this.cityRenderer.setRaceCheckpointMarker(null, null);
+            if (liveRank <= 3) {
+              const thumb = this.captureViralThumbnailInternal();
+              gameStore.publishViralEvent({
+                triggerKind: 'drift_stunt',
+                snapshotDataUrl: thumb,
+                summaryNote: `Finis Juara #${liveRank} di ${activeRace.raceName} dalam ${nextElapsed.toFixed(1)} detik!`,
+                cloutGain: liveRank === 1 ? 85 : 45,
+              });
+            }
+          } else if (
+            nextCpIdx !== activeRace.playerCheckpointIndex ||
+            liveRank !== activeRace.position ||
+            Math.floor(nextElapsed * 5) !== Math.floor(activeRace.elapsedSec * 5)
+          ) {
+            gameStore.updateActiveRace({
+              playerCheckpointIndex: nextCpIdx,
+              elapsedSec: nextElapsed,
+              position: liveRank,
+            });
+          } else {
+            activeRace.elapsedSec = nextElapsed;
+          }
+        }
+      } else {
+        this.cityRenderer.setRaceCheckpointMarker(null, null);
+      }
+
+      // Wave 2: Step Active 3D Turf War Territory Assault
+      const activeTw = gameStore.getState().activeTurfWar;
+      if (activeTw && activeTw.status === 'active') {
+        this.cityRenderer.setTurfWarZoneMarker(
+          activeTw.centerX,
+          activeTw.centerZ,
+          activeTw.radius
+        );
+        const twCounts = this.playerController.getRemainingTurfWarEnemyCount();
+        if (twCounts.remaining === 0) {
+          const adv = advanceTurfWarWave(activeTw);
+          if (adv.victory) {
+            gameStore.completeTurfWar();
+            this.cityRenderer.setTurfWarZoneMarker(null, null);
+            const thumb = this.captureViralThumbnailInternal();
+            gameStore.publishViralEvent({
+              triggerKind: 'heist_complete',
+              snapshotDataUrl: thumb,
+              summaryNote: `Wilayah ${activeTw.districtName} resmi direbut dari Sindikat setelah menumbangkan Kapten Wilayah!`,
+              cloutGain: 90,
+            });
+          } else if (adv.spawnedNewWave) {
+            gameStore.updateTurfWarState(adv.next);
+            this.playerController.spawnTurfWarWave(
+              activeTw.centerX,
+              activeTw.centerZ,
+              adv.next.wave
+            );
+            soundEngine.playPoliceSiren();
+            gameStore.triggerSquadCallout(
+              adv.next.wave === 3
+                ? `Raka: "Waspada! Kapten Wilayah ${activeTw.districtName} turun tangan di Gelombang 3!"`
+                : `Kirana: "Gelombang 2 masuk! Aku siap kunci perimeter pakai EMP!"`
+            );
+          }
+        } else if (
+          twCounts.remaining !== activeTw.enemiesRemaining ||
+          twCounts.captainAlive !== activeTw.captainAlive
+        ) {
+          gameStore.updateTurfWarState({
+            enemiesRemaining: twCounts.remaining,
+            captainAlive: twCounts.captainAlive,
+          });
+        }
+      } else {
+        this.cityRenderer.setTurfWarZoneMarker(null, null);
+      }
+
       // Publish 60fps mutable telemetry snapshot (0 React re-renders!)
       engineTelemetryRef.playerX = phys.x;
       engineTelemetryRef.playerY = phys.y;
       engineTelemetryRef.playerZ = phys.z;
       engineTelemetryRef.playerFacing = phys.facing;
       engineTelemetryRef.drivingVehicleId = phys.drivingVehicleId;
+      engineTelemetryRef.activeVehicleDamage = activeVeh ? activeVeh.damage : null;
       engineTelemetryRef.nearbyMission = stepRes.nearbyMission;
       engineTelemetryRef.activeChoice = this.props.activeChoice;
       this.trafficSystem.writeRadarSnapshot(engineTelemetryRef.vehicles);
+      this.trafficSystem.writePoliceVisionCones(
+        engineTelemetryRef.policeCones,
+        pState.wantedLevel
+      );
       this.playerController.writeRadarEnemies(engineTelemetryRef.enemies);
 
       const netInfo = this.netSync.getTelemetry();
@@ -538,17 +925,60 @@ export class WorldEngine {
       engineTelemetryRef.perf.roomId = netInfo.roomId;
       engineTelemetryRef.perf.roomMode = netInfo.roomMode;
       engineTelemetryRef.perf.simWorkerActive = this.simWorker.isWorkerActive();
+      engineTelemetryRef.perf.connectionState = netInfo.connectionState;
 
       this.hudSyncAccumulator += dt;
       if (this.hudSyncAccumulator >= 0.1) {
         const syncDt = this.hudSyncAccumulator;
         this.hudSyncAccumulator = 0;
 
+        const district = resolveDistrictAtPosition(phys.x, phys.z);
         if (pState.wantedLevel > 0) {
           this.props.onWantedEvadeUpdate(!stepRes.spottedByPolice, syncDt);
         }
 
-        const district = resolveDistrictAtPosition(phys.x, phys.z);
+        // Detect high-heat police escape for NabiloGram viral highlight
+        if (this.lastWantedLevelSeen >= 2 && pState.wantedLevel === 0) {
+          const thumb = this.captureViralThumbnailInternal();
+          gameStore.publishViralEvent({
+            triggerKind: 'police_escape',
+            snapshotDataUrl: thumb,
+            cloutGain: 60,
+          });
+        } else if (
+          this.lastWantedLevelSeen < 3 &&
+          pState.wantedLevel >= 3 &&
+          Date.now() - this.lastViralMomentAt > 10000
+        ) {
+          this.lastViralMomentAt = Date.now();
+          const thumb = this.captureViralThumbnailInternal();
+          gameStore.publishViralEvent({
+            triggerKind: 'police_chase',
+            snapshotDataUrl: thumb,
+            cloutGain: 45,
+          });
+        }
+        this.lastWantedLevelSeen = pState.wantedLevel;
+
+        gameStore.stepPoliceTactical({
+          dt: syncDt,
+          hasLineOfSight: stepRes.spottedByPolice,
+          playerX: phys.x,
+          playerZ: phys.z,
+          districtName: district.name,
+        });
+
+        const nextVehDmg = activeVeh ? activeVeh.damage : null;
+        const prevDmg = gameStore.getState().activeVehicleDamage;
+        if (
+          (nextVehDmg?.integrity ?? -1) !== (prevDmg?.integrity ?? -1) ||
+          (nextVehDmg?.smokeStage ?? 'none') !== (prevDmg?.smokeStage ?? 'none') ||
+          Boolean(nextVehDmg?.puncturedTires.some(Boolean)) !==
+            Boolean(prevDmg?.puncturedTires.some(Boolean))
+        ) {
+          gameStore.setState({ activeVehicleDamage: nextVehDmg ? { ...nextVehDmg } : null });
+        }
+
         const nearbyVehType = stepRes.activeVehicle
           ? null
           : this.trafficSystem.getNearbyVehicleType(phys.x, phys.z);

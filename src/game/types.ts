@@ -67,7 +67,8 @@ export type VehicleType =
   | 'barracuda'
   | 'heli'
   | 'supercar'
-  | 'vtol_jet';
+  | 'vtol_jet'
+  | 'speedboat';
 
 export interface VehicleSpec {
   type: VehicleType;
@@ -81,6 +82,7 @@ export interface VehicleSpec {
   accentHex: number;
   radius: number;
   isAircraft?: boolean;
+  isWatercraft?: boolean;
 }
 
 export interface PropertySpec {
@@ -254,7 +256,75 @@ export type InteriorZoneId =
   | 'heist_penthouse'
   | 'customs_garage'
   | 'bank_vault'
-  | 'warung';
+  | 'warung'
+  | 'safehouse_trio'
+  | 'faction_hq_jalanan'
+  | 'faction_hq_sindikat'
+  | 'faction_hq_rakyat'
+  | 'glodok_tech_shop';
+
+export type DistrictId =
+  | 'scbd'
+  | 'monas'
+  | 'blok_m'
+  | 'kota_tua'
+  | 'glodok'
+  | 'tanah_abang'
+  | 'kemayoran'
+  | 'senayan'
+  | 'priok'
+  | 'pik_ancol'
+  | 'manggarai'
+  | 'kemang'
+  | 'halim'
+  | string;
+
+export type BusinessId =
+  | 'biz_bengkel_modif'
+  | 'biz_armada_ojol'
+  | 'biz_gudang_priok'
+  | 'biz_server_glodok';
+
+export interface BusinessSpec {
+  id: BusinessId;
+  name: string;
+  districtId: DistrictId;
+  basePrice: number;
+  upgradeCost: number;
+  baseIncomePerHour: number;
+  linkedStock: StockSymbol;
+  rivalStock: StockSymbol;
+  description: string;
+}
+
+export interface FinancialNewsItem {
+  id: string;
+  headline: string;
+  affectedSymbol: StockSymbol;
+  deltaPct: number;
+  timestampLabel: string;
+}
+
+export interface CustomRaceTrackSpec {
+  id: string;
+  name: string;
+  subtitle?: string;
+  author?: string;
+  authorName?: string;
+  isLoop?: boolean;
+  entryFeeRp: number;
+  rewardRp: number;
+  checkpoints: [number, number][];
+  createdAt: number;
+}
+
+export type WorldClockRoadEventKind =
+  | 'none'
+  | 'rush_hour_pagi'
+  | 'macet_sore'
+  | 'konvoi_pejabat'
+  | 'pasar_tumpah'
+  | 'razia_malam';
 
 export type WarungSnackId =
   | 'gorengan_bakwan'
@@ -347,7 +417,9 @@ export interface DistrictTurfEntry {
 export type StreetContractKind =
   | 'ojol_delivery'
   | 'convoy_intercept'
-  | 'turf_assault';
+  | 'turf_assault'
+  | 'glodok_arena'
+  | 'priok_container_heist';
 
 export interface ActiveStreetContractState {
   id: string;
@@ -408,6 +480,9 @@ export interface PlayerProgressState {
   characterSkills: Record<CharacterSkillId, number>;
   weaponAttachments: Partial<Record<WeaponId, WeaponAttachmentId[]>>;
   districtTurf: Record<string, DistrictTurfEntry>;
+  unlockedSafehouses?: string[];
+  ownedBusinesses?: Partial<Record<BusinessId, number>>;
+  customRaceTracks?: CustomRaceTrackSpec[];
 }
 
 export interface BuildingFootprint {
@@ -797,6 +872,8 @@ export interface NpcVoiceResponse {
 
 export type MultiplayerRoomMode = 'free_roam' | 'street_race' | 'coop_heist';
 
+export type MultiplayerConnectionState = 'connected' | 'reconnecting' | 'offline';
+
 export interface NetPeerSnapshot {
   peerId: string;
   displayName: string;
@@ -820,7 +897,299 @@ export interface EnginePerformanceTelemetry {
   roomId: string;
   roomMode: MultiplayerRoomMode;
   simWorkerActive: boolean;
+  connectionState?: MultiplayerConnectionState;
 }
+
+export type VehicleDamageZone = 'front' | 'rear' | 'left' | 'right';
+export type VehicleSmokeStage = 'none' | 'steam' | 'heavy_smoke' | 'fire';
+
+export interface VehicleDamageState {
+  integrity: number;
+  zones: Record<VehicleDamageZone, number>;
+  puncturedTires: [boolean, boolean, boolean, boolean];
+  headlightsBroken: [boolean, boolean];
+  smokeStage: VehicleSmokeStage;
+  explosionCountdownSec: number | null;
+  exploded: boolean;
+  lastImpactSeverity: number;
+}
+
+export type PoliceTacticalPhase =
+  | 'clear'
+  | 'witness_reporting'
+  | 'active_pursuit'
+  | 'searching_lkp';
+
+export interface PoliceVisionCone {
+  id: string;
+  x: number;
+  z: number;
+  heading: number;
+  range: number;
+  halfAngleRad: number;
+  isHeli: boolean;
+}
+
+export interface PoliceTacticalState {
+  phase: PoliceTacticalPhase;
+  witnessProgress: number;
+  witnessX: number;
+  witnessZ: number;
+  witnessDistrict: string;
+  lastKnownX: number | null;
+  lastKnownZ: number | null;
+  searchRadius: number;
+  radioCallout: string | null;
+  radioCalloutStamp: number;
+  spikeStripsHitCount: number;
+}
+
+export type NabiloGramTriggerKind =
+  | 'drift_stunt'
+  | 'chain_explosion'
+  | 'police_chase'
+  | 'police_escape'
+  | 'street_event'
+  | 'heist_complete'
+  | 'warung_viral'
+  | 'manual_snap';
+
+export interface NabiloGramComment {
+  id: string;
+  handle: string;
+  text: string;
+  likes: number;
+}
+
+export interface NabiloGramPost {
+  id: string;
+  authorHandle: string;
+  authorTag: string;
+  districtName: string;
+  triggerKind: NabiloGramTriggerKind;
+  snapshotDataUrl: string | null;
+  caption: string;
+  hashtags: string[];
+  comments: NabiloGramComment[];
+  views: number;
+  likes: number;
+  isLiked: boolean;
+  boosted: boolean;
+  createdAtMs: number;
+  source: 'gemini' | 'local';
+  isPendingAi?: boolean;
+}
+
+export interface ViralCloutState {
+  xp: number;
+  level: number;
+  tierTitle: string;
+  nextLevelXp: number;
+  sponsorBonusPercent: number;
+}
+
+export interface ViralPostRequest {
+  triggerKind: NabiloGramTriggerKind;
+  districtName: string;
+  protagonistName: string;
+  wantedLevel: number;
+  vehicleName?: string;
+  summaryNote?: string;
+}
+
+export interface ViralPostResponse {
+  authorHandle: string;
+  authorTag: string;
+  caption: string;
+  hashtags: string[];
+  comments: { handle: string; text: string; likes: number }[];
+  source: 'gemini' | 'local';
+}
+
+export type StreetRandomEventKind =
+  | 'begal_rescue'
+  | 'street_race_challenge'
+  | 'vip_convoy'
+  | 'gang_brawl'
+  | 'stolen_motor';
+
+export interface StreetRandomEvent {
+  id: string;
+  kind: StreetRandomEventKind;
+  title: string;
+  subtitle: string;
+  districtId: string;
+  districtName: string;
+  x: number;
+  z: number;
+  remainingSec: number;
+  totalDurationSec: number;
+  rewardRp: number;
+  cloutXp: number;
+  faction: FactionId;
+  status: 'active' | 'resolved' | 'expired';
+}
+
+export interface TrioSynergyState {
+  nabiloRaka: number;
+  nabiloKirana: number;
+  rakaKirana: number;
+  lastBanterLine: string | null;
+  lastBanterSpeaker: string | null;
+}
+
+export interface HeistBreachSession {
+  active: boolean;
+  heistId: HeistId;
+  approach: HeistApproach;
+  stage: 'cyber_signal' | 'thermal_drill';
+  progress: number;
+  heat: number;
+  lockedBands: number;
+}
+
+/* ==========================================================================
+ * WAVE 2 PERFECTION UPGRADE TYPES
+ * ========================================================================== */
+
+export type CameraViewMode = 'third_person' | 'first_person' | 'cinematic';
+
+export type SquadOrderMode = 'follow' | 'attack' | 'hold';
+
+export interface TrioSquadTelemetryMember {
+  id: ProtagonistId;
+  name: string;
+  x: number;
+  z: number;
+  facing: number;
+  active: boolean;
+  actionLabel: string;
+}
+
+export interface TacticalCoverState {
+  inCover: boolean;
+  coverKind: 'none' | 'building' | 'vehicle' | 'barrier';
+  mitigationPct: number;
+  crosshairSpread: number;
+}
+
+export interface StuntRampSpec {
+  id: string;
+  name: string;
+  districtName: string;
+  x: number;
+  z: number;
+  heading: number;
+  length: number;
+  width: number;
+  peakHeight: number;
+  targetDistanceM: number;
+  rewardRp: number;
+}
+
+export interface StuntJumpResult {
+  rampId: string;
+  rampName: string;
+  distanceM: number;
+  airTimeSec: number;
+  rating: 'MANTAP' | 'GOKIL' | 'LEGENDARIS';
+  rewardRp: number;
+  cloutXp: number;
+  isNewRamp: boolean;
+  timestampMs: number;
+}
+
+export interface FloodZoneSpec {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  radius: number;
+  depthM: number;
+  hydroplaneFactor: number;
+}
+
+export interface RaceRivalTelemetry {
+  id: string;
+  name: string;
+  colorHex: number;
+  x: number;
+  z: number;
+  heading: number;
+  checkpointIndex: number;
+  finished: boolean;
+  finishTimeSec: number | null;
+}
+
+export interface ActiveStreetRaceSession {
+  raceId: string;
+  raceName: string;
+  checkpoints: [number, number][];
+  playerCheckpointIndex: number;
+  elapsedSec: number;
+  countdownSec: number;
+  position: number;
+  totalRacers: number;
+  status: 'countdown' | 'racing' | 'finished';
+  rewardRp: number;
+  finishedPlace: number | null;
+}
+
+export interface ActiveTurfWarSession {
+  districtId: string;
+  districtName: string;
+  centerX: number;
+  centerZ: number;
+  radius: number;
+  wave: 1 | 2 | 3;
+  totalWaves: 3;
+  enemiesRemaining: number;
+  captainAlive: boolean;
+  progressPct: number;
+  status: 'active' | 'victory' | 'aborted';
+}
+
+export interface EmpireEndgameSummary {
+  tier: 1 | 2 | 3 | 4;
+  tierTitle: string;
+  ownedDistricts: number;
+  totalDistricts: number;
+  ownedBusinessesCount: number;
+  completedHeistsCount: number;
+  completedStuntsCount: number;
+  passiveIncomePerMinRp: number;
+  empireScore: number;
+  nextTierGoal: string;
+}
+
+export type DailyChallengeKind =
+  | 'stunt_jump'
+  | 'street_race_win'
+  | 'turf_capture'
+  | 'squad_takedown'
+  | 'viral_post'
+  | 'drift_combo';
+
+export interface DailyChallengeItem {
+  id: string;
+  kind: DailyChallengeKind;
+  title: string;
+  subtitle: string;
+  progress: number;
+  target: number;
+  rewardRp: number;
+  cloutXp: number;
+  claimed: boolean;
+}
+
+export interface DailyChallengesState {
+  dateKey: string;
+  streakDays: number;
+  items: DailyChallengeItem[];
+}
+
+
+
 
 
 

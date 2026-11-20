@@ -48,6 +48,11 @@ export class WeatherLightingSystem {
   private elapsedTime = 0;
   private lightningStrength = 0;
   private nextLightningTimer = 6.5;
+  private lightningBoltGroup: THREE.Group;
+  private lightningBoltMat: THREE.LineBasicMaterial;
+  private lightningCoreMat: THREE.MeshBasicMaterial;
+  private lightningBoltLine: THREE.Line;
+  private lightningBoltCore: THREE.Mesh;
 
   constructor(
     scene: THREE.Scene,
@@ -235,8 +240,69 @@ export class WeatherLightingSystem {
     }
     scene.add(this.rainInst);
 
+    // Lightweight Volumetric Sunset God-Ray Shafts (Tropical Vice-Jakarta)
+    this.sunShaftGroup = new THREE.Group();
+    this.sunShaftMat = new THREE.MeshBasicMaterial({
+      color: 0xff9a6c,
+      transparent: true,
+      opacity: isSoftwareGl ? 0 : 0.085,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const shaftGeo = new THREE.ConeGeometry(16, 78, 12, 1, true);
+    const shaftOffsets: [number, number, number][] = [
+      [-18, 34, -22],
+      [14, 36, -42],
+      [2, 32, 14],
+    ];
+    for (const [sx, sy, sz] of shaftOffsets) {
+      const cone = new THREE.Mesh(shaftGeo, this.sunShaftMat);
+      cone.position.set(sx, sy, sz);
+      cone.rotation.z = -0.34;
+      cone.rotation.x = 0.24;
+      this.sunShaftGroup.add(cone);
+    }
+    this.sunShaftGroup.visible = !isSoftwareGl;
+    scene.add(this.sunShaftGroup);
+
+    // Pooled 3D Jagged Monsoon Lightning Bolt (strikes skyline during heavy storms)
+    this.lightningBoltGroup = new THREE.Group();
+    const boltPts: THREE.Vector3[] = [];
+    for (let s = 0; s <= 12; s++) {
+      const frac = s / 12;
+      const jitterX = s === 0 || s === 12 ? 0 : Math.sin(s * 3.7) * 2.4;
+      const jitterZ = s === 0 || s === 12 ? 0 : Math.cos(s * 2.9) * 2.1;
+      boltPts.push(new THREE.Vector3(jitterX, (1 - frac) * 96, jitterZ));
+    }
+    const boltGeo = new THREE.BufferGeometry().setFromPoints(boltPts);
+    this.lightningBoltMat = new THREE.LineBasicMaterial({
+      color: 0xe0f2fe,
+      transparent: true,
+      opacity: 0,
+    });
+    this.lightningBoltLine = new THREE.Line(boltGeo, this.lightningBoltMat);
+    this.lightningBoltGroup.add(this.lightningBoltLine);
+
+    const coreGeo = new THREE.CylinderGeometry(0.16, 0.34, 94, 6, 1, true);
+    this.lightningCoreMat = new THREE.MeshBasicMaterial({
+      color: 0x7dd3fc,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.lightningBoltCore = new THREE.Mesh(coreGeo, this.lightningCoreMat);
+    this.lightningBoltCore.position.y = 47;
+    this.lightningBoltGroup.add(this.lightningBoltCore);
+    this.lightningBoltGroup.visible = false;
+    scene.add(this.lightningBoltGroup);
+
     this.transitionState = createInitialWeatherTransitionState(initialWeather);
   }
+
+  private readonly sunShaftGroup: THREE.Group;
+  private readonly sunShaftMat: THREE.MeshBasicMaterial;
 
   public update(
     targetWeather: WeatherMode,
@@ -250,15 +316,32 @@ export class WeatherLightingSystem {
 
     const wet = this.transitionState.wetnessFactor;
     let lightningTriggered = false;
-    if (wet > 0.65) {
+    if (wet > 0.64) {
       this.nextLightningTimer -= dt;
       if (this.nextLightningTimer <= 0) {
         this.lightningStrength = 1.0;
-        this.nextLightningTimer = 6.5 + Math.random() * 8.5;
+        this.nextLightningTimer = 5.2 + Math.random() * 7.0;
         lightningTriggered = true;
+        // Strike a dramatic skyline coordinate near the player
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 34 + Math.random() * 48;
+        this.lightningBoltGroup.position.set(
+          playerX + Math.cos(angle) * dist,
+          0,
+          playerZ + Math.sin(angle) * dist
+        );
+        this.lightningBoltGroup.rotation.y = Math.random() * Math.PI * 2;
+        this.lightningBoltGroup.visible = true;
       }
     }
     this.lightningStrength = Math.max(0, this.lightningStrength - dt * 3.8);
+    if (this.lightningStrength > 0.08) {
+      this.lightningBoltGroup.visible = true;
+      this.lightningBoltMat.opacity = Math.min(1, this.lightningStrength * 1.3);
+      this.lightningCoreMat.opacity = this.lightningStrength * 0.45;
+    } else {
+      this.lightningBoltGroup.visible = false;
+    }
     const flashBoost = this.lightningStrength > 0.45 ? this.lightningStrength * 1.45 : 0;
 
     this.sunLight.color.setRGB(
@@ -320,6 +403,21 @@ export class WeatherLightingSystem {
     this.skyUniforms.uNightFactor.value = this.transitionState.nightFactor;
     this.skyUniforms.uLightning.value = this.lightningStrength;
 
+    // Volumetric Sunset God-Ray Shafts fade in during Tropical Vice-Jakarta senja
+    const sunsetStrength =
+      this.transitionState.sunGlowStrength *
+      (1 - Math.max(0, wet - 0.55) * 1.8) *
+      (1 - Math.max(0, this.transitionState.nightFactor - 0.72) * 2.6);
+    if (this.sunShaftGroup.visible) {
+      this.sunShaftMat.opacity = Math.max(0, Math.min(0.11, sunsetStrength * 0.16));
+      this.sunShaftMat.color.setRGB(
+        this.transitionState.sunColorRgb.r,
+        this.transitionState.sunColorRgb.g * 0.86,
+        this.transitionState.sunColorRgb.b * 0.78
+      );
+      this.sunShaftGroup.position.set(playerX * 0.35, 0, playerZ * 0.35);
+    }
+
     if (this.scene.background instanceof THREE.Color) {
       this.scene.background.setRGB(
         this.transitionState.fogHorizonRgb.r,
@@ -333,15 +431,16 @@ export class WeatherLightingSystem {
         this.transitionState.fogHorizonRgb.g,
         this.transitionState.fogHorizonRgb.b
       );
-      this.scene.fog.density = Math.max(0.0038, this.transitionState.fogDensity);
+      this.scene.fog.density = Math.max(0.0034, this.transitionState.fogDensity);
     }
 
-    // Rain particle curtain around player camera
-    if (wet > 0.12) {
-      const activeRain = Math.max(32, Math.round(this.rainCount * wet));
+    // Active rain drops only during monsoon downpour (wet > 0.58), preserving glossy post-rain asphalt in senja/malam
+    if (wet > 0.58) {
+      const rainIntensity = Math.min(1, (wet - 0.58) / 0.42);
+      const activeRain = Math.max(32, Math.round(this.rainCount * rainIntensity));
       this.rainInst.visible = true;
       this.rainInst.count = activeRain;
-      this.rainMat.opacity = 0.12 + wet * 0.38;
+      this.rainMat.opacity = 0.14 + rainIntensity * 0.36;
       const dummy = this.rainDummy;
       for (let i = 0; i < activeRain; i++) {
         this.rainOffsetsY[i] -= this.rainSpeeds[i] * dt;
@@ -357,7 +456,7 @@ export class WeatherLightingSystem {
           playerZ + this.rainOffsetsZ[i]
         );
         dummy.rotation.set(0, 0, -0.09);
-        dummy.scale.set(1, 0.72 + wet * 0.7, 1);
+        dummy.scale.set(1, 0.72 + rainIntensity * 0.7, 1);
         dummy.updateMatrix();
         this.rainInst.setMatrixAt(i, dummy.matrix);
       }
@@ -393,6 +492,14 @@ export class WeatherLightingSystem {
     this.skyDomeMat.dispose();
     this.rainGeo.dispose();
     this.rainMat.dispose();
+    this.sunShaftMat.dispose();
+    this.sunShaftGroup.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.geometry.dispose();
+    });
+    this.lightningBoltLine.geometry.dispose();
+    this.lightningBoltMat.dispose();
+    this.lightningBoltCore.geometry.dispose();
+    this.lightningCoreMat.dispose();
     this.sunLight.shadow.map?.dispose();
   }
 }
