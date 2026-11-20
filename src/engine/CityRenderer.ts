@@ -8,6 +8,8 @@ import {
   SpatialHashGrid,
   TrafficSignalPhase,
   createBuildingSpatialGrid,
+  isNearBuilding,
+  isOnRoadway,
 } from '../game/rules';
 import {
   SidewalkRect,
@@ -30,16 +32,15 @@ import {
   selectNearestLightIndices,
 } from './visualOverhaulMath';
 
-function buildExpansionZonesGroup(): {
+function buildExpansionZonesGroup(uTimeUniform: { value: number }): {
   group: THREE.Group;
   bayWaterMat: THREE.MeshStandardMaterial;
-  bayWaterGeo: THREE.BufferGeometry;
   floodDiscsGroup: THREE.Group;
 } {
   const group = new THREE.Group();
   group.name = 'JakartaExpansionZonesGroup';
 
-  // 1. Jakarta Bay & Kepulauan Seribu Water Basin (North Z <= -72 .. -160)
+  // 1. Jakarta Bay & Kepulauan Seribu Water Basin (North Z <= -72 .. -248), GPU vertex wave shader
   const bayWaterMat = new THREE.MeshStandardMaterial({
     color: 0x0369a1,
     roughness: 0.18,
@@ -48,24 +49,48 @@ function buildExpansionZonesGroup(): {
     transparent: true,
     opacity: 0.88,
   });
-  const bayGeo = new THREE.PlaneGeometry(330, 92, 32, 10);
+  bayWaterMat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = uTimeUniform;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform float uTime;`
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+float sanWaveY = sin(position.x * 0.14 + uTime * 2.1) * 0.09 + cos(position.z * 0.18 + uTime * 2.6) * 0.07;
+transformed.y += sanWaveY;`
+      );
+  };
+  bayWaterMat.customProgramCacheKey = () => 'san-nabilo-bay-waves-v1';
+
+  const bayGeo = new THREE.PlaneGeometry(540, 175, 48, 18);
   bayGeo.rotateX(-Math.PI / 2);
   const bayMesh = new THREE.Mesh(bayGeo, bayMatOrFallback(bayWaterMat));
-  bayMesh.position.set(0, -0.02, -118);
+  bayMesh.position.set(0, -0.02, -160);
   group.add(bayMesh);
 
-  // Kepulauan Seribu Coral Atoll & Speedboat Jetty Pier
+  // Kepulauan Seribu Coral Atolls & Speedboat Jetty Pier
   const sandMat = new THREE.MeshStandardMaterial({
     color: 0xd6d3d1,
     roughness: 0.88,
     metalness: 0.04,
   });
-  const reefIsland = new THREE.Mesh(
-    new THREE.CylinderGeometry(7.5, 9.5, 1.2, 16),
-    sandMat
-  );
-  reefIsland.position.set(-48, 0.35, -83);
-  group.add(reefIsland);
+  const reefPositions: [number, number, number, number][] = [
+    [-48, 0.35, -83, 7.5],
+    [92, 0.35, -148, 9.2],
+    [-118, 0.35, -152, 8.6],
+  ];
+  for (const [rx, ry, rz, rad] of reefPositions) {
+    const reefIsland = new THREE.Mesh(
+      new THREE.CylinderGeometry(rad, rad + 2.2, 1.2, 16),
+      sandMat
+    );
+    reefIsland.position.set(rx, ry, rz);
+    group.add(reefIsland);
+  }
 
   const jettyMat = new THREE.MeshStandardMaterial({
     color: 0x475569,
@@ -132,7 +157,7 @@ function buildExpansionZonesGroup(): {
   floodDiscsGroup.visible = false;
   group.add(floodDiscsGroup);
 
-  return { group, bayWaterMat, bayWaterGeo: bayGeo, floodDiscsGroup };
+  return { group, bayWaterMat, floodDiscsGroup };
 }
 
 function bayMatOrFallback(mat: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
@@ -181,9 +206,11 @@ export class CityRenderer {
   private readonly roadMat: THREE.MeshStandardMaterial;
   private readonly spireBeaconMat: THREE.MeshBasicMaterial;
   private readonly bayWaterMat: THREE.MeshStandardMaterial;
-  private readonly bayWaterGeo: THREE.BufferGeometry;
   private readonly floodDiscsGroup: THREE.Group;
   private readonly collectibleMeshes = new Map<string, THREE.Group>();
+  private lastCollectedCount = -1;
+  private lastCollectedFirstId: string | undefined;
+  private collectedIdSet = new Set<string>();
   private readonly streetscape: ReturnType<typeof buildJakartaStreetscape>;
   private readonly districtProps: ReturnType<typeof buildJakartaDistrictProps>;
   private readonly roadDetailSystem: ReturnType<
@@ -211,9 +238,8 @@ export class CityRenderer {
     });
     this.chunkLoader.updateAroundPlayer(0, 26, true);
 
-    const expZones = buildExpansionZonesGroup();
+    const expZones = buildExpansionZonesGroup(this.roadUniforms.uTime);
     this.bayWaterMat = expZones.bayWaterMat;
-    this.bayWaterGeo = expZones.bayWaterGeo;
     this.floodDiscsGroup = expZones.floodDiscsGroup;
     this.rootGroup.add(expZones.group);
 
@@ -248,7 +274,7 @@ export class CityRenderer {
     }
 
     // 1. Extended Terrain & Monas Plaza
-    const groundGeo = new THREE.PlaneGeometry(520, 520);
+    const groundGeo = new THREE.PlaneGeometry(760, 760);
     groundGeo.rotateX(-Math.PI / 2);
     const groundMat = new THREE.MeshStandardMaterial({
       color: 0x0f1a14,
@@ -382,14 +408,14 @@ if (uWetness > 0.04) {
     };
     this.roadMat.customProgramCacheKey = () => 'san-nabilo-wet-asphalt-v3';
 
-    const nsRoadGeo = new THREE.PlaneGeometry(14, 272);
+    const nsRoadGeo = new THREE.PlaneGeometry(14, 288);
     nsRoadGeo.rotateX(-Math.PI / 2);
     const nsRoad = new THREE.Mesh(nsRoadGeo, this.roadMat);
-    nsRoad.position.set(0, 0.036, 0);
+    nsRoad.position.set(0, 0.036, 72);
     nsRoad.receiveShadow = true;
     this.rootGroup.add(nsRoad);
 
-    const ewRoadGeo = new THREE.PlaneGeometry(14, 272);
+    const ewRoadGeo = new THREE.PlaneGeometry(14, 434);
     ewRoadGeo.rotateX(-Math.PI / 2);
     ewRoadGeo.rotateY(Math.PI / 2);
     const ewRoad = new THREE.Mesh(ewRoadGeo, this.roadMat);
@@ -398,22 +424,22 @@ if (uWetness > 0.04) {
     this.rootGroup.add(ewRoad);
 
     for (const offset of [-32, 32]) {
-      const hRoadGeo = new THREE.PlaneGeometry(10, 270);
+      const hRoadGeo = new THREE.PlaneGeometry(10, 434);
       hRoadGeo.rotateX(-Math.PI / 2);
       hRoadGeo.rotateY(Math.PI / 2);
       const hRoad = new THREE.Mesh(hRoadGeo, this.roadMat);
       hRoad.position.set(0, 0.02, offset);
       this.rootGroup.add(hRoad);
 
-      const vRoadGeo = new THREE.PlaneGeometry(10, 270);
+      const vRoadGeo = new THREE.PlaneGeometry(10, 292);
       vRoadGeo.rotateX(-Math.PI / 2);
       const vRoad = new THREE.Mesh(vRoadGeo, this.roadMat);
-      vRoad.position.set(offset, 0.028, 0);
+      vRoad.position.set(offset, 0.028, 74);
       this.rootGroup.add(vRoad);
     }
 
-    // Outer Jakarta Ring Boulevard (x = +-128, z = +128 south/east/west)
-    const outerRingSouthGeo = new THREE.PlaneGeometry(12, 268);
+    // Outer Jakarta Ring Boulevard (x = +-128 over z [-68..214], z = +128 across [-214..214])
+    const outerRingSouthGeo = new THREE.PlaneGeometry(12, 428);
     outerRingSouthGeo.rotateX(-Math.PI / 2);
     outerRingSouthGeo.rotateY(Math.PI / 2);
     const outerRingSouth = new THREE.Mesh(outerRingSouthGeo, this.roadMat);
@@ -421,11 +447,36 @@ if (uWetness > 0.04) {
     this.rootGroup.add(outerRingSouth);
 
     for (const sideX of [-128, 128]) {
-      const outerSideGeo = new THREE.PlaneGeometry(12, 210);
+      const outerSideGeo = new THREE.PlaneGeometry(12, 282);
       outerSideGeo.rotateX(-Math.PI / 2);
       const outerSide = new THREE.Mesh(outerSideGeo, this.roadMat);
-      outerSide.position.set(sideX, 0.026, 29);
+      outerSide.position.set(sideX, 0.026, 73);
       this.rootGroup.add(outerSide);
+    }
+
+    // JORR Outer Perimeter Loop (x = +-208, z = +208) + Northern Wing Coastal Roads (z = -66)
+    const jorrSouthGeo = new THREE.PlaneGeometry(14, 430);
+    jorrSouthGeo.rotateX(-Math.PI / 2);
+    jorrSouthGeo.rotateY(Math.PI / 2);
+    const jorrSouth = new THREE.Mesh(jorrSouthGeo, this.roadMat);
+    jorrSouth.position.set(0, 0.023, 208);
+    this.rootGroup.add(jorrSouth);
+
+    for (const sideX of [-208, 208]) {
+      const jorrSideGeo = new THREE.PlaneGeometry(14, 286);
+      jorrSideGeo.rotateX(-Math.PI / 2);
+      const jorrSide = new THREE.Mesh(jorrSideGeo, this.roadMat);
+      jorrSide.position.set(sideX, 0.025, 72);
+      this.rootGroup.add(jorrSide);
+    }
+
+    for (const wingX of [-168, 168]) {
+      const wingGeo = new THREE.PlaneGeometry(11, 92);
+      wingGeo.rotateX(-Math.PI / 2);
+      wingGeo.rotateY(Math.PI / 2);
+      const wingRoad = new THREE.Mesh(wingGeo, this.roadMat);
+      wingRoad.position.set(wingX, 0.025, -66);
+      this.rootGroup.add(wingRoad);
     }
 
     // 3. Tol Layang, Enterable Interior Stage & Warung Stalls
@@ -557,6 +608,8 @@ if (uWetness > 0.04) {
       maxAnisotropy
     );
     this.rootGroup.add(this.roadsideSystem.group);
+
+    this.rootGroup.add(this.buildOuterMegapolitanBlocks());
 
     scene.add(this.rootGroup);
   }
@@ -1043,16 +1096,177 @@ if (uWetness > 0.04) {
     this.streetscape.setTrafficSignalPhase(phase);
   }
 
+  private buildOuterMegapolitanBlocks(): THREE.Group {
+    const group = new THREE.Group();
+    group.name = 'OuterMegapolitanInstancedBlocks';
+
+    const blockPlacements: {
+      x: number;
+      z: number;
+      w: number;
+      h: number;
+      d: number;
+      color: number;
+    }[] = [];
+    const treePlacements: {
+      x: number;
+      z: number;
+      s: number;
+      h: number;
+      color: number;
+    }[] = [];
+
+    const reservedSpots: [number, number][] = [
+      [-146, 162],
+      [38, 168],
+      [160, 48],
+      [-168, 176],
+      [176, 172],
+      [176, -42],
+      [-178, -54],
+    ];
+    const blockPalette = [0x1e293b, 0x283548, 0x334155, 0x243040, 0x36312d];
+    const treePalette = [0x14532d, 0x166534, 0x15803d, 0x1e4d2b];
+
+    const hashUnit = (gx: number, gz: number): number => {
+      const s = Math.sin(gx * 12.9898 + gz * 78.233) * 43758.5453;
+      return s - Math.floor(s);
+    };
+
+    for (let x = -222; x <= 222; x += 22) {
+      for (let z = -54; z <= 220; z += 22) {
+        if (Math.abs(x) <= 96 && z <= 96) continue;
+        if (z < -62) continue;
+        if (
+          isOnRoadway(x, z) ||
+          isOnRoadway(x - 10, z) ||
+          isOnRoadway(x + 10, z) ||
+          isOnRoadway(x, z - 10) ||
+          isOnRoadway(x, z + 10)
+        ) {
+          continue;
+        }
+        if (isNearBuilding(x, z, 15)) continue;
+        let nearReserved = false;
+        for (let r = 0; r < reservedSpots.length; r++) {
+          const dx = x - reservedSpots[r][0];
+          const dz = z - reservedSpots[r][1];
+          if (dx * dx + dz * dz < 14 * 14) {
+            nearReserved = true;
+            break;
+          }
+        }
+        if (nearReserved) continue;
+
+        const rnd = hashUnit(x, z);
+        if (rnd < 0.38) {
+          const s = 2.6 + rnd * 3.8;
+          const h = 4.6 + hashUnit(z, x) * 3.6;
+          treePlacements.push({
+            x,
+            z,
+            s,
+            h,
+            color: treePalette[Math.floor(rnd * 17) % treePalette.length],
+          });
+        } else {
+          const rnd2 = hashUnit(z + 7, x - 3);
+          const w = 8 + Math.floor(rnd * 4.5);
+          const d = 8 + Math.floor(rnd2 * 4.5);
+          const h = 11 + Math.floor(((rnd + rnd2) * 0.5) * 21);
+          blockPlacements.push({
+            x,
+            z,
+            w,
+            h,
+            d,
+            color:
+              blockPalette[
+                Math.floor((rnd + rnd2) * 19) % blockPalette.length
+              ],
+          });
+        }
+      }
+    }
+
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+
+    if (blockPlacements.length > 0) {
+      const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+      const boxMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.78,
+        metalness: 0.16,
+      });
+      const blockInst = new THREE.InstancedMesh(
+        boxGeo,
+        boxMat,
+        blockPlacements.length
+      );
+      blockPlacements.forEach((b, i) => {
+        dummy.position.set(b.x, b.h * 0.5, b.z);
+        dummy.scale.set(b.w, b.h, b.d);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        blockInst.setMatrixAt(i, dummy.matrix);
+        color.setHex(b.color);
+        blockInst.setColorAt(i, color);
+      });
+      blockInst.instanceMatrix.needsUpdate = true;
+      if (blockInst.instanceColor) blockInst.instanceColor.needsUpdate = true;
+      group.add(blockInst);
+    }
+
+    if (treePlacements.length > 0) {
+      const treeGeo = new THREE.ConeGeometry(1, 1, 7);
+      const treeMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.9,
+        metalness: 0.04,
+      });
+      const treeInst = new THREE.InstancedMesh(
+        treeGeo,
+        treeMat,
+        treePlacements.length
+      );
+      treePlacements.forEach((t, i) => {
+        dummy.position.set(t.x, t.h * 0.5 + 0.4, t.z);
+        dummy.scale.set(t.s, t.h, t.s);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        treeInst.setMatrixAt(i, dummy.matrix);
+        color.setHex(t.color);
+        treeInst.setColorAt(i, color);
+      });
+      treeInst.instanceMatrix.needsUpdate = true;
+      if (treeInst.instanceColor) treeInst.instanceColor.needsUpdate = true;
+      group.add(treeInst);
+    }
+
+    return group;
+  }
+
   public updateChunksAroundPlayer(playerX: number, playerZ: number): void {
     this.chunkLoader.updateAroundPlayer(playerX, playerZ, false);
   }
 
   public syncCollectibles(collectedIds: readonly string[], dt: number): void {
-    const set = new Set(collectedIds);
+    if (
+      collectedIds.length !== this.lastCollectedCount ||
+      collectedIds[0] !== this.lastCollectedFirstId
+    ) {
+      this.lastCollectedCount = collectedIds.length;
+      this.lastCollectedFirstId = collectedIds[0];
+      this.collectedIdSet.clear();
+      for (let i = 0; i < collectedIds.length; i++) {
+        this.collectedIdSet.add(collectedIds[i]);
+      }
+    }
     for (const pkg of NUSANTARA_PACKAGES) {
       const grp = this.collectibleMeshes.get(pkg.id);
       if (!grp) continue;
-      const visible = !set.has(pkg.id);
+      const visible = !this.collectedIdSet.has(pkg.id);
       grp.visible = visible;
       if (visible) {
         grp.rotation.y += dt * 1.9;
@@ -1098,7 +1312,9 @@ if (uWetness > 0.04) {
   public setWeatherTransition(
     nightFactor: number,
     wetnessFactor: number,
-    dt: number = 0.016
+    dt: number = 0.016,
+    playerX: number = 0,
+    playerZ: number = 0
   ): void {
     this.elapsedTime += dt;
     const tone = computeTimeOfDayToneState(nightFactor, wetnessFactor);
@@ -1112,20 +1328,6 @@ if (uWetness > 0.04) {
     this.spireBeaconMat.color.setScalar(0.55 + nightFactor * 0.45);
     this.floodDiscsGroup.visible = wetnessFactor > 0.65;
     this.bayWaterMat.roughness = 0.14 + Math.sin(this.elapsedTime * 1.8) * 0.04;
-
-    // Animated Teluk Jakarta ocean waves
-    const bayPos = this.bayWaterGeo.attributes.position as THREE.BufferAttribute;
-    if (bayPos) {
-      for (let i = 0; i < bayPos.count; i++) {
-        const vx = bayPos.getX(i);
-        const vz = bayPos.getZ(i);
-        const waveY =
-          Math.sin(vx * 0.14 + this.elapsedTime * 2.1) * 0.09 +
-          Math.cos(vz * 0.18 + this.elapsedTime * 2.6) * 0.07;
-        bayPos.setY(i, waveY);
-      }
-      bayPos.needsUpdate = true;
-    }
 
     // Automatically illuminate Jakarta skyscraper offices & Blok M ruko windows at dusk/night
     for (let i = 0; i < this.buildingEmissiveMats.length; i++) {
@@ -1149,28 +1351,30 @@ if (uWetness > 0.04) {
         Math.cos(this.elapsedTime * 1.25 + i * 0.7) * windStrength * 0.65;
     }
 
-    // Subtle procedural cloth wave flutter on Monas Merah Putih flags
-    const flagWindAmp = 0.12 + wetnessFactor * 0.07;
-    for (let f = 0; f < this.animatedFlags.length; f++) {
-      const fl = this.animatedFlags[f];
-      const posAttr = fl.geometry.attributes.position as THREE.BufferAttribute;
-      const arr = posAttr.array as Float32Array;
-      const base = fl.basePositions;
-      for (let v = 0; v < posAttr.count; v++) {
-        const ix = v * 3;
-        const bx = base[ix];
-        const by = base[ix + 1];
-        const flutterWeight = Math.min(1, Math.max(0, bx / 1.82));
-        const wave =
-          Math.sin(bx * 3.6 - this.elapsedTime * 5.2 + fl.phase) *
-            flagWindAmp *
-            flutterWeight +
-          Math.sin(by * 2.4 - this.elapsedTime * 3.1 + fl.phase) *
-            0.03 *
-            flutterWeight;
-        arr[ix + 2] = base[ix + 2] + wave;
+    // Subtle procedural cloth wave flutter on Monas Merah Putih flags (near central core)
+    if (playerX * playerX + playerZ * playerZ <= 75 * 75) {
+      const flagWindAmp = 0.12 + wetnessFactor * 0.07;
+      for (let f = 0; f < this.animatedFlags.length; f++) {
+        const fl = this.animatedFlags[f];
+        const posAttr = fl.geometry.attributes.position as THREE.BufferAttribute;
+        const arr = posAttr.array as Float32Array;
+        const base = fl.basePositions;
+        for (let v = 0; v < posAttr.count; v++) {
+          const ix = v * 3;
+          const bx = base[ix];
+          const by = base[ix + 1];
+          const flutterWeight = Math.min(1, Math.max(0, bx / 1.82));
+          const wave =
+            Math.sin(bx * 3.6 - this.elapsedTime * 5.2 + fl.phase) *
+              flagWindAmp *
+              flutterWeight +
+            Math.sin(by * 2.4 - this.elapsedTime * 3.1 + fl.phase) *
+              0.03 *
+              flutterWeight;
+          arr[ix + 2] = base[ix + 2] + wave;
+        }
+        posAttr.needsUpdate = true;
       }
-      posAttr.needsUpdate = true;
     }
 
     // Subtle low-profile breathing pulse on interior & warung ground rings

@@ -2288,8 +2288,8 @@ export class PlayerController {
       const col =
         (vSpec.isAircraft && activeVehicle.y > 5) || surfaceElev > 2.5
           ? {
-              x: THREE.MathUtils.clamp(nextVX, -88, 88),
-              z: THREE.MathUtils.clamp(nextVZ, -88, 88),
+              x: THREE.MathUtils.clamp(nextVX, -236, 236),
+              z: THREE.MathUtils.clamp(nextVZ, -236, 236),
               collided: false,
             }
           : resolveCircleAABBCollision(
@@ -2694,8 +2694,8 @@ export class PlayerController {
       const col =
         elevY > 2.5
           ? {
-              x: THREE.MathUtils.clamp(nextPX, -156, 156),
-              z: THREE.MathUtils.clamp(nextPZ, -156, 156),
+              x: THREE.MathUtils.clamp(nextPX, -236, 236),
+              z: THREE.MathUtils.clamp(nextPZ, -236, 236),
               collided: false,
             }
           : resolveCircleAABBCollision(

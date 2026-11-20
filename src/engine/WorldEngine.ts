@@ -166,6 +166,12 @@ export class WorldEngine {
   private viralThumbCanvas: HTMLCanvasElement | null = null;
   private lastViralMomentAt = 0;
   private lastWantedLevelSeen = 0;
+  private streetlightTimer = 0;
+  private lastStreetlightX = 9999;
+  private lastStreetlightZ = 9999;
+  private lastChunkX = 9999;
+  private lastChunkZ = 9999;
+  private lastAmbientCalloutAt = 0;
 
   constructor(container: HTMLElement, initialProps: WorldEngineProps) {
     this.container = container;
@@ -218,7 +224,7 @@ export class WorldEngine {
       60,
       initW / initH,
       0.2,
-      360
+      480
     );
 
     this.weatherSystem = new WeatherLightingSystem(
@@ -289,9 +295,53 @@ export class WorldEngine {
         onPlayerHitAngle: (ang) => this.props.onPlayerHitAngle?.(ang),
         onHornTriggered: (hx, hy, hz) => {
           this.netSync.sendCoopEvent({ type: 'horn', x: hx, y: hy, z: hz });
+          const curPhys = this.playerController.playerPhys;
+          const curState = gameStore.getState();
+          const drivingVeh = curPhys.drivingVehicleId
+            ? this.trafficSystem.vehicles.find(
+                (v) => v.id === curPhys.drivingVehicleId
+              )
+            : null;
+          let startedFare = false;
+          if (
+            drivingVeh &&
+            (drivingVeh.type === 'sedan' ||
+              drivingVeh.type === 'angkot' ||
+              drivingVeh.type === 'bajaj' ||
+              drivingVeh.type === 'ojek' ||
+              drivingVeh.type === 'supercar') &&
+            curState.activeContract === null &&
+            curState.playerState.wantedLevel === 0 &&
+            this.crowdSystem.hasPedestrianNear(hx, hz, 14)
+          ) {
+            const fare = gameStore.startQuickTaxiFare(
+              hx,
+              hz,
+              VEHICLE_SPECS[drivingVeh.type].name
+            );
+            if (fare) {
+              startedFare = true;
+              this.calloutCounter += 1;
+              this.activeWorldCallouts.push({
+                id: `callout_${this.calloutCounter}`,
+                text: `Penumpang Naik: "${fare.subtitle}!"`,
+                x: hx + 1.4,
+                y: hy + 2.1,
+                z: hz + 1.4,
+                createdAt: performance.now(),
+                durationMs: 2800,
+              });
+            }
+          }
           const reactedVehicles = this.trafficSystem.notifyHorn(hx, hz);
-          let reactedPeds = this.crowdSystem.reactToHorn(hx, hz, 24);
-          if (reactedVehicles.length === 0 && reactedPeds.length === 0) {
+          let reactedPeds = startedFare
+            ? []
+            : this.crowdSystem.reactToHorn(hx, hz, 24);
+          if (
+            !startedFare &&
+            reactedVehicles.length === 0 &&
+            reactedPeds.length === 0
+          ) {
             reactedPeds = this.crowdSystem.reactToHorn(hx, hz, 38);
           }
           const nowTs = performance.now();
@@ -359,6 +409,9 @@ export class WorldEngine {
           this.lastViralMomentAt = nowTs;
           const phys = this.playerController.playerPhys;
           this.crowdSystem.triggerSocialFilmingNear(phys.x, phys.z, 26);
+          if (kind === 'drift_stunt') {
+            this.crowdSystem.triggerCheerNear(phys.x, phys.z, 24);
+          }
           const thumb = this.captureViralThumbnailInternal();
           const activeVeh = phys.drivingVehicleId
             ? this.trafficSystem.vehicles.find(
@@ -780,13 +833,28 @@ export class WorldEngine {
     if (lightningTriggered && currentGameState === 'playing') {
       soundEngine.playThunderBoom();
     }
-    this.cityRenderer.setWeatherTransition(nightFactor, wetnessFactor, dt);
-    this.cityRenderer.updateStreetlightPool(
-      phys.x,
-      phys.z,
+    this.cityRenderer.setWeatherTransition(
       nightFactor,
-      wetnessFactor
+      wetnessFactor,
+      dt,
+      phys.x,
+      phys.z
     );
+    this.streetlightTimer += dt;
+    if (
+      this.streetlightTimer >= 0.15 ||
+      Math.hypot(phys.x - this.lastStreetlightX, phys.z - this.lastStreetlightZ) > 6
+    ) {
+      this.streetlightTimer = 0;
+      this.lastStreetlightX = phys.x;
+      this.lastStreetlightZ = phys.z;
+      this.cityRenderer.updateStreetlightPool(
+        phys.x,
+        phys.z,
+        nightFactor,
+        wetnessFactor
+      );
+    }
 
     this.trafficSystem.updateVisualsAndAircraft(
       dt,
@@ -824,7 +892,11 @@ export class WorldEngine {
       );
 
       this.cityRenderer.setTrafficSignalPhase(stepRes.signalPhase);
-      this.cityRenderer.updateChunksAroundPlayer(phys.x, phys.z);
+      if (Math.hypot(phys.x - this.lastChunkX, phys.z - this.lastChunkZ) > 12) {
+        this.lastChunkX = phys.x;
+        this.lastChunkZ = phys.z;
+        this.cityRenderer.updateChunksAroundPlayer(phys.x, phys.z);
+      }
       const collectedIds = pState.collectedPackages || [];
       this.cityRenderer.syncCollectibles(collectedIds, dt);
       if (pState.currentInterior === 'exterior') {
@@ -918,6 +990,9 @@ export class WorldEngine {
         );
       }
 
+      const playerSpeed = activeVeh
+        ? Math.abs(activeVeh.speed)
+        : Math.hypot(phys.vx, phys.vz);
       this.crowdSystem.step(
         dt,
         this.postProcessing.getRecommendedCrowdRatio(),
@@ -925,8 +1000,26 @@ export class WorldEngine {
         stepRes.signalPhase,
         pState.wantedLevel,
         phys.x,
-        phys.z
+        phys.z,
+        playerSpeed,
+        Boolean(activeVeh)
       );
+      if (now - this.lastAmbientCalloutAt > 11000 && this.activeWorldCallouts.length < 3) {
+        const ambient = this.crowdSystem.getAmbientCallout(phys.x, phys.z);
+        if (ambient) {
+          this.lastAmbientCalloutAt = now;
+          this.calloutCounter += 1;
+          this.activeWorldCallouts.push({
+            id: `callout_${this.calloutCounter}`,
+            text: ambient.text,
+            x: ambient.x,
+            y: ambient.y,
+            z: ambient.z,
+            createdAt: now,
+            durationMs: 2600,
+          });
+        }
+      }
 
       // Step real-time vehicle smoke, engine fire, and chain-reaction explosions
       this.trafficSystem.stepVehicleDamageAndExplosions(

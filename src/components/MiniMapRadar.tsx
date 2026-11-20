@@ -69,6 +69,13 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
       ctx.fillStyle = '#070b12';
       ctx.fillRect(0, 0, w, h);
 
+      // Northern Jakarta Bay Water Basin (z < -72)
+      const bayEdgeY = cy + (-72 - pz) * zoom;
+      if (bayEdgeY > 0) {
+        ctx.fillStyle = 'rgba(3, 105, 161, 0.28)';
+        ctx.fillRect(0, 0, w, Math.min(h, bayEdgeY));
+      }
+
       // Subtle tactical grid
       ctx.strokeStyle = 'rgba(56, 189, 248, 0.06)';
       ctx.lineWidth = 1;
@@ -85,7 +92,7 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
         ctx.stroke();
       }
 
-      // 1. Roads (Inner Ring + Outer Ring Boulevard)
+      // 1. Roads (Inner Ring + Outer Ring +-128 + JORR Perimeter +-208 + Coastal Wings)
       ctx.strokeStyle = '#1e293b';
       ctx.lineWidth = 12;
       ctx.strokeRect(
@@ -96,19 +103,35 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
       );
       ctx.strokeStyle = 'rgba(30, 41, 59, 0.72)';
       ctx.lineWidth = 8;
-      ctx.strokeRect(
-        cx + (-128 - px) * zoom,
-        cy + (-72 - pz) * zoom,
-        256 * zoom,
-        200 * zoom
-      );
+      ctx.beginPath();
+      // Outer Ring x = +-128 over z [-68..214] & z = 128 across [-214..214]
+      ctx.moveTo(cx + (-128 - px) * zoom, cy + (-68 - pz) * zoom);
+      ctx.lineTo(cx + (-128 - px) * zoom, cy + (214 - pz) * zoom);
+      ctx.moveTo(cx + (128 - px) * zoom, cy + (-68 - pz) * zoom);
+      ctx.lineTo(cx + (128 - px) * zoom, cy + (214 - pz) * zoom);
+      ctx.moveTo(cx + (-214 - px) * zoom, cy + (128 - pz) * zoom);
+      ctx.lineTo(cx + (214 - px) * zoom, cy + (128 - pz) * zoom);
+      // JORR Perimeter x = +-208 over z [-71..215] & z = 208 across [-215..215]
+      ctx.moveTo(cx + (-208 - px) * zoom, cy + (-71 - pz) * zoom);
+      ctx.lineTo(cx + (-208 - px) * zoom, cy + (215 - pz) * zoom);
+      ctx.moveTo(cx + (208 - px) * zoom, cy + (-71 - pz) * zoom);
+      ctx.lineTo(cx + (208 - px) * zoom, cy + (215 - pz) * zoom);
+      ctx.moveTo(cx + (-215 - px) * zoom, cy + (208 - pz) * zoom);
+      ctx.lineTo(cx + (215 - px) * zoom, cy + (208 - pz) * zoom);
+      // Northern wing coastal boulevards (z = -66 across [-214..-122] and [122..214])
+      ctx.moveTo(cx + (-214 - px) * zoom, cy + (-66 - pz) * zoom);
+      ctx.lineTo(cx + (-122 - px) * zoom, cy + (-66 - pz) * zoom);
+      ctx.moveTo(cx + (122 - px) * zoom, cy + (-66 - pz) * zoom);
+      ctx.lineTo(cx + (214 - px) * zoom, cy + (-66 - pz) * zoom);
+      ctx.stroke();
+
       ctx.strokeStyle = '#1e293b';
       ctx.lineWidth = 12;
       ctx.beginPath();
-      ctx.moveTo(cx + (0 - px) * zoom, cy + (-136 - pz) * zoom);
-      ctx.lineTo(cx + (0 - px) * zoom, cy + (136 - pz) * zoom);
-      ctx.moveTo(cx + (-136 - px) * zoom, cy + (0 - pz) * zoom);
-      ctx.lineTo(cx + (136 - px) * zoom, cy + (0 - pz) * zoom);
+      ctx.moveTo(cx + (0 - px) * zoom, cy + (-72 - pz) * zoom);
+      ctx.lineTo(cx + (0 - px) * zoom, cy + (216 - pz) * zoom);
+      ctx.moveTo(cx + (-216 - px) * zoom, cy + (0 - pz) * zoom);
+      ctx.lineTo(cx + (216 - px) * zoom, cy + (0 - pz) * zoom);
       ctx.stroke();
 
       // 2. Monas Plaza core

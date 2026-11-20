@@ -132,6 +132,11 @@ export class TrafficSystem {
       { type: 'angkot', x: -5.4, z: 45.5, heading: Math.PI },
       { type: 'sedan', x: 5.4, z: -15.0, heading: 0 },
       { type: 'speedboat', x: -28, z: -82, heading: 0 },
+      // Outer Megapolitan parked fleet (Pondok Indah, Kemang, Kelapa Gading, Marunda Bay)
+      { type: 'supercar', x: -146, z: 162, heading: Math.PI * 0.5 },
+      { type: 'ojek', x: 38, z: 168, heading: 0 },
+      { type: 'barracuda', x: 160, z: 48, heading: -Math.PI * 0.5 },
+      { type: 'speedboat', x: 152, z: -82, heading: Math.PI },
     ];
 
     parkedVehicles.forEach((vCfg, idx) => {
@@ -615,17 +620,25 @@ export class TrafficSystem {
     const sirenPhaseRed = Math.floor(nowMs / 115) % 2 === 0;
 
     for (const v of this.vehicles) {
+      const isPlayerVeh = v.id === drivingVehicleId;
+      const dSq =
+        (v.x - playerX) * (v.x - playerX) + (v.z - playerZ) * (v.z - playerZ);
+      if (!isPlayerVeh && dSq > 195 * 195) {
+        if (v.mesh.visible) v.mesh.visible = false;
+        continue;
+      }
+      if (!v.mesh.visible) v.mesh.visible = true;
+
       if (v.type === 'heli' || v.type === 'vtol_jet') {
         const rotor =
           (v.mesh.userData.mainRotor as THREE.Object3D | undefined) ||
           v.mesh.getObjectByName('heliRotor');
         if (rotor) {
           v.mesh.userData.mainRotor = rotor;
-          const isActiveAircraft = v.id === drivingVehicleId;
-          rotor.rotation.y += dt * (isActiveAircraft ? 22 : 4.5);
+          rotor.rotation.y += dt * (isPlayerVeh ? 22 : 4.5);
         }
-      } else {
-        // Spin 3D wheels proportionally to linear speed
+      } else if (isPlayerVeh || dSq <= 95 * 95) {
+        // Spin 3D wheels proportionally to linear speed for nearby vehicles only
         const wheels = v.mesh.userData.wheels as THREE.Object3D[] | undefined;
         if (wheels && Math.abs(v.speed) > 0.05) {
           for (let wi = 0; wi < wheels.length; wi++) {

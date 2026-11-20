@@ -283,6 +283,21 @@ export const STREET_RACES: StreetRaceSpec[] = [
       [0, 24],
     ],
   },
+  {
+    id: 'race_jorr_grand_tour',
+    name: 'Grand Tour Lingkar Luar Megapolitan JORR',
+    subtitle: 'Lintasan Ekspres 480m Pondok Indah – Kemang – Kelapa Gading – Marunda (6 Checkpoint)',
+    entryFeeRp: 150000,
+    rewardRp: 1850000,
+    checkpoints: [
+      [-128, 128],
+      [0, 208],
+      [208, 208],
+      [208, 0],
+      [128, 128],
+      [0, 24],
+    ],
+  },
 ];
 
 export function getRoadsideGroundY(
@@ -623,6 +638,26 @@ export const TRAFFIC_ROUTES: Record<TrafficRouteId, TrafficWaypoint[]> = {
     { x: 126, z: 126 },
     { x: -126, z: 126 },
   ],
+  jorr_perimeter_loop: [
+    { x: -208, z: 208 },
+    { x: 208, z: 208 },
+    { x: 208, z: -66 },
+    { x: 128, z: -66 },
+    { x: 128, z: 2.5 },
+    { x: 34.4, z: 2.5 },
+    { x: 34.4, z: 128 },
+    { x: -34.4, z: 128 },
+    { x: -34.4, z: 2.5 },
+    { x: -128, z: 2.5 },
+    { x: -128, z: -66 },
+    { x: -208, z: -66 },
+  ],
+  south_jakarta_boulevard: [
+    { x: -128, z: 128 },
+    { x: 128, z: 128 },
+    { x: 128, z: 208 },
+    { x: -128, z: 208 },
+  ],
 };
 
 function interpolateRoutePosition(
@@ -668,6 +703,12 @@ export function generateInitialTrafficSpawns(): TrafficSpawnSpec[] {
     { id: 'traffic_sedan_tol2', type: 'sedan', routeId: 'tol_layang_express', seg: 2, t: 0.35, speed: 14.8 },
     { id: 'traffic_supercar_outer', type: 'supercar', routeId: 'outer_ring_express', seg: 1, t: 0.4, speed: 17.5 },
     { id: 'traffic_tj_outer', type: 'transjakarta', routeId: 'outer_ring_express', seg: 2, t: 0.55, speed: 11.2 },
+    { id: 'traffic_jorr_supercar', type: 'supercar', routeId: 'jorr_perimeter_loop', seg: 0, t: 0.35, speed: 18.8 },
+    { id: 'traffic_jorr_polisi', type: 'polisi', routeId: 'jorr_perimeter_loop', seg: 1, t: 0.45, speed: 13.5 },
+    { id: 'traffic_jorr_tj', type: 'transjakarta', routeId: 'jorr_perimeter_loop', seg: 10, t: 0.5, speed: 11.8 },
+    { id: 'traffic_jorr_ojek', type: 'ojek', routeId: 'south_jakarta_boulevard', seg: 0, t: 0.6, speed: 12.8 },
+    { id: 'traffic_south_angkot', type: 'angkot', routeId: 'south_jakarta_boulevard', seg: 1, t: 0.5, speed: 10.2 },
+    { id: 'traffic_south_sedan', type: 'sedan', routeId: 'south_jakarta_boulevard', seg: 2, t: 0.35, speed: 14.5 },
   ];
 
   return assignments.map((item) => {
@@ -1424,8 +1465,8 @@ export function validateCustomRaceTrack(
         normalizedCheckpoints: [],
       };
     }
-    const cx = Math.max(-156, Math.min(156, Math.round(pt[0] * 10) / 10));
-    const cz = Math.max(-156, Math.min(156, Math.round(pt[1] * 10) / 10));
+    const cx = Math.max(-236, Math.min(236, Math.round(pt[0] * 10) / 10));
+    const cz = Math.max(-236, Math.min(236, Math.round(pt[1] * 10) / 10));
 
     if (i > 0) {
       const prev = normalized[i - 1];

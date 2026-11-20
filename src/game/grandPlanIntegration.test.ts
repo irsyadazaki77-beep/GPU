@@ -14,14 +14,18 @@ import {
   computeSpeedSensitiveTurnRate,
   createCustomRaceTrackSpec,
   createInitialPlayerState,
+  createQuickPassengerFare,
   resolveCombatComboState,
+  resolveDistrictAtPosition,
   stepVehicleLongitudinalSpeed,
 } from './rules';
 import { gameStore } from '../state/gameStore';
 
-test('World expansion to 320m x 320m preserves outer ring route and bounds', () => {
-  assert.equal(WORLD_MAX_BOUND, 160);
+test('World expansion to 480m x 480m preserves outer ring, JORR perimeter loop, and bounds', () => {
+  assert.equal(WORLD_MAX_BOUND, 240);
   assert.ok(TRAFFIC_ROUTES.outer_ring_express.length >= 6);
+  assert.ok(TRAFFIC_ROUTES.jorr_perimeter_loop.length >= 6);
+  assert.ok(TRAFFIC_ROUTES.south_jakarta_boulevard.length >= 4);
 });
 
 test('Trio active abilities, Kirana Cyber Hack, Safehouse rest, and Custom UGC race store actions work end-to-end', () => {
@@ -200,4 +204,110 @@ test('GTA driving braking vs reverse, speed-sensitive steering, and Hospital Res
   assert.equal(respawn.nextState.wantedLevel, 0);
   assert.equal(respawn.nextState.rupiah, 1_950_000);
   assert.deepEqual(respawn.nextState.completedMissions, ['ch1_m1', 'ch1_m2']);
+});
+
+test('Wave 5 open-world districts, living pedestrian AI interactions/recycling, quick taxi fare, and SimWorker fallback work', async () => {
+  const {
+    recycleDistantPedestrianInPlace,
+    stepPedestrianInteractions,
+    triggerCrowdCheerNear,
+  } = await import('../engine/crowdAi');
+  const { SimWorkerClient } = await import('../engine/simWorkerClient');
+
+  // 1. Outer 480m districts resolve accurately
+  assert.equal(resolveDistrictAtPosition(-145, 160).id, 'pondok_indah');
+  assert.equal(resolveDistrictAtPosition(48, 172).id, 'kemang_selatan');
+  assert.equal(resolveDistrictAtPosition(172, 48).id, 'kelapa_gading');
+  assert.equal(resolveDistrictAtPosition(-172, 12).id, 'pantai_pik_utara');
+
+  // 2. Pedestrian streaming recycle moves >108m agent near player & clears timers
+  const farAgent = {
+    x: -180,
+    z: 180,
+    axis: 'ns' as const,
+    dir: 1 as const,
+    minX: -182,
+    maxX: -178,
+    minZ: 170,
+    maxZ: 190,
+    speed: 1.5,
+    phase: 0.4,
+    state: 'FILMING' as const,
+    archetype: 'komuter' as const,
+    panicTimer: 2,
+    panicVx: 1,
+    panicVz: 0,
+    crowdTimer: 1,
+    crowdAnchorX: 0,
+    crowdAnchorZ: 0,
+    filmTimer: 3,
+    torsoColor: 0xffffff,
+  };
+  const sidewalks = [
+    { minX: 4, maxX: 8, minZ: 16, maxZ: 34 },
+    { minX: -10, maxX: -6, minZ: 16, maxZ: 34 },
+  ];
+  const recycled = recycleDistantPedestrianInPlace(farAgent, 0, 26, sidewalks, 0, 108 * 108);
+  assert.equal(recycled, true);
+  assert.ok(Math.hypot(farAgent.x - 0, farAgent.z - 26) < 40);
+  assert.equal(farAgent.panicTimer, 0);
+  assert.equal(farAgent.state, 'WALKING');
+
+  // 3. Pedestrian social interactions & drift cheering
+  const pedA = {
+    ...farAgent,
+    x: 2,
+    z: 20,
+    interactCooldown: 0,
+    crowdTimer: 0,
+    filmTimer: 0,
+    panicTimer: 0,
+  };
+  const pedB = {
+    ...farAgent,
+    x: 2.9,
+    z: 20.5,
+    interactCooldown: 0,
+    crowdTimer: 0,
+    filmTimer: 0,
+    panicTimer: 0,
+  };
+  assert.equal(stepPedestrianInteractions([pedA, pedB], 2), 1);
+  assert.equal(pedA.state, 'CHATTING');
+  assert.equal(pedB.state, 'CHATTING');
+
+  const cheered = triggerCrowdCheerNear([pedA, pedB], 3, 21, 20, 3.5);
+  assert.equal(cheered, 2);
+  assert.equal(pedA.state, 'CHEERING');
+
+  // 4. Quick taxi/ojek fare generation & store trigger
+  const pureFare = createQuickPassengerFare(0, 26, 'Taksi Garuda');
+  assert.equal(pureFare.kind, 'ojol_delivery');
+  assert.ok(Math.hypot(pureFare.targetX - 0, pureFare.targetZ - 26) >= 65);
+  assert.ok(pureFare.rewardRp >= 110_000);
+
+  gameStore.setState({ activeContract: null, customWaypoint: null });
+  const startedFare = gameStore.startQuickTaxiFare(0, 26, 'Ojek Online');
+  assert.ok(startedFare);
+  assert.equal(gameStore.getState().activeContract?.id, startedFare.id);
+  assert.equal(gameStore.getState().customWaypoint?.x, startedFare.targetX);
+  assert.equal(gameStore.startQuickTaxiFare(0, 26, 'Ojek Online'), null);
+  gameStore.setState({ activeContract: null, customWaypoint: null });
+
+  // 5. SimWorkerClient synchronous fallback computes valid ahead distances
+  const sim = new SimWorkerClient(8);
+  const out = sim.stepBatch(
+    [
+      { x: 10, z: 0, heading: 0, speed: 8 },
+      { x: 10, z: 14, heading: 0, speed: 6 },
+    ],
+    0,
+    26,
+    0.05
+  );
+  assert.ok(out instanceof Float32Array);
+  assert.ok(out.length >= 8);
+  assert.ok(Number.isFinite(out[0]));
+  assert.ok(out[0] < 999);
+  sim.dispose();
 });

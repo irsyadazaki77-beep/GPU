@@ -1,6 +1,6 @@
 import type { BuildingFootprint, SidewalkBounds } from '../types';
 
-export const WORLD_MAX_BOUND = 160;
+export const WORLD_MAX_BOUND = 240;
 
 export const CITY_BUILDINGS: BuildingFootprint[] = [
   // Monas Centerpiece at (0, 0)
@@ -240,6 +240,103 @@ export const CITY_BUILDINGS: BuildingFootprint[] = [
     primaryColor: 0x7c2d12,
     accentColor: 0xfacc15,
   },
+  // WAVE 5 MEGAPOLITAN OUTER JAKARTA LANDMARKS (480m x 480m)
+  {
+    id: 'pik2_beach_club',
+    name: 'Klub Pantai Pasir Putih PIK Utara',
+    x: -168,
+    z: -46,
+    width: 18,
+    depth: 14,
+    height: 14,
+    style: 'colonial',
+    primaryColor: 0xf8fafc,
+    accentColor: 0x0ea5e9,
+  },
+  {
+    id: 'soetta_cargo_hub',
+    name: 'Hub Kargo Logistik Bandara Barat',
+    x: -170,
+    z: 62,
+    width: 22,
+    depth: 16,
+    height: 16,
+    style: 'port_crane',
+    primaryColor: 0x334155,
+    accentColor: 0xf59e0b,
+  },
+  {
+    id: 'pondok_indah_tower',
+    name: 'Menara Pondok Indah & Mal Selatan',
+    x: -158,
+    z: 168,
+    width: 18,
+    depth: 16,
+    height: 42,
+    style: 'skyscraper',
+    primaryColor: 0x1e293b,
+    accentColor: 0xfacc15,
+  },
+  {
+    id: 'tb_simatupang_hq',
+    name: 'Menara Korporasi TB Simatupang',
+    x: -48,
+    z: 172,
+    width: 20,
+    depth: 14,
+    height: 38,
+    style: 'skyscraper',
+    primaryColor: 0x0f172a,
+    accentColor: 0x38bdf8,
+  },
+  {
+    id: 'kemang_village_plaza',
+    name: 'Kemang Village & Avenue Selatan',
+    x: 56,
+    z: 172,
+    width: 18,
+    depth: 14,
+    height: 20,
+    style: 'ruko',
+    primaryColor: 0x7c2d12,
+    accentColor: 0xf97316,
+  },
+  {
+    id: 'bekasi_industrial_depot',
+    name: 'Kawasan Industri & Logistik Timur',
+    x: 170,
+    z: 164,
+    width: 22,
+    depth: 16,
+    height: 18,
+    style: 'port_crane',
+    primaryColor: 0x1e3a8a,
+    accentColor: 0xf59e0b,
+  },
+  {
+    id: 'kelapa_gading_mall',
+    name: 'Sentra Kelapa Gading & Summarecon',
+    x: 168,
+    z: 62,
+    width: 20,
+    depth: 16,
+    height: 26,
+    style: 'pasar',
+    primaryColor: 0x0f766e,
+    accentColor: 0xfef08a,
+  },
+  {
+    id: 'marunda_lighthouse_depot',
+    name: 'Mercusuar & Depot Marunda Timur',
+    x: 166,
+    z: -46,
+    width: 16,
+    depth: 14,
+    height: 30,
+    style: 'skyscraper',
+    primaryColor: 0x1e293b,
+    accentColor: 0x22d3ee,
+  },
 ];
 
 export const MAIN_BOULEVARD_SIDEWALK_SLABS: SidewalkBounds[] = [
@@ -261,6 +358,14 @@ export const MAIN_BOULEVARD_SIDEWALK_SLABS: SidewalkBounds[] = [
   { minX: 20, maxX: 25, minZ: 7.05, maxZ: 11.35 },
   { minX: 40, maxX: 82, minZ: -11.35, maxZ: -7.05 },
   { minX: 40, maxX: 82, minZ: 7.05, maxZ: 11.35 },
+  // Outer Megapolitan Promenade Sidewalk Slabs (Pondok Indah, Kemang, Kelapa Gading, PIK Utara)
+  { minX: -196, maxX: -140, minZ: 136, maxZ: 141 },
+  { minX: -196, maxX: -140, minZ: -11.5, maxZ: -7.2 },
+  { minX: 140, maxX: 196, minZ: 7.2, maxZ: 11.5 },
+  { minX: -118, maxX: -40, minZ: 136, maxZ: 141 },
+  { minX: 40, maxX: 118, minZ: 136, maxZ: 141 },
+  { minX: -118, maxX: -40, minZ: 197, maxZ: 201 },
+  { minX: 40, maxX: 118, minZ: 197, maxZ: 201 },
 ];
 
 /**

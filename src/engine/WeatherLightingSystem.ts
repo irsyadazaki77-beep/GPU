@@ -73,7 +73,7 @@ export class WeatherLightingSystem {
     scene.background = new THREE.Color(horizonHex);
     scene.fog = new THREE.FogExp2(horizonHex, 0.0028);
 
-    this.skyDomeGeo = new THREE.SphereGeometry(250, 32, 24);
+    this.skyDomeGeo = new THREE.SphereGeometry(390, 32, 24);
     this.skyUniforms = {
       uTopColor: { value: new THREE.Color(0x0c1428) },
       uHorizonColor: { value: new THREE.Color(0xd97706) },

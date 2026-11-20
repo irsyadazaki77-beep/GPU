@@ -71,6 +71,7 @@ import {
   createInitialPoliceTacticalState,
   createInitialTrioSynergy,
   createInitialWorldClockEventState,
+  createQuickPassengerFare,
   createSeedNabiloGramPosts,
   createStreetRaceSession,
   createTurfWarSession,
@@ -959,6 +960,29 @@ export const gameStore = {
       },
     };
     emitChange();
+  },
+
+  startQuickTaxiFare: (
+    playerX: number,
+    playerZ: number,
+    vehicleLabel: string
+  ): ActiveStreetContractState | null => {
+    if (state.activeContract) return null;
+    soundEngine.playPickup();
+    const fare = createQuickPassengerFare(playerX, playerZ, vehicleLabel);
+    state = {
+      ...state,
+      activeContract: fare,
+      customWaypoint: {
+        x: fare.targetX,
+        z: fare.targetZ,
+        label: fare.subtitle,
+        category: 'custom',
+      },
+      lastOutcomeText: `${fare.title}: ${fare.subtitle} (+Rp ${fare.rewardRp.toLocaleString('id-ID')})`,
+    };
+    emitChange();
+    return fare;
   },
 
   setCustomWaypoint: (wp: CustomWaypointState | null) => {

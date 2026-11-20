@@ -80,7 +80,7 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
   const activeRoadEvent = worldClockEventState.activeEvent;
 
   const [filter, setFilter] = useState<MapFilterCategory>('all');
-  const [zoom, setZoom] = useState<number>(1.35);
+  const [zoom, setZoom] = useState<number>(0.75);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [selectedPoi, setSelectedPoi] = useState<MapPoiItem | null>(null);
 
@@ -223,10 +223,10 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
   const canvasToWorld = (cx: number, cy: number) => {
     const scale = 2.05 * zoom;
     const wx = Math.round(
-      Math.max(-86, Math.min(86, (cx - CANVAS_W / 2 - pan.x) / scale))
+      Math.max(-236, Math.min(236, (cx - CANVAS_W / 2 - pan.x) / scale))
     );
     const wz = Math.round(
-      Math.max(-86, Math.min(86, (cy - CANVAS_H / 2 - pan.y) / scale))
+      Math.max(-236, Math.min(236, (cy - CANVAS_H / 2 - pan.y) / scale))
     );
     return { wx, wz };
   };
@@ -247,6 +247,13 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
       // 1. Tactical Dark Ocean & City Base
       ctx.fillStyle = '#060911';
       ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+      // Northern Jakarta Bay Water Basin (z < -72)
+      const bayEdgeY = originY - 72 * scale;
+      if (bayEdgeY > 0) {
+        ctx.fillStyle = 'rgba(3, 105, 161, 0.24)';
+        ctx.fillRect(0, 0, CANVAS_W, Math.min(CANVAS_H, bayEdgeY));
+      }
 
       // 2. Subtle Coordinate Grid
       ctx.strokeStyle = 'rgba(56, 189, 248, 0.06)';
@@ -290,9 +297,9 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
         ctx.stroke();
       }
 
-      // 4. Arterial Road Network & Ring Road
+      // 4. Arterial Road Network, Outer Ring & JORR Perimeter
       ctx.strokeStyle = '#1e293b';
-      ctx.lineWidth = Math.max(6, 7.5 * zoom);
+      ctx.lineWidth = Math.max(5, 7.5 * zoom);
       ctx.strokeRect(
         originX - 32 * scale,
         originY - 32 * scale,
@@ -300,10 +307,34 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
         64 * scale
       );
       ctx.beginPath();
-      ctx.moveTo(originX, originY - 90 * scale);
-      ctx.lineTo(originX, originY + 90 * scale);
-      ctx.moveTo(originX - 90 * scale, originY);
-      ctx.lineTo(originX + 90 * scale, originY);
+      ctx.moveTo(originX, originY - 72 * scale);
+      ctx.lineTo(originX, originY + 216 * scale);
+      ctx.moveTo(originX - 216 * scale, originY);
+      ctx.lineTo(originX + 216 * scale, originY);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(51, 65, 85, 0.78)';
+      ctx.lineWidth = Math.max(3.5, 5.5 * zoom);
+      ctx.beginPath();
+      // Outer Ring x = +-128 over z [-68..214] & z = 128 across [-214..214]
+      ctx.moveTo(originX - 128 * scale, originY - 68 * scale);
+      ctx.lineTo(originX - 128 * scale, originY + 214 * scale);
+      ctx.moveTo(originX + 128 * scale, originY - 68 * scale);
+      ctx.lineTo(originX + 128 * scale, originY + 214 * scale);
+      ctx.moveTo(originX - 214 * scale, originY + 128 * scale);
+      ctx.lineTo(originX + 214 * scale, originY + 128 * scale);
+      // JORR Perimeter x = +-208 over z [-71..215] & z = 208 across [-215..215]
+      ctx.moveTo(originX - 208 * scale, originY - 71 * scale);
+      ctx.lineTo(originX - 208 * scale, originY + 215 * scale);
+      ctx.moveTo(originX + 208 * scale, originY - 71 * scale);
+      ctx.lineTo(originX + 208 * scale, originY + 215 * scale);
+      ctx.moveTo(originX - 215 * scale, originY + 208 * scale);
+      ctx.lineTo(originX + 215 * scale, originY + 208 * scale);
+      // Northern coastal wings z = -66 across [-214..-122] and [122..214]
+      ctx.moveTo(originX - 214 * scale, originY - 66 * scale);
+      ctx.lineTo(originX - 122 * scale, originY - 66 * scale);
+      ctx.moveTo(originX + 122 * scale, originY - 66 * scale);
+      ctx.lineTo(originX + 214 * scale, originY - 66 * scale);
       ctx.stroke();
 
       // Elevated Toll Road (Tol Layang)
@@ -530,8 +561,8 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
     const dy = e.clientY - dragStartRef.current.y;
     dragStartRef.current.moved += Math.abs(dx) + Math.abs(dy);
     setPan({
-      x: Math.max(-240, Math.min(240, dragStartRef.current.panX + dx)),
-      y: Math.max(-180, Math.min(180, dragStartRef.current.panY + dy)),
+      x: Math.max(-460, Math.min(460, dragStartRef.current.panX + dx)),
+      y: Math.max(-420, Math.min(420, dragStartRef.current.panY + dy)),
     });
   };
 
@@ -623,7 +654,7 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setZoom((z) => Math.max(0.9, +(z - 0.25).toFixed(2)))}
+              onClick={() => setZoom((z) => Math.max(0.4, +(z - 0.25).toFixed(2)))}
               className="px-2.5 py-1 rounded bg-white/8 hover:bg-white/15 text-xs font-mono-num text-[#f4f1ea] cursor-pointer"
               title="Perkecil Peta"
             >
@@ -643,7 +674,7 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
             <button
               type="button"
               onClick={() => {
-                setZoom(1.35);
+                setZoom(0.75);
                 setPan({ x: 0, y: 0 });
               }}
               className="px-2.5 py-1 rounded bg-white/8 hover:bg-white/15 text-xs text-[#cbd5e1] cursor-pointer"

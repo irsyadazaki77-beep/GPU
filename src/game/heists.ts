@@ -115,6 +115,38 @@ export const JAKARTA_DISTRICTS: DistrictZone[] = [
     centerZ: 74,
     radius: 24,
   },
+  {
+    id: 'pondok_indah',
+    name: 'Pondok Indah & TB Simatupang',
+    subtitle: 'Kawasan Elit Selatan & Menara Korporat JORR',
+    centerX: -145,
+    centerZ: 160,
+    radius: 52,
+  },
+  {
+    id: 'kemang_selatan',
+    name: 'Kemang Village & Koridor Selatan',
+    subtitle: 'Distrik Kafe Malam & Boulevard Lingkar Luar',
+    centerX: 48,
+    centerZ: 172,
+    radius: 50,
+  },
+  {
+    id: 'kelapa_gading',
+    name: 'Kelapa Gading & Marunda Timur',
+    subtitle: 'Sentra Boulevard Timur & Depot Logistik JORR',
+    centerX: 172,
+    centerZ: 48,
+    radius: 52,
+  },
+  {
+    id: 'pantai_pik_utara',
+    name: 'Pantai Pasir Putih & Kargo Barat',
+    subtitle: 'Klub Pantai Pesisir Barat & Hub Kargo Bandara',
+    centerX: -172,
+    centerZ: 12,
+    radius: 52,
+  },
 ];
 
 export const HEIST_CREW_ROSTER: HeistCrewMemberSpec[] = [

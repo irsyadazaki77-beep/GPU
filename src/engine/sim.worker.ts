@@ -65,22 +65,33 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
   self.onmessage = (
     evt: MessageEvent<{
       inBuffer?: ArrayBuffer;
+      outBuffer?: ArrayBuffer;
       playerX?: number;
       playerZ?: number;
       dt?: number;
     }>
   ) => {
-    const { inBuffer, playerX = 0, playerZ = 0, dt = 1 / 60 } = evt.data || {};
+    const {
+      inBuffer,
+      outBuffer,
+      playerX = 0,
+      playerZ = 0,
+      dt = 1 / 60,
+    } = evt.data || {};
     if (!inBuffer) return;
     const inFloats = new Float32Array(inBuffer);
-    const outFloats = new Float32Array(inFloats.length);
+    const targetOutBuffer =
+      outBuffer && outBuffer.byteLength === inBuffer.byteLength
+        ? outBuffer
+        : new ArrayBuffer(inBuffer.byteLength);
+    const outFloats = new Float32Array(targetOutBuffer);
     computeSimBatchInPlace(inFloats, outFloats, playerX, playerZ, dt);
     (self as unknown as DedicatedWorkerGlobalScope).postMessage(
       {
         inBuffer,
-        outBuffer: outFloats.buffer,
+        outBuffer: targetOutBuffer,
       },
-      [inBuffer, outFloats.buffer]
+      [inBuffer, targetOutBuffer]
     );
   };
 }

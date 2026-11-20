@@ -56,7 +56,7 @@ export const JAKARTA_EXPANSION_ZONES: ExpansionZoneSpec[] = [
     chunkKey: '-1,-1',
     centerX: -66,
     centerZ: -112,
-    bounds: { minX: -158, maxX: 158, minZ: -158, maxZ: -72 },
+    bounds: { minX: -238, maxX: 238, minZ: -238, maxZ: -72 },
     waterLevelY: -0.15,
   },
 ];
@@ -210,8 +210,8 @@ export function computeChunkDiff(
  * Determines whether a world coordinate is inside the Jakarta Bay & Kepulauan Seribu water zone.
  */
 export function isInJakartaBayWaterZone(x: number, z: number): boolean {
-  // Northern coastal water basin & Kepulauan Seribu channel
-  if (z <= -72 && Math.abs(x) <= 158) {
+  // Northern coastal water basin & Kepulauan Seribu channel across 480m bayfront
+  if (z <= -72 && Math.abs(x) <= 238) {
     return true;
   }
   // Ancol-PIK western coastal marina inlet

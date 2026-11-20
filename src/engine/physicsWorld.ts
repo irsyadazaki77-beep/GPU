@@ -206,6 +206,9 @@ export interface VehiclePhysicsRecord {
   pitchAngle: number;
   rollAngle: number;
   heaveOffset: number;
+  lastSyncedX: number;
+  lastSyncedY: number;
+  lastSyncedZ: number;
   bodyHandle?: number;
 }
 
@@ -444,6 +447,9 @@ export class JakartaPhysicsWorld {
       pitchAngle: 0,
       rollAngle: 0,
       heaveOffset: 0,
+      lastSyncedX: Number.NaN,
+      lastSyncedY: Number.NaN,
+      lastSyncedZ: Number.NaN,
     };
     this.vehicles.set(id, rec);
     if (this.rapierReady) {
@@ -496,15 +502,18 @@ export class JakartaPhysicsWorld {
     }
 
     for (const v of vehicleList) {
-      const rec = this.registerVehicle(
-        v.id,
-        v.type,
-        v.x,
-        v.y,
-        v.z,
-        v.heading,
-        v.type === 'transjakarta' || v.type === 'barracuda' ? 2.4 : 1.75
-      );
+      let rec = this.vehicles.get(v.id);
+      if (!rec) {
+        rec = this.registerVehicle(
+          v.id,
+          v.type,
+          v.x,
+          v.y,
+          v.z,
+          v.heading,
+          v.type === 'transjakarta' || v.type === 'barracuda' ? 2.4 : 1.75
+        );
+      }
       rec.x = v.x;
       rec.y = v.y;
       rec.z = v.z;
@@ -515,7 +524,7 @@ export class JakartaPhysicsWorld {
     let playerCollisionImpact = 0;
     let playerInFloodZone = false;
 
-    // Pairwise impulse-based vehicle collision solver (player vs traffic & traffic vs traffic)
+    // Pairwise impulse-based vehicle collision solver (squared-distance broadphase avoids Math.hypot allocation/sqrt)
     for (let i = 0; i < vehicleList.length; i++) {
       const a = vehicleList[i];
       const recA = this.vehicles.get(a.id)!;
@@ -527,9 +536,10 @@ export class JakartaPhysicsWorld {
         const minDist = (recA.radius + recB.radius) * 0.78;
         const dx = b.x - a.x;
         const dz = b.z - a.z;
-        const dist = Math.hypot(dx, dz);
+        const distSq = dx * dx + dz * dz;
 
-        if (dist > 0.001 && dist < minDist) {
+        if (distSq > 1e-6 && distSq < minDist * minDist) {
+          const dist = Math.sqrt(distSq);
           const nx = dx / dist;
           const nz = dz / dist;
           const overlap = minDist - dist;
@@ -615,59 +625,79 @@ export class JakartaPhysicsWorld {
       }
 
       const isPlayerVeh = v.id === drivingVehicleId;
-      const floodRes = evaluateFloodZoneHydroplaning(
-        v.x,
-        v.z,
-        weatherMode,
-        v.speed,
-        v.y
-      );
-      if (isPlayerVeh && floodRes.inFloodZone) {
-        playerInFloodZone = true;
-      }
+      const isStaticParked =
+        !isPlayerVeh &&
+        Math.abs(v.speed) < 0.05 &&
+        Math.abs(rec.prevSpeed) < 0.05 &&
+        Math.abs(rec.impulseVx) < 0.01 &&
+        Math.abs(rec.impulseVz) < 0.01;
 
-      const steer = isPlayerVeh
-        ? turnInput
-        : Math.max(-1, Math.min(1, (v.heading - rec.prevHeading) / Math.max(0.008, dt)));
-      const susp = computeDriftAndSuspensionStep(
-        rec.prevSpeed,
-        v.speed,
-        steer,
-        v.isDrifting || floodRes.inFloodZone,
-        v.pitchAngle,
-        v.rollAngle,
-        dt,
-        floodRes.lateralFrictionMultiplier
-      );
-
-      if (v.type === 'speedboat' || isInJakartaBayWaterZone(v.x, v.z)) {
-        const buoy = computeWaterBuoyancyStep(
+      if (!isStaticParked) {
+        const floodRes = evaluateFloodZoneHydroplaning(
           v.x,
-          v.y,
           v.z,
-          0,
+          weatherMode,
           v.speed,
-          dt,
-          nowMs
+          v.y
         );
-        if (buoy.inWater) {
-          v.y = buoy.nextY;
-          v.pitchAngle = susp.pitchAngle + buoy.wavePitch;
-          v.rollAngle = susp.rollAngle + buoy.waveRoll;
+        if (isPlayerVeh && floodRes.inFloodZone) {
+          playerInFloodZone = true;
+        }
+
+        const steer = isPlayerVeh
+          ? turnInput
+          : Math.max(-1, Math.min(1, (v.heading - rec.prevHeading) / Math.max(0.008, dt)));
+        const susp = computeDriftAndSuspensionStep(
+          rec.prevSpeed,
+          v.speed,
+          steer,
+          v.isDrifting || floodRes.inFloodZone,
+          v.pitchAngle,
+          v.rollAngle,
+          dt,
+          floodRes.lateralFrictionMultiplier
+        );
+
+        if (v.type === 'speedboat' || isInJakartaBayWaterZone(v.x, v.z)) {
+          const buoy = computeWaterBuoyancyStep(
+            v.x,
+            v.y,
+            v.z,
+            0,
+            v.speed,
+            dt,
+            nowMs
+          );
+          if (buoy.inWater) {
+            v.y = buoy.nextY;
+            v.pitchAngle = susp.pitchAngle + buoy.wavePitch;
+            v.rollAngle = susp.rollAngle + buoy.waveRoll;
+          } else {
+            v.pitchAngle = susp.pitchAngle;
+            v.rollAngle = susp.rollAngle;
+          }
         } else {
           v.pitchAngle = susp.pitchAngle;
           v.rollAngle = susp.rollAngle;
         }
-      } else {
-        v.pitchAngle = susp.pitchAngle;
-        v.rollAngle = susp.rollAngle;
       }
 
       rec.prevSpeed = v.speed;
       rec.prevHeading = v.heading;
 
       const rb = this.bodyMap.get(v.id);
-      if (rb && this.rapierReady) {
+      if (
+        rb &&
+        this.rapierReady &&
+        (Number.isNaN(rec.lastSyncedX) ||
+          Math.abs(v.x - rec.lastSyncedX) +
+            Math.abs(v.y - rec.lastSyncedY) +
+            Math.abs(v.z - rec.lastSyncedZ) >
+            0.002)
+      ) {
+        rec.lastSyncedX = v.x;
+        rec.lastSyncedY = v.y;
+        rec.lastSyncedZ = v.z;
         rb.setTranslation(
           { x: v.x, y: Math.max(0.5, v.y + 0.5), z: v.z },
           true

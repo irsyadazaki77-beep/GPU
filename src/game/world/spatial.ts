@@ -19,11 +19,20 @@ export function isNearBuilding(x: number, z: number, pad: number = 4): boolean {
 }
 
 export function isOnRoadway(x: number, z: number): boolean {
-  if (Math.abs(x) < 9.5 || Math.abs(z) < 9.5) return true;
-  if (Math.abs(Math.abs(x) - 32) < 6.5 && Math.abs(z) < 136) return true;
-  if (Math.abs(Math.abs(z) - 32) < 6.5 && Math.abs(x) < 136) return true;
-  if (Math.abs(Math.abs(x) - 128) < 6.5 && Math.abs(z) < 136) return true;
-  if (Math.abs(Math.abs(z) - 128) < 6.5 && Math.abs(x) < 136) return true;
+  if (Math.abs(x) < 9.5 && z >= -76 && z <= 216) return true;
+  if (Math.abs(z) < 9.5 && Math.abs(x) <= 216) return true;
+  if (Math.abs(Math.abs(x) - 32) < 6.5 && z >= -76 && z <= 216) return true;
+  if (Math.abs(Math.abs(z) - 32) < 6.5 && Math.abs(x) <= 216) return true;
+  if (Math.abs(Math.abs(x) - 128) < 7.0 && z >= -72 && z <= 216) return true;
+  if (Math.abs(z - 128) < 7.0 && Math.abs(x) <= 216) return true;
+  if (Math.abs(Math.abs(x) - 208) < 7.0 && z >= -70 && z <= 216) return true;
+  if (Math.abs(z - 208) < 7.0 && Math.abs(x) <= 216) return true;
+  if (
+    Math.abs(z - -66) < 6.2 &&
+    ((x >= -216 && x <= -122) || (x >= 122 && x <= 216))
+  ) {
+    return true;
+  }
   if (z >= -32 && z <= -20 && Math.abs(x) <= 72) return true;
   return false;
 }

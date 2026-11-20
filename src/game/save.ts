@@ -63,7 +63,7 @@ const VALID_ORIGINS: OriginArchetype[] = [
 
 const VALID_WEATHERS: WeatherMode[] = ['senja', 'malam', 'siang', 'hujan'];
 
-function clampCoord(n: unknown, fallback: number, maxBound: number = 156): number {
+function clampCoord(n: unknown, fallback: number, maxBound: number = 236): number {
   if (typeof n !== 'number' || !Number.isFinite(n)) return fallback;
   return Math.max(-maxBound, Math.min(maxBound, n));
 }
@@ -212,7 +212,7 @@ export function migrateSavedGame(raw: unknown): SavedGameSnapshot | null {
       : fallbackState.collectedPackages || [],
   };
 
-  const maxCoordBound = parsed.version && parsed.version < 3 ? 88 : 156;
+  const maxCoordBound = parsed.version && parsed.version < 3 ? 88 : 236;
   const playerPos = {
     x: clampCoord(parsed.playerPos?.x, 0, maxCoordBound),
     z: clampCoord(parsed.playerPos?.z, 26, maxCoordBound),

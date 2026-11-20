@@ -565,7 +565,9 @@ export type TrafficRouteId =
   | 'merdeka_east_arterial'
   | 'grand_boulevard_circuit'
   | 'tol_layang_express'
-  | 'outer_ring_express';
+  | 'outer_ring_express'
+  | 'jorr_perimeter_loop'
+  | 'south_jakarta_boulevard';
 
 export interface TrafficWaypoint {
   x: number;

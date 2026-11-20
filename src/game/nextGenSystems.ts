@@ -1,4 +1,5 @@
 import type {
+  ActiveStreetContractState,
   FactionId,
   NabiloGramPost,
   NabiloGramTriggerKind,
@@ -443,22 +444,132 @@ export const STREET_RANDOM_EVENTS_CATALOG: StreetEventTemplate[] = [
     cloutXp: 55,
     faction: 'jalanan',
   },
+  {
+    kind: 'vip_convoy',
+    title: 'Konvoi Bisnis Pondok Indah',
+    subtitle: 'Kawal atau rampas koper transaksi sindikat di bulevar Pondok Indah.',
+    districtId: 'pondok_indah',
+    districtName: 'Pondok Indah Golf & Mall',
+    x: -168,
+    z: 176,
+    rewardRp: 260000,
+    cloutXp: 80,
+    faction: 'sindikat',
+  },
+  {
+    kind: 'street_race_challenge',
+    title: 'Adu Kecepatan Kemang Selatan',
+    subtitle: 'Pembalap malam Jaksel menantang sprint liar di koridor Kemang.',
+    districtId: 'kemang_selatan',
+    districtName: 'Kemang Selatan Creative Hub',
+    x: 34,
+    z: 174,
+    rewardRp: 195000,
+    cloutXp: 70,
+    faction: 'jalanan',
+  },
+  {
+    kind: 'stolen_motor',
+    title: 'Begalan Kurir Kelapa Gading',
+    subtitle: 'Cegat penadah motor curian di depan Boulevard Kelapa Gading.',
+    districtId: 'kelapa_gading',
+    districtName: 'Kelapa Gading Boulevard',
+    x: 176,
+    z: 36,
+    rewardRp: 185000,
+    cloutXp: 65,
+    faction: 'jalanan',
+  },
+  {
+    kind: 'gang_brawl',
+    title: 'Pengamanan Pantai PIK 2',
+    subtitle: 'Bubarkan preman pengganggu pengunjung bulevar pesisir PIK Utara.',
+    districtId: 'pantai_pik_utara',
+    districtName: 'PIK 2 Pesisir Utara',
+    x: -174,
+    z: -56,
+    rewardRp: 210000,
+    cloutXp: 75,
+    faction: 'rakyat',
+  },
 ];
 
 export function spawnNextStreetRandomEvent(
   eventCounter: number,
-  excludeKind?: StreetRandomEventKind
+  excludeKind?: StreetRandomEventKind,
+  playerX?: number,
+  playerZ?: number
 ): StreetRandomEvent {
   const pool = excludeKind
     ? STREET_RANDOM_EVENTS_CATALOG.filter((e) => e.kind !== excludeKind)
     : STREET_RANDOM_EVENTS_CATALOG;
-  const tpl = pool[Math.abs(eventCounter) % pool.length] || STREET_RANDOM_EVENTS_CATALOG[0];
+  let candidatePool = pool;
+  if (playerX !== undefined && playerZ !== undefined) {
+    const nearby = pool.filter(
+      (e) => Math.hypot(e.x - playerX, e.z - playerZ) <= 165
+    );
+    if (nearby.length > 0) {
+      candidatePool = nearby;
+    }
+  }
+  const tpl =
+    candidatePool[Math.abs(eventCounter) % candidatePool.length] ||
+    STREET_RANDOM_EVENTS_CATALOG[0];
   return {
     id: `sev_${tpl.kind}_${eventCounter}`,
     ...tpl,
     remainingSec: 85,
     totalDurationSec: 85,
     status: 'active',
+  };
+}
+
+const PASSENGER_FARES_DESTINATIONS: {
+  label: string;
+  districtId: string;
+  x: number;
+  z: number;
+}[] = [
+  { label: 'Pondok Indah Mall', districtId: 'pondok_indah', x: -166, z: 168 },
+  { label: 'Kemang Village Hub', districtId: 'kemang_selatan', x: 30, z: 170 },
+  { label: 'Boulevard Kelapa Gading', districtId: 'kelapa_gading', x: 168, z: 38 },
+  { label: 'PIK 2 Beachfront', districtId: 'pantai_pik_utara', x: -168, z: -60 },
+  { label: 'Bundaran HI', districtId: 'sudirman', x: -12, z: -48 },
+  { label: 'SCBD Equity Tower', districtId: 'scbd', x: -42, z: -34 },
+  { label: 'Terminal Blok M', districtId: 'blok_m', x: -14, z: 44 },
+  { label: 'Stasiun Kota Tua', districtId: 'kota_tua', x: 42, z: 18 },
+];
+
+export function createQuickPassengerFare(
+  playerX: number,
+  playerZ: number,
+  vehicleLabel: string
+): ActiveStreetContractState {
+  const qualified = PASSENGER_FARES_DESTINATIONS.filter(
+    (d) => Math.hypot(d.x - playerX, d.z - playerZ) >= 65
+  );
+  const candidates = qualified.length > 0 ? qualified : PASSENGER_FARES_DESTINATIONS;
+  const pickIdx =
+    Math.floor(Math.abs(playerX * 7 + playerZ * 13)) % candidates.length;
+  const dest = candidates[pickIdx] || PASSENGER_FARES_DESTINATIONS[0];
+  const dist = Math.hypot(dest.x - playerX, dest.z - playerZ);
+  const rewardRp = Math.max(
+    110000,
+    Math.min(260000, Math.round((85000 + dist * 650) / 5000) * 5000)
+  );
+  const totalTimeSec = Math.max(65, Math.min(110, Math.round(45 + dist * 0.28)));
+
+  return {
+    id: `contract_fare_${Date.now()}`,
+    kind: 'ojol_delivery',
+    title: `Tarikan Cepat (${vehicleLabel})`,
+    subtitle: `Antar penumpang ke ${dest.label}`,
+    targetX: dest.x,
+    targetZ: dest.z,
+    districtId: dest.districtId,
+    rewardRp,
+    timeRemainingSec: totalTimeSec,
+    totalTimeSec,
   };
 }
 
