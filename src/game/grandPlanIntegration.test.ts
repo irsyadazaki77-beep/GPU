@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  JAKARTA_DISTRICTS,
   COMBAT_COMBO_WINDOW_MS,
   NEAR_MISS_COOLDOWN_MS,
   NUSANTARA_ALL_PACKAGES_BONUS_RP,
@@ -310,4 +311,34 @@ test('Wave 5 open-world districts, living pedestrian AI interactions/recycling, 
   assert.ok(Number.isFinite(out[0]));
   assert.ok(out[0] < 999);
   sim.dispose();
+});
+
+test('Wave 6 transmission RPM shifting, tire skidmark wheel geometry, and scrubbed district copy', async () => {
+  const { computeEngineTransmissionRpm } = await import('./sound');
+  const { computeRearWheelPositions } = await import('../engine/TireSkidmarkPool');
+
+  // 1. 5-gear transmission climbs in gear 1 and drops pitch cleanly on shift into gear 2
+  const gear1Redline = computeEngineTransmissionRpm(0.20, 'sedan', false, false);
+  const gear2Start = computeEngineTransmissionRpm(0.24, 'sedan', false, false);
+  assert.equal(gear1Redline.gear, 1);
+  assert.equal(gear2Start.gear, 2);
+  assert.ok(
+    gear2Start.baseFreq < gear1Redline.baseFreq,
+    `Expected upshift RPM drop: gear2=${gear2Start.baseFreq} vs gear1=${gear1Redline.baseFreq}`
+  );
+
+  // 2. Symmetric rear wheel positions behind vehicle center along heading
+  const wheels = computeRearWheelPositions(10, 20, 0, 0.72, 1.15);
+  assert.ok(Math.abs(wheels.lz - (20 - 1.15)) < 1e-6);
+  assert.ok(Math.abs(wheels.rz - (20 - 1.15)) < 1e-6);
+  assert.ok(Math.abs(wheels.rx - wheels.lx - 1.44) < 1e-6);
+
+  // 3. District subtitles are clean immersive copy without dev-phase tags
+  for (const dist of JAKARTA_DISTRICTS) {
+    assert.equal(
+      /\b(Tahap|Fase)\s*[0-9]/i.test(dist.subtitle),
+      false,
+      `Found dev milestone tag in ${dist.id}: ${dist.subtitle}`
+    );
+  }
 });

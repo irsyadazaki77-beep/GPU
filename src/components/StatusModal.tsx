@@ -623,7 +623,7 @@ export const StatusModal: React.FC<StatusModalProps> = ({
                 <div className="pt-2 border-t border-white/10 flex flex-col gap-3">
                   <div>
                     <div className="flex items-center justify-between text-xs mb-2">
-                      <span className="text-[#94a3b8]">Kualitas Grafis AAA</span>
+                      <span className="text-[#94a3b8]">Kualitas Grafis</span>
                       <span className="font-mono-num text-[#38bdf8] uppercase">
                         Aktif: {resolvedGraphicsTier}
                       </span>

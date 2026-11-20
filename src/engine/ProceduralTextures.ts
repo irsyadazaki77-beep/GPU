@@ -43,6 +43,7 @@ class ProceduralTextureFactory {
   private marbleCache: MarbleTextureSet | null = null;
   private radialPoolCache: THREE.CanvasTexture | null = null;
   private flagTextureCache: THREE.CanvasTexture | null = null;
+  private contactShadowCache: THREE.CanvasTexture | null = null;
 
   public getAsphaltTextures(
     maxAnisotropy: number,
@@ -695,6 +696,29 @@ class ProceduralTextureFactory {
     return tex;
   }
 
+  public getContactShadowTexture(): THREE.CanvasTexture {
+    if (this.contactShadowCache) return this.contactShadowCache;
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    const grad = ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
+    grad.addColorStop(0.0, 'rgba(3, 5, 9, 0.72)');
+    grad.addColorStop(0.48, 'rgba(3, 5, 9, 0.44)');
+    grad.addColorStop(0.82, 'rgba(3, 5, 9, 0.12)');
+    grad.addColorStop(1.0, 'rgba(3, 5, 9, 0.0)');
+
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this.contactShadowCache = tex;
+    return tex;
+  }
+
   public getWarungBannerTexture(
     title: string = 'WARUNG KOPI & SOTO BETAWI',
     subtitle: string = 'KOPI TUBRUK · GORENGAN · BUKA 24 JAM'
@@ -781,6 +805,11 @@ class ProceduralTextureFactory {
     if (this.flagTextureCache) {
       this.flagTextureCache.dispose();
       this.flagTextureCache = null;
+    }
+
+    if (this.contactShadowCache) {
+      this.contactShadowCache.dispose();
+      this.contactShadowCache = null;
     }
   }
 }

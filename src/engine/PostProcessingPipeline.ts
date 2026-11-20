@@ -19,6 +19,7 @@ const CinematicGradeShader = {
     uFokusMix: { value: 0 },
     uSpeedRatio: { value: 0 },
     uPhotoFilter: { value: 0 },
+    uTime: { value: 0 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -35,6 +36,7 @@ const CinematicGradeShader = {
     uniform float uFokusMix;
     uniform float uSpeedRatio;
     uniform float uPhotoFilter;
+    uniform float uTime;
     varying vec2 vUv;
 
     void main() {
@@ -93,6 +95,11 @@ const CinematicGradeShader = {
       float dmgMask = smoothstep(0.32, 0.85, dist) * uDamagePulse;
       col = mix(col, vec3(0.86, 0.12, 0.14), clamp(dmgMask * 0.55, 0.0, 0.65));
 
+      // Gentle filmic S-curve + ultra-subtle analog micro-grain to cure flat 8-bit sky/asphalt banding
+      col = mix(col, col * col * (3.0 - 2.0 * col), 0.14);
+      float grain = (fract(sin(dot(vUv * vec2(1280.0, 720.0) + uTime * 37.0, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 0.014;
+      col += grain * (1.0 - lumaBase * 0.45);
+
       gl_FragColor = vec4(col, 1.0);
     }
   `,
@@ -129,6 +136,7 @@ export class PostProcessingPipeline {
 
   private readonly frameWindow: number[] = [];
   private governorCooldown = 0;
+  private elapsedTime = 0;
 
   constructor(
     renderer: THREE.WebGLRenderer,
@@ -316,6 +324,7 @@ export class PostProcessingPipeline {
     this.bloomPass.radius = tone.bloomRadius;
     this.bloomPass.threshold = tone.bloomThreshold;
 
+    this.elapsedTime += params.dt;
     const u = this.gradePass.material.uniforms;
     u.uChromatic.value =
       Math.max(0, params.speedRatio - 0.65) * 0.0012 + params.damagePulse * 0.0018;
@@ -324,6 +333,7 @@ export class PostProcessingPipeline {
     u.uFokusMix.value = params.fokusActive ? 1.0 : 0.0;
     u.uSpeedRatio.value = params.speedRatio;
     u.uPhotoFilter.value = filterCode;
+    u.uTime.value = this.elapsedTime;
 
     this.composer.render();
   }

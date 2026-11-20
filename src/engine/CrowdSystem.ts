@@ -6,6 +6,7 @@ import {
   TrafficSignalPhase,
 } from '../game/rules';
 import type { SidewalkRect } from '../game/world/textures';
+import { proceduralTextures } from './ProceduralTextures';
 import {
   PedestrianAiAgent,
   PedestrianArchetype,
@@ -52,11 +53,14 @@ function resolveArchetypeShirtColor(
   return BATIK_SHIRT_COLORS[index % BATIK_SHIRT_COLORS.length];
 }
 
-function resolveHatColor(arch: PedestrianArchetype): number | null {
+const SKIN_TONES = [0xd99b66, 0xc68652, 0xe3ae7e, 0xad6f42];
+const TROUSER_COLORS = [0x1e293b, 0x1d3557, 0x3f3f46, 0x574c3f];
+
+function resolveHatColor(arch: PedestrianArchetype, index: number): number {
   if (arch === 'ojol_driver') return 0x15803d;
   if (arch === 'satpam') return 0x172554;
   if (arch === 'pedagang') return 0xd97706;
-  return null;
+  return index % 3 === 0 ? 0x27201c : 0x18181b;
 }
 
 export class CrowdSystem {
@@ -73,6 +77,7 @@ export class CrowdSystem {
   private readonly rightLegMesh: THREE.InstancedMesh;
   private readonly umbrellaMesh: THREE.InstancedMesh;
   private readonly phoneMesh: THREE.InstancedMesh;
+  private readonly shadowMesh: THREE.InstancedMesh;
 
   private readonly _dummy = new THREE.Object3D();
   private readonly _color = new THREE.Color();
@@ -152,7 +157,7 @@ export class CrowdSystem {
 
     const headGeo = new THREE.SphereGeometry(0.16, 8, 8);
     const headMat = new THREE.MeshStandardMaterial({
-      color: 0xd99b66,
+      color: 0xffffff,
       roughness: 0.65,
     });
     this.headMesh = new THREE.InstancedMesh(headGeo, headMat, MAX_PEDESTRIANS);
@@ -190,7 +195,7 @@ export class CrowdSystem {
     const legGeo = new THREE.BoxGeometry(0.15, 0.52, 0.16);
     legGeo.translate(0, -0.26, 0);
     const legMat = new THREE.MeshStandardMaterial({
-      color: 0x1e293b,
+      color: 0xffffff,
       roughness: 0.85,
     });
     this.leftLegMesh = new THREE.InstancedMesh(legGeo, legMat, MAX_PEDESTRIANS);
@@ -202,6 +207,26 @@ export class CrowdSystem {
     this.leftLegMesh.frustumCulled = false;
     this.rightLegMesh.frustumCulled = false;
     this.group.add(this.leftLegMesh, this.rightLegMesh);
+
+    const shadowGeo = new THREE.PlaneGeometry(0.95, 0.95);
+    shadowGeo.rotateX(-Math.PI / 2);
+    const shadowMat = new THREE.MeshBasicMaterial({
+      map: proceduralTextures.getContactShadowTexture(),
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    this.shadowMesh = new THREE.InstancedMesh(
+      shadowGeo,
+      shadowMat,
+      MAX_PEDESTRIANS
+    );
+    this.shadowMesh.frustumCulled = false;
+    this.group.add(this.shadowMesh);
 
     const umbrellaGeo = new THREE.ConeGeometry(0.62, 0.22, 8);
     const umbrellaMat = new THREE.MeshStandardMaterial({
@@ -227,18 +252,42 @@ export class CrowdSystem {
     this.group.add(this.phoneMesh);
 
     for (let i = 0; i < MAX_PEDESTRIANS; i++) {
+      const arch = this.agents[i].archetype ?? 'komuter';
       this._color.setHex(this.agents[i].torsoColor);
       this.torsoMesh.setColorAt(i, this._color);
       this.armMesh.setColorAt(i * 2, this._color);
       this.armMesh.setColorAt(i * 2 + 1, this._color);
-      this._color.setHex(
-        i % 3 === 0 ? 0xf59e0b : i % 3 === 1 ? 0x38bdf8 : 0xef4444
+      this.headMesh.setColorAt(
+        i,
+        this._color.setHex(SKIN_TONES[i % SKIN_TONES.length])
       );
-      this.umbrellaMesh.setColorAt(i, this._color);
-      this.hatHelmetMesh.setColorAt(i, this._color.setHex(0x15803d));
+      const trouserColor = this._color.setHex(
+        TROUSER_COLORS[i % TROUSER_COLORS.length]
+      );
+      this.leftLegMesh.setColorAt(i, trouserColor);
+      this.rightLegMesh.setColorAt(i, trouserColor);
+      this.umbrellaMesh.setColorAt(
+        i,
+        this._color.setHex(
+          i % 3 === 0 ? 0xf59e0b : i % 3 === 1 ? 0x38bdf8 : 0xef4444
+        )
+      );
+      this.hatHelmetMesh.setColorAt(
+        i,
+        this._color.setHex(resolveHatColor(arch, i))
+      );
     }
     if (this.torsoMesh.instanceColor) {
       this.torsoMesh.instanceColor.needsUpdate = true;
+    }
+    if (this.headMesh.instanceColor) {
+      this.headMesh.instanceColor.needsUpdate = true;
+    }
+    if (this.leftLegMesh.instanceColor) {
+      this.leftLegMesh.instanceColor.needsUpdate = true;
+    }
+    if (this.rightLegMesh.instanceColor) {
+      this.rightLegMesh.instanceColor.needsUpdate = true;
     }
     if (this.armMesh.instanceColor) {
       this.armMesh.instanceColor.needsUpdate = true;
@@ -457,6 +506,13 @@ export class CrowdSystem {
       const cosF = Math.cos(facing);
       const sinF = Math.sin(facing);
 
+      // Contact Shadow Disc
+      dummy.position.set(ag.x, 0.042, ag.z);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      this.shadowMesh.setMatrixAt(slot, dummy.matrix);
+
       // Torso
       dummy.position.set(ag.x, baseY + 0.88, ag.z);
       dummy.rotation.set(0, facing, 0);
@@ -466,22 +522,24 @@ export class CrowdSystem {
       this._color.setHex(ag.torsoColor);
       this.torsoMesh.setColorAt(slot, this._color);
 
-      // Head
+      // Head + varied natural skin tone
       dummy.position.set(ag.x, baseY + 1.38, ag.z);
       dummy.rotation.set(0, facing, 0);
       dummy.updateMatrix();
       this.headMesh.setMatrixAt(slot, dummy.matrix);
+      this.headMesh.setColorAt(
+        slot,
+        this._color.setHex(SKIN_TONES[i % SKIN_TONES.length])
+      );
 
-      // Hat / Helmet
-      const hatHex = ag.archetype ? resolveHatColor(ag.archetype) : null;
-      if (hatHex !== null) {
-        dummy.position.set(ag.x, baseY + 1.44, ag.z);
-        dummy.rotation.set(0, facing, 0);
-        dummy.updateMatrix();
-        this.hatHelmetMesh.setMatrixAt(hatCount, dummy.matrix);
-        this.hatHelmetMesh.setColorAt(hatCount, this._color.setHex(hatHex));
-        hatCount++;
-      }
+      // Hair cap / Hat / Helmet
+      const hatHex = resolveHatColor(ag.archetype ?? 'komuter', i);
+      dummy.position.set(ag.x, baseY + 1.425, ag.z);
+      dummy.rotation.set(0, facing, 0);
+      dummy.updateMatrix();
+      this.hatHelmetMesh.setMatrixAt(hatCount, dummy.matrix);
+      this.hatHelmetMesh.setColorAt(hatCount, this._color.setHex(hatHex));
+      hatCount++;
 
       // Arms (1 draw call for both left + right articulated arms)
       let leftArmRotX = moving ? swing : 0;
@@ -518,16 +576,19 @@ export class CrowdSystem {
       this.armMesh.setColorAt(armCount, this._color);
       armCount++;
 
-      // Legs
+      // Legs + trousers tint
+      const trouserHex = TROUSER_COLORS[i % TROUSER_COLORS.length];
       dummy.position.set(ag.x - cosF * 0.11, baseY + 0.58, ag.z + sinF * 0.11);
       dummy.rotation.set(swing, facing, 0);
       dummy.updateMatrix();
       this.leftLegMesh.setMatrixAt(slot, dummy.matrix);
+      this.leftLegMesh.setColorAt(slot, this._color.setHex(trouserHex));
 
       dummy.position.set(ag.x + cosF * 0.11, baseY + 0.58, ag.z - sinF * 0.11);
       dummy.rotation.set(-swing, facing, 0);
       dummy.updateMatrix();
       this.rightLegMesh.setMatrixAt(slot, dummy.matrix);
+      this.rightLegMesh.setColorAt(slot, this._color);
 
       if (showUmbrellas) {
         dummy.position.set(ag.x, baseY + 1.82, ag.z);
@@ -559,6 +620,8 @@ export class CrowdSystem {
       }
     }
 
+    this.shadowMesh.count = renderedCount;
+    this.shadowMesh.visible = renderedCount > 0;
     this.torsoMesh.count = renderedCount;
     this.headMesh.count = renderedCount;
     this.leftLegMesh.count = renderedCount;
@@ -572,13 +635,23 @@ export class CrowdSystem {
     this.phoneMesh.visible = filmingPhoneCount > 0;
 
     if (renderedCount > 0) {
+      this.shadowMesh.instanceMatrix.needsUpdate = true;
       this.torsoMesh.instanceMatrix.needsUpdate = true;
       if (this.torsoMesh.instanceColor) {
         this.torsoMesh.instanceColor.needsUpdate = true;
       }
       this.headMesh.instanceMatrix.needsUpdate = true;
+      if (this.headMesh.instanceColor) {
+        this.headMesh.instanceColor.needsUpdate = true;
+      }
       this.leftLegMesh.instanceMatrix.needsUpdate = true;
+      if (this.leftLegMesh.instanceColor) {
+        this.leftLegMesh.instanceColor.needsUpdate = true;
+      }
       this.rightLegMesh.instanceMatrix.needsUpdate = true;
+      if (this.rightLegMesh.instanceColor) {
+        this.rightLegMesh.instanceColor.needsUpdate = true;
+      }
       this.armMesh.instanceMatrix.needsUpdate = true;
       if (this.armMesh.instanceColor) {
         this.armMesh.instanceColor.needsUpdate = true;
@@ -602,6 +675,8 @@ export class CrowdSystem {
   }
 
   public dispose(): void {
+    this.shadowMesh.geometry.dispose();
+    (this.shadowMesh.material as THREE.Material).dispose();
     this.torsoMesh.geometry.dispose();
     (this.torsoMesh.material as THREE.Material).dispose();
     this.headMesh.geometry.dispose();

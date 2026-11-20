@@ -1712,10 +1712,10 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                 </div>
               </div>
 
-              {/* 4. Balap Liar Rival AI & 6 Stunt Ramp Jakarta */}
+              {/* 4. Balap Liar Malam & 6 Stunt Ramp Jakarta */}
               <div className="pt-2 border-t border-white/10 flex flex-col gap-2">
                 <div className="text-[11px] font-bold uppercase font-mono-num text-[#22d3ee]">
-                  Balap Liar Rival AI Jakarta
+                  Balap Liar Malam Jakarta
                 </div>
                 <div className="flex flex-col gap-1.5">
                   {STREET_RACES.map((race) => (
@@ -1728,7 +1728,7 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                           {race.name}
                         </div>
                         <div className="text-[10px] font-mono-num text-[#22c55e]">
-                          3 Rival AI · Hadiah {formatRupiah(race.rewardRp)}
+                          3 Pembalap · Hadiah {formatRupiah(race.rewardRp)}
                         </div>
                       </div>
                       <button

@@ -35,7 +35,6 @@ import {
 function buildExpansionZonesGroup(uTimeUniform: { value: number }): {
   group: THREE.Group;
   bayWaterMat: THREE.MeshStandardMaterial;
-  floodDiscsGroup: THREE.Group;
 } {
   const group = new THREE.Group();
   group.name = 'JakartaExpansionZonesGroup';
@@ -137,27 +136,7 @@ transformed.y += sanWaveY;`
     group.add(archBeam);
   }
 
-  // 4. Low-Lying Flood Zone Puddle Discs (visible during Heavy Rain 'hujan')
-  const floodDiscsGroup = new THREE.Group();
-  const floodMat = new THREE.MeshStandardMaterial({
-    color: 0x0284c7,
-    roughness: 0.12,
-    metalness: 0.78,
-    transparent: true,
-    opacity: 0.55,
-    depthWrite: false,
-  });
-  for (const fz of JAKARTA_FLOOD_ZONES) {
-    const discGeo = new THREE.CircleGeometry(fz.radius, 24);
-    discGeo.rotateX(-Math.PI / 2);
-    const disc = new THREE.Mesh(discGeo, floodMat);
-    disc.position.set(fz.x, 0.055, fz.z);
-    floodDiscsGroup.add(disc);
-  }
-  floodDiscsGroup.visible = false;
-  group.add(floodDiscsGroup);
-
-  return { group, bayWaterMat, floodDiscsGroup };
+  return { group, bayWaterMat };
 }
 
 function bayMatOrFallback(mat: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
@@ -206,7 +185,6 @@ export class CityRenderer {
   private readonly roadMat: THREE.MeshStandardMaterial;
   private readonly spireBeaconMat: THREE.MeshBasicMaterial;
   private readonly bayWaterMat: THREE.MeshStandardMaterial;
-  private readonly floodDiscsGroup: THREE.Group;
   private readonly collectibleMeshes = new Map<string, THREE.Group>();
   private lastCollectedCount = -1;
   private lastCollectedFirstId: string | undefined;
@@ -240,7 +218,6 @@ export class CityRenderer {
 
     const expZones = buildExpansionZonesGroup(this.roadUniforms.uTime);
     this.bayWaterMat = expZones.bayWaterMat;
-    this.floodDiscsGroup = expZones.floodDiscsGroup;
     this.rootGroup.add(expZones.group);
 
     // 10 Glowing Koper Emas Nusantara Collectibles
@@ -609,7 +586,7 @@ if (uWetness > 0.04) {
     );
     this.rootGroup.add(this.roadsideSystem.group);
 
-    this.rootGroup.add(this.buildOuterMegapolitanBlocks());
+    this.rootGroup.add(this.buildOuterMegapolitanBlocks(maxAnisotropy));
 
     scene.add(this.rootGroup);
   }
@@ -651,40 +628,40 @@ if (uWetness > 0.04) {
         y: 8.4,
         z: -38,
         rotY: Math.PI * 0.25,
-        title: 'NABILOGRAM LIVE',
-        subtitle: 'TRENDING SUDIRMAN MALAM INI',
-        bg: '#140c24',
-        accent: '#ff5e7e',
+        title: 'BURSA NUSANTARA',
+        subtitle: 'KORIDOR FINANSIAL SUDIRMAN',
+        bg: '#0b1220',
+        accent: '#e2a93b',
       },
       {
         x: 9.8,
         y: 8.6,
         z: -48,
         rotY: -Math.PI * 0.25,
-        title: 'GARUDA GT-X',
-        subtitle: 'GARASI MODIFIKASI BLOK M',
-        bg: '#081b26',
-        accent: '#22d3ee',
+        title: 'BENGKEL GARUDA',
+        subtitle: 'TUNING & RESTORASI BLOK M',
+        bg: '#101826',
+        accent: '#38bdf8',
       },
       {
         x: -10.5,
         y: 7.8,
         z: 42,
         rotY: Math.PI * 0.75,
-        title: 'KOPI SENJA 24J',
-        subtitle: 'WARUNG MELAWAI · WIFI & MIE',
-        bg: '#1c1208',
-        accent: '#f59e0b',
+        title: 'KOPI MELAWAI 24J',
+        subtitle: 'ROASTERY · SOTO · WARUNG MALAM',
+        bg: '#18120c',
+        accent: '#d97706',
       },
       {
         x: -40,
         y: 9.2,
         z: -32,
         rotY: Math.PI * 0.2,
-        title: 'KLUB NEON SCBD',
-        subtitle: 'VIP LOUNGE · LIVE DJ SET',
-        bg: '#1b0a22',
-        accent: '#f472b6',
+        title: 'PASEBAN LOUNGE',
+        subtitle: 'DISTRIK SCBD · LIVE JAZZ',
+        bg: '#14111c',
+        accent: '#f4a261',
       },
     ];
 
@@ -707,22 +684,25 @@ if (uWetness > 0.04) {
       if (ctx) {
         const grad = ctx.createLinearGradient(0, 0, 512, 224);
         grad.addColorStop(0, s.bg);
-        grad.addColorStop(1, '#090d18');
+        grad.addColorStop(1, '#090d16');
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, 512, 224);
 
-        ctx.strokeStyle = s.accent;
-        ctx.lineWidth = 8;
-        ctx.strokeRect(10, 10, 492, 204);
+        ctx.fillStyle = s.accent;
+        ctx.fillRect(0, 0, 512, 6);
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(14, 16, 484, 194);
 
         ctx.fillStyle = s.accent;
-        ctx.font = 'bold 54px sans-serif';
+        ctx.font = '700 44px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(s.title, 256, 106);
 
-        ctx.fillStyle = '#f8fafc';
-        ctx.font = 'bold 26px sans-serif';
-        ctx.fillText(s.subtitle, 256, 162);
+        ctx.fillStyle = '#e2e8f0';
+        ctx.font = '600 22px system-ui, sans-serif';
+        ctx.fillText(s.subtitle, 256, 158);
       }
 
       const tex = new THREE.CanvasTexture(canvas);
@@ -733,8 +713,8 @@ if (uWetness > 0.04) {
         map: tex,
         emissiveMap: tex,
         emissive: new THREE.Color(0xffffff),
-        emissiveIntensity: 0.95,
-        roughness: 0.25,
+        emissiveIntensity: 0.65,
+        roughness: 0.34,
         metalness: 0.1,
       });
       this.videotronMats.push(screenMat);
@@ -875,11 +855,11 @@ if (uWetness > 0.04) {
       metalness: 0.55,
     });
     const railMat = new THREE.MeshStandardMaterial({
-      color: 0xf59e0b,
+      color: 0xd97706,
       emissive: new THREE.Color(0xd97706),
-      emissiveIntensity: 0.55,
-      roughness: 0.35,
-      metalness: 0.6,
+      emissiveIntensity: 0.18,
+      roughness: 0.42,
+      metalness: 0.48,
     });
 
     for (const r of STUNT_RAMPS_CATALOG) {
@@ -933,11 +913,11 @@ if (uWetness > 0.04) {
         rampGroup.add(rail);
       }
 
-      // Glowing launch chevrons along the ramp deck
+      // Subtle amber launch chevrons painted along ramp deck
       const chevMat = new THREE.MeshBasicMaterial({
-        color: 0x22d3ee,
+        color: 0xf59e0b,
         transparent: true,
-        opacity: 0.85,
+        opacity: 0.32,
         side: THREE.DoubleSide,
       });
       this.rampChevronMats.push(chevMat);
@@ -1001,18 +981,18 @@ if (uWetness > 0.04) {
     g.add(ring);
 
     const beamMat = new THREE.MeshBasicMaterial({
-      color: 0x22d3ee,
+      color: 0x38bdf8,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.14,
       side: THREE.DoubleSide,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
     const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(3.8, 4.4, 22, 16, 1, true),
+      new THREE.CylinderGeometry(4.1, 4.5, 5.5, 20, 1, true),
       beamMat
     );
-    beam.position.y = 11.2;
+    beam.position.y = 2.85;
     g.add(beam);
     return g;
   }
@@ -1096,7 +1076,7 @@ if (uWetness > 0.04) {
     this.streetscape.setTrafficSignalPhase(phase);
   }
 
-  private buildOuterMegapolitanBlocks(): THREE.Group {
+  private buildOuterMegapolitanBlocks(maxAnisotropy: number): THREE.Group {
     const group = new THREE.Group();
     group.name = 'OuterMegapolitanInstancedBlocks';
 
@@ -1111,8 +1091,8 @@ if (uWetness > 0.04) {
     const treePlacements: {
       x: number;
       z: number;
-      s: number;
-      h: number;
+      trunkH: number;
+      crownR: number;
       color: number;
     }[] = [];
 
@@ -1125,8 +1105,8 @@ if (uWetness > 0.04) {
       [176, -42],
       [-178, -54],
     ];
-    const blockPalette = [0x1e293b, 0x283548, 0x334155, 0x243040, 0x36312d];
-    const treePalette = [0x14532d, 0x166534, 0x15803d, 0x1e4d2b];
+    const blockPalette = [0xcbd5e1, 0xd6d3d1, 0xbfdbfe, 0xe2e8f0, 0xc4b5a5];
+    const treePalette = [0x164e2e, 0x1e5631, 0x1b4332, 0x22543d];
 
     const hashUnit = (gx: number, gz: number): number => {
       const s = Math.sin(gx * 12.9898 + gz * 78.233) * 43758.5453;
@@ -1160,13 +1140,13 @@ if (uWetness > 0.04) {
 
         const rnd = hashUnit(x, z);
         if (rnd < 0.38) {
-          const s = 2.6 + rnd * 3.8;
-          const h = 4.6 + hashUnit(z, x) * 3.6;
+          const trunkH = 1.6 + rnd * 1.4;
+          const crownR = 1.8 + hashUnit(z, x) * 1.4;
           treePlacements.push({
             x,
             z,
-            s,
-            h,
+            trunkH,
+            crownR,
             color: treePalette[Math.floor(rnd * 17) % treePalette.length],
           });
         } else {
@@ -1193,17 +1173,42 @@ if (uWetness > 0.04) {
     const color = new THREE.Color();
 
     if (blockPlacements.length > 0) {
+      const outerFacade = proceduralTextures.getBuildingFacadeTextures(
+        0x334155,
+        0x38bdf8,
+        'skyscraper',
+        maxAnisotropy
+      );
       const boxGeo = new THREE.BoxGeometry(1, 1, 1);
       const boxMat = new THREE.MeshStandardMaterial({
         color: 0xffffff,
-        roughness: 0.78,
-        metalness: 0.16,
+        map: outerFacade.map,
+        roughnessMap: outerFacade.roughnessMap,
+        emissiveMap: outerFacade.emissiveMap,
+        emissive: new THREE.Color(0xffffff),
+        emissiveIntensity: 0.1,
+        roughness: 0.72,
+        metalness: 0.22,
       });
+      this.buildingEmissiveMats.push(boxMat);
       const blockInst = new THREE.InstancedMesh(
         boxGeo,
         boxMat,
         blockPlacements.length
       );
+
+      const roofGeo = new THREE.BoxGeometry(1, 1, 1);
+      const roofMat = new THREE.MeshStandardMaterial({
+        color: 0x1e293b,
+        roughness: 0.84,
+        metalness: 0.18,
+      });
+      const roofInst = new THREE.InstancedMesh(
+        roofGeo,
+        roofMat,
+        blockPlacements.length
+      );
+
       blockPlacements.forEach((b, i) => {
         dummy.position.set(b.x, b.h * 0.5, b.z);
         dummy.scale.set(b.w, b.h, b.d);
@@ -1212,36 +1217,62 @@ if (uWetness > 0.04) {
         blockInst.setMatrixAt(i, dummy.matrix);
         color.setHex(b.color);
         blockInst.setColorAt(i, color);
+
+        dummy.position.set(b.x, b.h + 0.7, b.z);
+        dummy.scale.set(b.w * 0.62, 1.4, b.d * 0.62);
+        dummy.updateMatrix();
+        roofInst.setMatrixAt(i, dummy.matrix);
       });
       blockInst.instanceMatrix.needsUpdate = true;
       if (blockInst.instanceColor) blockInst.instanceColor.needsUpdate = true;
-      group.add(blockInst);
+      roofInst.instanceMatrix.needsUpdate = true;
+      group.add(blockInst, roofInst);
     }
 
     if (treePlacements.length > 0) {
-      const treeGeo = new THREE.ConeGeometry(1, 1, 7);
-      const treeMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        roughness: 0.9,
-        metalness: 0.04,
+      const trunkGeo = new THREE.CylinderGeometry(0.16, 0.3, 1, 6);
+      const trunkMat = new THREE.MeshStandardMaterial({
+        color: 0x4a3728,
+        roughness: 0.94,
+        metalness: 0.02,
       });
-      const treeInst = new THREE.InstancedMesh(
-        treeGeo,
-        treeMat,
+      const trunkInst = new THREE.InstancedMesh(
+        trunkGeo,
+        trunkMat,
         treePlacements.length
       );
+
+      const canopyGeo = new THREE.IcosahedronGeometry(1, 1);
+      const canopyMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.88,
+        metalness: 0.04,
+      });
+      const canopyInst = new THREE.InstancedMesh(
+        canopyGeo,
+        canopyMat,
+        treePlacements.length
+      );
+
       treePlacements.forEach((t, i) => {
-        dummy.position.set(t.x, t.h * 0.5 + 0.4, t.z);
-        dummy.scale.set(t.s, t.h, t.s);
+        dummy.position.set(t.x, t.trunkH * 0.5, t.z);
+        dummy.scale.set(1, t.trunkH, 1);
         dummy.rotation.set(0, 0, 0);
         dummy.updateMatrix();
-        treeInst.setMatrixAt(i, dummy.matrix);
+        trunkInst.setMatrixAt(i, dummy.matrix);
+
+        dummy.position.set(t.x, t.trunkH + t.crownR * 0.45, t.z);
+        dummy.scale.set(t.crownR, t.crownR * 0.76, t.crownR);
+        dummy.rotation.set(0, (i * 0.7) % (Math.PI * 2), 0);
+        dummy.updateMatrix();
+        canopyInst.setMatrixAt(i, dummy.matrix);
         color.setHex(t.color);
-        treeInst.setColorAt(i, color);
+        canopyInst.setColorAt(i, color);
       });
-      treeInst.instanceMatrix.needsUpdate = true;
-      if (treeInst.instanceColor) treeInst.instanceColor.needsUpdate = true;
-      group.add(treeInst);
+      trunkInst.instanceMatrix.needsUpdate = true;
+      canopyInst.instanceMatrix.needsUpdate = true;
+      if (canopyInst.instanceColor) canopyInst.instanceColor.needsUpdate = true;
+      group.add(trunkInst, canopyInst);
     }
 
     return group;
@@ -1326,7 +1357,6 @@ if (uWetness > 0.04) {
     this.roadMat.metalness = 0.04 + wetnessFactor * 0.24;
     this.roadMat.envMapIntensity = 0.34 + wetnessFactor * 0.42;
     this.spireBeaconMat.color.setScalar(0.55 + nightFactor * 0.45);
-    this.floodDiscsGroup.visible = wetnessFactor > 0.65;
     this.bayWaterMat.roughness = 0.14 + Math.sin(this.elapsedTime * 1.8) * 0.04;
 
     // Automatically illuminate Jakarta skyscraper offices & Blok M ruko windows at dusk/night
@@ -1335,11 +1365,11 @@ if (uWetness > 0.04) {
         tone.windowEmissiveIntensity;
     }
 
-    // Pulse Vice-Jakarta LED videotrons stronger at dusk/night
-    const screenBoost = 0.62 + nightFactor * 0.85;
+    // Pulse Vice-Jakarta LED videotrons subtly at dusk/night
+    const screenBoost = 0.38 + nightFactor * 0.54;
     for (let i = 0; i < this.videotronMats.length; i++) {
       this.videotronMats[i].emissiveIntensity =
-        screenBoost + Math.sin(this.elapsedTime * 2.2 + i * 1.4) * 0.12;
+        screenBoost + Math.sin(this.elapsedTime * 2.2 + i * 1.4) * 0.04;
     }
 
     // Gentle tropical breeze sway on boulevard palm canopies
@@ -1392,7 +1422,7 @@ if (uWetness > 0.04) {
     // Wave 2: Pulse stunt ramp chevrons subtly, monsoon flood puddles & race checkpoint gate
     for (let i = 0; i < this.rampChevronMats.length; i++) {
       this.rampChevronMats[i].opacity =
-        0.26 + Math.sin(this.elapsedTime * 3.2 + i * 1.1) * 0.12;
+        0.22 + Math.sin(this.elapsedTime * 3.2 + i * 1.1) * 0.08;
     }
     this.wave2FloodZonesGroup.visible = wetnessFactor > 0.55;
     if (this.floodZoneMat && this.wave2FloodZonesGroup.visible) {

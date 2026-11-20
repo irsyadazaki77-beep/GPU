@@ -319,7 +319,7 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
             {dialogueRes && (
               <span className="text-[11px] font-mono-num text-[#94a3b8]">
                 Nada: {dialogueRes.tone} ·{' '}
-                {dialogueRes.source === 'gemini' ? 'Gemini AI' : 'Lokal Offline'}
+                {dialogueRes.source === 'gemini' ? 'Saluran Langsung' : 'Radio Lokal'}
               </span>
             )}
           </div>
@@ -362,7 +362,7 @@ export const StoryDialogueModal: React.FC<StoryDialogueModalProps> = ({
               disabled={loadingAi || !promptInput.trim()}
               className="px-3.5 py-2 rounded-lg bg-[#38bdf8] hover:bg-[#7dd3fc] text-[#090c12] font-semibold text-xs cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
-              {loadingAi ? 'Mengontak...' : 'Tanya NPC'}
+              {loadingAi ? 'Mengontak...' : 'Kirim'}
             </button>
           </form>
 

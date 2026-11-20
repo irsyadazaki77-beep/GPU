@@ -56,6 +56,9 @@ test('exponentialDampFactor is frame-rate independent and bounded in [0, 1]', ()
 
 test('computeOffRoadMicroShake activates only when driving fast off paved corridors', () => {
   assert.equal(computeOffRoadMicroShake(0, 26, 20, false), 0); // On Sudirman boulevard
+  assert.equal(computeOffRoadMicroShake(128, 40, 25, false), 0); // On Outer Ring highway
+  assert.equal(computeOffRoadMicroShake(208, 100, 28, false), 0); // On JORR perimeter
+  assert.equal(computeOffRoadMicroShake(-168, -66, 22, false), 0); // On northern coastal wing
   assert.equal(computeOffRoadMicroShake(22, 22, 3, false), 0); // Too slow
   assert.equal(computeOffRoadMicroShake(22, 22, 20, true), 0); // Aircraft exempt
   const offRoadShake = computeOffRoadMicroShake(22, 22, 20, false);

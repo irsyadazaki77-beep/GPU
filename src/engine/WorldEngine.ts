@@ -41,6 +41,7 @@ import { TrafficSystem } from './TrafficSystem';
 import { WeatherLightingSystem } from './WeatherLightingSystem';
 import { cityAudio } from './CityAudio';
 import { proceduralTextures } from './ProceduralTextures';
+import { TireSkidmarkPool } from './TireSkidmarkPool';
 import {
   computeTimeOfDayToneState,
   pickHornReactionCallout,
@@ -137,6 +138,7 @@ export class WorldEngine {
   private readonly trafficSystem: TrafficSystem;
   private readonly destructibleProps: DestructiblePropsSystem;
   private readonly crowdSystem: CrowdSystem;
+  private readonly tireSkidmarks: TireSkidmarkPool;
   private readonly physicsWorld: JakartaPhysicsWorld;
   private readonly netSync: MultiplayerClientSync;
   private readonly simWorker: SimWorkerClient;
@@ -243,6 +245,7 @@ export class WorldEngine {
       this.cityRenderer.getSidewalkRects(),
       this.cityRenderer.buildingGrid
     );
+    this.tireSkidmarks = new TireSkidmarkPool(this.scene);
     this.physicsWorld = new JakartaPhysicsWorld(
       undefined,
       this.cityRenderer.buildingGrid
@@ -990,6 +993,25 @@ export class WorldEngine {
         );
       }
 
+      if (
+        activeVeh &&
+        !vehSpec?.isAircraft &&
+        activeVeh.y < 1.2 &&
+        activeVeh.isDrifting &&
+        Math.abs(activeVeh.speed) > 4.5
+      ) {
+        this.tireSkidmarks.stampPair(
+          activeVeh.x,
+          activeVeh.z,
+          activeVeh.heading,
+          activeVeh.type === 'ojek' ? 0.14 : 0.72,
+          activeVeh.type === 'ojek' ? 0.65 : 1.15,
+          wetnessFactor
+        );
+      } else {
+        this.tireSkidmarks.resetTrack();
+      }
+
       const playerSpeed = activeVeh
         ? Math.abs(activeVeh.speed)
         : Math.hypot(phys.vx, phys.vz);
@@ -1340,17 +1362,7 @@ export class WorldEngine {
       soundEngine.updateEngineAudio(0, false, false, false, false);
     }
 
-    // Update procedural Web Audio engine & urban ambience layers
-    const isDrivingNow =
-      currentGameState === 'playing' && Boolean(phys.drivingVehicleId);
-    const activeDrivingVeh = isDrivingNow
-      ? this.trafficSystem.vehicles.find((v) => v.id === phys.drivingVehicleId)
-      : null;
-    cityAudio.updateEngine(speedRatio, isDrivingNow, activeDrivingVeh?.type ?? null);
-    cityAudio.updateUrbanAmbience(
-      currentGameState === 'playing' && pState.currentInterior === 'exterior',
-      nightFactor
-    );
+    // Master soundEngine handles dynamic engine RPM & district urban ambience
 
     // Project active 3D horn/street reaction callouts to viewport coordinates
     if (this.activeWorldCallouts.length > 0) {
@@ -1443,6 +1455,7 @@ export class WorldEngine {
     this.playerController.dispose();
     this.destructibleProps.dispose();
     this.crowdSystem.dispose();
+    this.tireSkidmarks.dispose();
     this.trafficSystem.dispose();
     this.cityRenderer.dispose();
     this.weatherSystem.dispose();

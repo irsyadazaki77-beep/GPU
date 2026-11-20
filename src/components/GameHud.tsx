@@ -605,8 +605,16 @@ export const GameHud: React.FC<GameHudProps> = ({
           data-testid="near-miss-toast"
           className="fixed inset-x-0 bottom-32 sm:bottom-28 z-20 flex justify-center pointer-events-none px-4 animate-aaa-up"
         >
-          <div className="px-4 py-1.5 rounded-full bg-[#090d16]/90 border border-[#22d3ee]/65 shadow-xl font-mono-num text-xs font-bold text-[#67e8f9]">
-            ⚡ {nearMissBanner.text}
+          <div className="px-4 py-1.5 rounded-full bg-[#090d16]/90 border border-[#22d3ee]/65 shadow-xl font-mono-num text-xs font-bold text-[#67e8f9] inline-flex items-center gap-1.5">
+            <svg
+              className="w-3.5 h-3.5 shrink-0"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M13 2L4.5 13.5H11L10 22L19.5 10.5H13L13 2Z" />
+            </svg>
+            <span>{nearMissBanner.text}</span>
           </div>
         </div>
       )}

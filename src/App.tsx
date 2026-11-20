@@ -44,18 +44,51 @@ import {
 } from './components/JakartaWorldCanvas';
 import { TitleScreen } from './components/TitleScreen';
 import { GameHud } from './components/GameHud';
-import { StoryDialogueModal } from './components/StoryDialogueModal';
-import { NabiloPhoneModal } from './components/NabiloPhoneModal';
-import { StatusModal } from './components/StatusModal';
 import { RadialWheelOverlay } from './components/RadialWheelOverlay';
-import { HeistPlanningModal } from './components/HeistPlanningModal';
-import { HeistBreachOverlay } from './components/HeistBreachOverlay';
-import { CustomsGarageModal } from './components/CustomsGarageModal';
-import { WarungSnackModal } from './components/WarungSnackModal';
 import { CinematicOverlay } from './components/CinematicOverlay';
 import { MobileTouchControls } from './components/MobileTouchControls';
-import { PhotoModeOverlay } from './components/PhotoModeOverlay';
 import { WorldCalloutOverlay } from './components/WorldCalloutOverlay';
+
+const StoryDialogueModal = React.lazy(() =>
+  import('./components/StoryDialogueModal').then((m) => ({
+    default: m.StoryDialogueModal,
+  }))
+);
+const NabiloPhoneModal = React.lazy(() =>
+  import('./components/NabiloPhoneModal').then((m) => ({
+    default: m.NabiloPhoneModal,
+  }))
+);
+const StatusModal = React.lazy(() =>
+  import('./components/StatusModal').then((m) => ({
+    default: m.StatusModal,
+  }))
+);
+const HeistPlanningModal = React.lazy(() =>
+  import('./components/HeistPlanningModal').then((m) => ({
+    default: m.HeistPlanningModal,
+  }))
+);
+const HeistBreachOverlay = React.lazy(() =>
+  import('./components/HeistBreachOverlay').then((m) => ({
+    default: m.HeistBreachOverlay,
+  }))
+);
+const CustomsGarageModal = React.lazy(() =>
+  import('./components/CustomsGarageModal').then((m) => ({
+    default: m.CustomsGarageModal,
+  }))
+);
+const WarungSnackModal = React.lazy(() =>
+  import('./components/WarungSnackModal').then((m) => ({
+    default: m.WarungSnackModal,
+  }))
+);
+const PhotoModeOverlay = React.lazy(() =>
+  import('./components/PhotoModeOverlay').then((m) => ({
+    default: m.PhotoModeOverlay,
+  }))
+);
 import { useGameKeyboardShortcuts } from './hooks/useGameKeyboardShortcuts';
 import { useGameRuntimeLoops } from './hooks/useGameRuntimeLoops';
 import { soundEngine } from './game/sound';
@@ -1327,22 +1360,24 @@ export default function App() {
         )}
 
       {/* CINEMATIC PHOTO MODE STUDIO [N] */}
-      {gameState === 'playing' && photoModeOpen && (
-        <PhotoModeOverlay
-          weatherMode={weatherMode}
-          onChangeWeather={(w) => {
-            gameStore.setState({
-              weatherMode: w,
-              worldTimeMinutes: WEATHER_PRESET_MINUTES[w],
-            });
-            soundEngine.playPickup();
-          }}
-          onCapturePng={handleCapturePhoto}
-          onClose={() => gameStore.setState({ photoModeOpen: false })}
-        />
-      )}
+      <React.Suspense fallback={null}>
+        {gameState === 'playing' && photoModeOpen && (
+          <PhotoModeOverlay
+            weatherMode={weatherMode}
+            onChangeWeather={(w) => {
+              gameStore.setState({
+                weatherMode: w,
+                worldTimeMinutes: WEATHER_PRESET_MINUTES[w],
+              });
+              soundEngine.playPickup();
+            }}
+            onCapturePng={handleCapturePhoto}
+            onClose={() => gameStore.setState({ photoModeOpen: false })}
+          />
+        )}
+      </React.Suspense>
 
-      {/* GTA V RADIAL WEAPON WHEEL & SATELLITE CHARACTER SWITCHER */}
+      {/* RADIAL WEAPON WHEEL & SATELLITE CHARACTER SWITCHER */}
       {gameState === 'playing' && wheelMode && (
         <RadialWheelOverlay
           mode={wheelMode}
@@ -1355,64 +1390,66 @@ export default function App() {
         />
       )}
 
-      {/* GRAND HEIST TACTICAL PLANNING BOARD */}
-      {gameState === 'playing' && heistBoardOpen && (
-        <HeistPlanningModal
-          playerState={playerState}
-          onUpdatePlan={(plan) =>
-            gameStore.updatePlayerState((prev) => ({
-              ...prev,
-              activeHeistPlan: plan,
-            }))
-          }
-          onLaunchHeistSetup={handleLaunchHeistSetup}
-          onLaunchHeistFinale={handleLaunchHeistFinale}
-          onClose={() => gameStore.setState({ heistBoardOpen: false })}
-        />
-      )}
+      <React.Suspense fallback={null}>
+        {/* GRAND HEIST TACTICAL PLANNING BOARD */}
+        {gameState === 'playing' && heistBoardOpen && (
+          <HeistPlanningModal
+            playerState={playerState}
+            onUpdatePlan={(plan) =>
+              gameStore.updatePlayerState((prev) => ({
+                ...prev,
+                activeHeistPlan: plan,
+              }))
+            }
+            onLaunchHeistSetup={handleLaunchHeistSetup}
+            onLaunchHeistFinale={handleLaunchHeistFinale}
+            onClose={() => gameStore.setState({ heistBoardOpen: false })}
+          />
+        )}
 
-      {/* GRAND HEIST MULTI-STAGE VAULT BREACH MINIGAME */}
-      {gameState === 'playing' && activeHeistBreach && (
-        <HeistBreachOverlay
-          session={activeHeistBreach}
-          synergyBonusPct={computeTrioSynergyPerks(trioSynergy).heistBonusPercent}
-          onCompleteBreach={(hId, mult) => executeHeistGetawayFinale(hId, mult)}
-          onCancel={() => gameStore.closeHeistBreach()}
-        />
-      )}
+        {/* GRAND HEIST MULTI-STAGE VAULT BREACH MINIGAME */}
+        {gameState === 'playing' && activeHeistBreach && (
+          <HeistBreachOverlay
+            session={activeHeistBreach}
+            synergyBonusPct={computeTrioSynergyPerks(trioSynergy).heistBonusPercent}
+            onCompleteBreach={(hId, mult) => executeHeistGetawayFinale(hId, mult)}
+            onCancel={() => gameStore.closeHeistBreach()}
+          />
+        )}
 
-      {/* LOS SANTOS CUSTOMS 360° VEHICLE CUSTOMIZATION GARAGE */}
-      {gameState === 'playing' && customsGarageOpen && (
-        <CustomsGarageModal
-          playerState={playerState}
-          onSelectPaint={handleSelectPaint}
-          onSelectUnderglow={handleSelectUnderglow}
-          onUpgradeEngine={handleUpgradeVehicle}
-          onUpgradeArmorPlating={handleUpgradeArmorPlating}
-          onRepairAndClearWanted={handleRepairAndClearWanted}
-          onHonk={() => controllerRef.current?.triggerHorn()}
-          onClose={() => gameStore.setState({ customsGarageOpen: false })}
-        />
-      )}
+        {/* BENGKEL GARUDA 360 VEHICLE CUSTOMIZATION GARAGE */}
+        {gameState === 'playing' && customsGarageOpen && (
+          <CustomsGarageModal
+            playerState={playerState}
+            onSelectPaint={handleSelectPaint}
+            onSelectUnderglow={handleSelectUnderglow}
+            onUpgradeEngine={handleUpgradeVehicle}
+            onUpgradeArmorPlating={handleUpgradeArmorPlating}
+            onRepairAndClearWanted={handleRepairAndClearWanted}
+            onHonk={() => controllerRef.current?.triggerHorn()}
+            onClose={() => gameStore.setState({ customsGarageOpen: false })}
+          />
+        )}
 
-      {/* WARUNG KOPI & JAJANAN NUSANTARA INTERACTIVE MINI-GAME */}
-      {gameState === 'playing' && warungModalOpen && (
-        <WarungSnackModal
-          playerState={playerState}
-          onConsumeSnack={handleConsumeWarungSnack}
-          onCloseModal={() => gameStore.setState({ warungModalOpen: false })}
-          onExitWarung={() => {
-            soundEngine.playPickup();
-            gameStore.setState((prev) => ({
-              warungModalOpen: false,
-              playerState: {
-                ...prev.playerState,
-                currentInterior: 'exterior',
-              },
-            }));
-          }}
-        />
-      )}
+        {/* WARUNG KOPI & JAJANAN NUSANTARA INTERACTIVE MINI-GAME */}
+        {gameState === 'playing' && warungModalOpen && (
+          <WarungSnackModal
+            playerState={playerState}
+            onConsumeSnack={handleConsumeWarungSnack}
+            onCloseModal={() => gameStore.setState({ warungModalOpen: false })}
+            onExitWarung={() => {
+              soundEngine.playPickup();
+              gameStore.setState((prev) => ({
+                warungModalOpen: false,
+                playerState: {
+                  ...prev.playerState,
+                  currentInterior: 'exterior',
+                },
+              }));
+            }}
+          />
+        )}
+      </React.Suspense>
 
       {/* 2.39:1 CINEMATIC LETTERBOX & SUBTITLES */}
       {gameState === 'playing' && !photoModeOpen && (
@@ -1430,124 +1467,126 @@ export default function App() {
         />
       )}
 
-      {/* INTERACTIVE BRANCHING STORY DIALOGUE + NPC AI */}
-      {gameState === 'playing' && dialogueMission && (
-        <StoryDialogueModal
-          mission={dialogueMission}
-          onSelectChoice={handleSelectChoice}
-          onClose={() => {
-            controllerRef.current?.stopCutsceneFraming();
-            gameStore.setState({ dialogueMission: null });
-          }}
-        />
-      )}
+      <React.Suspense fallback={null}>
+        {/* INTERACTIVE BRANCHING STORY DIALOGUE */}
+        {gameState === 'playing' && dialogueMission && (
+          <StoryDialogueModal
+            mission={dialogueMission}
+            onSelectChoice={handleSelectChoice}
+            onClose={() => {
+              controllerRef.current?.stopCutsceneFraming();
+              gameStore.setState({ dialogueMission: null });
+            }}
+          />
+        )}
 
-      {/* NABILOPHONE OS 6.0 SMARTPHONE OVERLAY */}
-      {gameState === 'playing' && phoneOpen && !dialogueMission && (
-        <NabiloPhoneModal
-          playerState={playerState}
-          activeMission={activeMission}
-          lastOutcomeText={lastOutcomeText}
-          weatherMode={weatherMode}
-          onClose={() => gameStore.setState({ phoneOpen: false })}
-          onTriggerMissionDialog={(m) =>
-            gameStore.setState({ dialogueMission: m })
-          }
-          onSpawnVehicle={(type) =>
-            controllerRef.current?.spawnVehicleNearPlayer(type)
-          }
-          onBuyOrEquipWeapon={handleBuyOrEquipWeapon}
-          onBuyArmorOrMedkit={handleBuyArmorOrMedkit}
-          onBuyProperty={handleBuyProperty}
-          onCompleteSideHustle={(rp) => handleCompleteSideHustle(rp)}
-          onChangeWeather={(w) => {
-            gameStore.setState({
-              weatherMode: w,
-              worldTimeMinutes: WEATHER_PRESET_MINUTES[w],
-            });
-            soundEngine.playPickup();
-          }}
-          onRecruitCrew={handleRecruitCrew}
-          onChangeRadio={handleChangeRadio}
-          onChangeOutfit={handleChangeOutfit}
-          onUpgradeVehicle={handleUpgradeVehicle}
-          onUpgradeDrone={handleUpgradeDrone}
-          onFastTravel={handleFastTravel}
-          onBuyStock={handleBuyStock}
-          onSellStock={handleSellStock}
-          onSwitchProtagonist={handleSwitchProtagonist}
-          onOpenHeistBoard={() => gameStore.setState({ heistBoardOpen: true })}
-          onOpenCustomsGarage={() =>
-            gameStore.setState({ customsGarageOpen: true })
-          }
-          onEnterInterior={handleEnterInteriorById}
-          onStartStreetRace={handleStartStreetRace}
-          onStartCustomRace={(track) =>
-            controllerRef.current?.startCustomStreetRace(track)
-          }
-          onShareCustomRace={(track) =>
-            controllerRef.current?.sendCustomRaceTrack?.(track) ?? false
-          }
-          onCaptureViralSnap={handleCaptureViralSnap}
-          onStartTurfWar={(districtId) =>
-            controllerRef.current?.startTurfWar(districtId)
-          }
-          onWarpToRamp={(rampId) =>
-            controllerRef.current?.teleportToStuntRamp(rampId)
-          }
-        />
-      )}
+        {/* NABILOPHONE OS 6.0 SMARTPHONE OVERLAY */}
+        {gameState === 'playing' && phoneOpen && !dialogueMission && (
+          <NabiloPhoneModal
+            playerState={playerState}
+            activeMission={activeMission}
+            lastOutcomeText={lastOutcomeText}
+            weatherMode={weatherMode}
+            onClose={() => gameStore.setState({ phoneOpen: false })}
+            onTriggerMissionDialog={(m) =>
+              gameStore.setState({ dialogueMission: m })
+            }
+            onSpawnVehicle={(type) =>
+              controllerRef.current?.spawnVehicleNearPlayer(type)
+            }
+            onBuyOrEquipWeapon={handleBuyOrEquipWeapon}
+            onBuyArmorOrMedkit={handleBuyArmorOrMedkit}
+            onBuyProperty={handleBuyProperty}
+            onCompleteSideHustle={(rp) => handleCompleteSideHustle(rp)}
+            onChangeWeather={(w) => {
+              gameStore.setState({
+                weatherMode: w,
+                worldTimeMinutes: WEATHER_PRESET_MINUTES[w],
+              });
+              soundEngine.playPickup();
+            }}
+            onRecruitCrew={handleRecruitCrew}
+            onChangeRadio={handleChangeRadio}
+            onChangeOutfit={handleChangeOutfit}
+            onUpgradeVehicle={handleUpgradeVehicle}
+            onUpgradeDrone={handleUpgradeDrone}
+            onFastTravel={handleFastTravel}
+            onBuyStock={handleBuyStock}
+            onSellStock={handleSellStock}
+            onSwitchProtagonist={handleSwitchProtagonist}
+            onOpenHeistBoard={() => gameStore.setState({ heistBoardOpen: true })}
+            onOpenCustomsGarage={() =>
+              gameStore.setState({ customsGarageOpen: true })
+            }
+            onEnterInterior={handleEnterInteriorById}
+            onStartStreetRace={handleStartStreetRace}
+            onStartCustomRace={(track) =>
+              controllerRef.current?.startCustomStreetRace(track)
+            }
+            onShareCustomRace={(track) =>
+              controllerRef.current?.sendCustomRaceTrack?.(track) ?? false
+            }
+            onCaptureViralSnap={handleCaptureViralSnap}
+            onStartTurfWar={(districtId) =>
+              controllerRef.current?.startTurfWar(districtId)
+            }
+            onWarpToRamp={(rampId) =>
+              controllerRef.current?.teleportToStuntRamp(rampId)
+            }
+          />
+        )}
 
-      {/* STATE 3 & 4: UNIFIED PAUSE MENU / VICTORY / DEFEAT MODAL */}
-      {(gameState === 'paused' || gameState === 'gameover') && (
-        <StatusModal
-          mode={gameState === 'paused' ? 'paused' : outcomeMode}
-          snapshot={gameState === 'paused' ? playerState : endSnapshot}
-          outcomeNarrative={lastOutcomeText}
-          weatherMode={weatherMode}
-          muted={muted}
-          onResume={() => {
-            document.body.dataset.state = 'playing';
-            gameStore.setState({ gameState: 'playing' });
-          }}
-          onRestart={(e) => {
-            e.currentTarget.blur();
-            startNewGame(origin, selectedStage);
-          }}
-          onHospitalRespawn={() => {
-            const res = gameStore.respawnAtHospital();
-            document.body.dataset.state = 'playing';
-            controllerRef.current?.restoreSavedPosition(res.spawnX, res.spawnZ);
-          }}
-          onReturnTitle={() => {
-            persistCurrentSave();
-            document.body.dataset.state = 'title';
-            gameStore.setState({
-              savedGame: loadSavedGame(),
-              gameState: 'title',
-            });
-          }}
-          onFastTravel={handleFastTravel}
-          onTeleportCoords={handleTeleportCoords}
-          onTriggerMissionDialog={(m) =>
-            gameStore.setState({ dialogueMission: m })
-          }
-          onChangeWeather={(w) => {
-            gameStore.setState({
-              weatherMode: w,
-              worldTimeMinutes: WEATHER_PRESET_MINUTES[w],
-            });
-            soundEngine.playPickup();
-          }}
-          onChangeRadio={handleChangeRadio}
-          onToggleMute={() => gameStore.toggleMute()}
-          onOpenHeistBoard={() => gameStore.setState({ heistBoardOpen: true })}
-          onOpenCustomsGarage={() =>
-            gameStore.setState({ customsGarageOpen: true })
-          }
-          onOpenPhotoMode={() => gameStore.setState({ photoModeOpen: true })}
-        />
-      )}
+        {/* STATE 3 & 4: UNIFIED PAUSE MENU / VICTORY / DEFEAT MODAL */}
+        {(gameState === 'paused' || gameState === 'gameover') && (
+          <StatusModal
+            mode={gameState === 'paused' ? 'paused' : outcomeMode}
+            snapshot={gameState === 'paused' ? playerState : endSnapshot}
+            outcomeNarrative={lastOutcomeText}
+            weatherMode={weatherMode}
+            muted={muted}
+            onResume={() => {
+              document.body.dataset.state = 'playing';
+              gameStore.setState({ gameState: 'playing' });
+            }}
+            onRestart={(e) => {
+              e.currentTarget.blur();
+              startNewGame(origin, selectedStage);
+            }}
+            onHospitalRespawn={() => {
+              const res = gameStore.respawnAtHospital();
+              document.body.dataset.state = 'playing';
+              controllerRef.current?.restoreSavedPosition(res.spawnX, res.spawnZ);
+            }}
+            onReturnTitle={() => {
+              persistCurrentSave();
+              document.body.dataset.state = 'title';
+              gameStore.setState({
+                savedGame: loadSavedGame(),
+                gameState: 'title',
+              });
+            }}
+            onFastTravel={handleFastTravel}
+            onTeleportCoords={handleTeleportCoords}
+            onTriggerMissionDialog={(m) =>
+              gameStore.setState({ dialogueMission: m })
+            }
+            onChangeWeather={(w) => {
+              gameStore.setState({
+                weatherMode: w,
+                worldTimeMinutes: WEATHER_PRESET_MINUTES[w],
+              });
+              soundEngine.playPickup();
+            }}
+            onChangeRadio={handleChangeRadio}
+            onToggleMute={() => gameStore.toggleMute()}
+            onOpenHeistBoard={() => gameStore.setState({ heistBoardOpen: true })}
+            onOpenCustomsGarage={() =>
+              gameStore.setState({ customsGarageOpen: true })
+            }
+            onOpenPhotoMode={() => gameStore.setState({ photoModeOpen: true })}
+          />
+        )}
+      </React.Suspense>
     </div>
   );
 }

@@ -54,7 +54,7 @@ export const JAKARTA_DISTRICTS: DistrictZone[] = [
   {
     id: 'tanjung_priok',
     name: 'Pelabuhan Tanjung Priok',
-    subtitle: 'Dermaga Kontainer & Logistik Utara (Tahap 2)',
+    subtitle: 'Dermaga Kontainer & Logistik Utara',
     centerX: 62,
     centerZ: -58,
     radius: 34,
@@ -62,7 +62,7 @@ export const JAKARTA_DISTRICTS: DistrictZone[] = [
   {
     id: 'scbd',
     name: 'Kawasan Elit SCBD & Semanggi',
-    subtitle: 'Bursa Saham & Menara Kaca Malam (Tahap 2)',
+    subtitle: 'Bursa Saham & Menara Kaca Malam',
     centerX: -62,
     centerZ: -56,
     radius: 34,
@@ -70,7 +70,7 @@ export const JAKARTA_DISTRICTS: DistrictZone[] = [
   {
     id: 'ancol_pik',
     name: 'Pesisir Ancol & Pantai Indah Kapuk',
-    subtitle: 'Dermaga Marina & Boulevard Pantai (Tahap 3)',
+    subtitle: 'Dermaga Marina & Boulevard Pantai',
     centerX: -62,
     centerZ: 58,
     radius: 34,
@@ -78,7 +78,7 @@ export const JAKARTA_DISTRICTS: DistrictZone[] = [
   {
     id: 'halim_station',
     name: 'Stasiun Terpadu Halim & Cawang',
-    subtitle: 'Hub Kereta Cepat & Pangkalan Taktis (Tahap 3)',
+    subtitle: 'Hub Kereta Cepat & Pangkalan Taktis',
     centerX: 62,
     centerZ: 58,
     radius: 34,
@@ -86,7 +86,7 @@ export const JAKARTA_DISTRICTS: DistrictZone[] = [
   {
     id: 'senayan_gbk',
     name: 'Kompleks Gelora Senayan & GBK',
-    subtitle: 'Arena Stadion Megah & Markas Komando Garuda (Tahap 4)',
+    subtitle: 'Arena Stadion Megah & Markas Komando Garuda',
     centerX: -64,
     centerZ: 36,
     radius: 26,
@@ -94,7 +94,7 @@ export const JAKARTA_DISTRICTS: DistrictZone[] = [
   {
     id: 'kemayoran',
     name: 'Distrik Siber & Bandara Kemayoran',
-    subtitle: 'Menara Radar Lama & Benteng Data Sovereign (Tahap 4)',
+    subtitle: 'Menara Radar Lama & Benteng Data Sovereign',
     centerX: 64,
     centerZ: -36,
     radius: 26,
@@ -102,7 +102,7 @@ export const JAKARTA_DISTRICTS: DistrictZone[] = [
   {
     id: 'pik2_mangrove',
     name: 'Kawasan Pesisir PIK 2 & Ekowisata',
-    subtitle: 'Pulau Reklamasi, Pagoda Kaca & Dermaga Jet (Fase 5)',
+    subtitle: 'Pulau Reklamasi, Pagoda Kaca & Dermaga Jet',
     centerX: -76,
     centerZ: -18,
     radius: 24,
@@ -110,7 +110,7 @@ export const JAKARTA_DISTRICTS: DistrictZone[] = [
   {
     id: 'tmii_ragunan',
     name: 'Taman Mini & Koridor Selatan',
-    subtitle: 'Kubah Budaya Nusantara & Pangkalan Gatotkaca (Fase 5)',
+    subtitle: 'Kubah Budaya Nusantara & Pangkalan Gatotkaca',
     centerX: 48,
     centerZ: 74,
     radius: 24,

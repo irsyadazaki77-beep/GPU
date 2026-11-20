@@ -21,6 +21,12 @@ class CityAudioSynthesizer {
   private noiseBuffer: AudioBuffer | null = null;
   private unlocked = false;
 
+  private getSfxMasterGain(): number {
+    if (soundEngine.muted) return 0;
+    const vols = soundEngine.getChannelVolumes();
+    return Math.max(0, Math.min(1, vols.master * vols.sfx)) * 0.72;
+  }
+
   private ensureContext(): AudioContext | null {
     if (typeof window === 'undefined') return null;
     if (!this.ctx) {
@@ -31,7 +37,7 @@ class CityAudioSynthesizer {
       if (!AudioCtx) return null;
       this.ctx = new AudioCtx();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = soundEngine.muted ? 0 : 0.72;
+      this.masterGain.gain.value = this.getSfxMasterGain();
       this.masterGain.connect(this.ctx.destination);
     }
     return this.ctx;
@@ -65,7 +71,11 @@ class CityAudioSynthesizer {
   public syncMuteState(muted: boolean): void {
     if (!this.ctx || !this.masterGain) return;
     const now = this.ctx.currentTime;
-    this.masterGain.gain.setTargetAtTime(muted ? 0 : 0.72, now, 0.05);
+    this.masterGain.gain.setTargetAtTime(
+      muted ? 0 : this.getSfxMasterGain(),
+      now,
+      0.05
+    );
   }
 
   public updateEngine(
@@ -237,12 +247,14 @@ class CityAudioSynthesizer {
    * Dual-tone Jakarta klakson (F4 + A4 disharmonic twin horn)
    */
   public playHorn(): void {
-    if (soundEngine.muted) return;
+    const masterSfx = this.getSfxMasterGain();
+    if (masterSfx <= 0.001) return;
     const ctx = this.ensureContext();
     if (!ctx || !this.masterGain) return;
     if (ctx.state === 'suspended') {
       ctx.resume().catch(() => {});
     }
+    this.masterGain.gain.setTargetAtTime(masterSfx, ctx.currentTime, 0.02);
 
     const now = ctx.currentTime;
     const dur = 0.28;
@@ -275,9 +287,11 @@ class CityAudioSynthesizer {
    * Short delayed honk-back from nearby reactive traffic (Angkot / Ojol / Sedan)
    */
   public playTrafficResponseHorn(pitchMult: number = 1.0, delaySec: number = 0.16): void {
-    if (soundEngine.muted) return;
+    const masterSfx = this.getSfxMasterGain();
+    if (masterSfx <= 0.001) return;
     const ctx = this.ensureContext();
     if (!ctx || !this.masterGain || ctx.state !== 'running') return;
+    this.masterGain.gain.setTargetAtTime(masterSfx, ctx.currentTime, 0.02);
 
     const start = ctx.currentTime + delaySec;
     const dur = 0.16;
@@ -306,9 +320,11 @@ class CityAudioSynthesizer {
    * Low-end tactile collision thud scaled by impact intensity (0..1)
    */
   public playCollisionThud(intensity: number = 0.65): void {
-    if (soundEngine.muted) return;
+    const masterSfx = this.getSfxMasterGain();
+    if (masterSfx <= 0.001) return;
     const ctx = this.ensureContext();
     if (!ctx || !this.masterGain || ctx.state !== 'running') return;
+    this.masterGain.gain.setTargetAtTime(masterSfx, ctx.currentTime, 0.02);
 
     const now = ctx.currentTime;
     const amp = Math.max(0.06, Math.min(0.28, intensity * 0.24));

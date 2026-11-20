@@ -8,6 +8,85 @@ import {
 
 export type AudioChannel = 'sfx' | 'radio' | 'ambience';
 
+export function computeEngineTransmissionRpm(
+  speedRatio: number,
+  vehicleType?: string | null,
+  isAircraft: boolean = false,
+  nitroActive: boolean = false
+): {
+  gear: number;
+  baseFreq: number;
+  subRatio: number;
+  cutoffHz: number;
+} {
+  const sr = Math.max(0, Math.min(1.4, speedRatio));
+  const nitroFreq = nitroActive ? 22 : 0;
+  const nitroCut = nitroActive ? 240 : 0;
+
+  if (isAircraft) {
+    const baseFreq =
+      (vehicleType === 'vtol_jet' ? 76 : 48) + sr * 56 + nitroFreq;
+    return {
+      gear: 1,
+      baseFreq,
+      subRatio: 0.5,
+      cutoffHz: 210 + sr * 480 + nitroCut,
+    };
+  }
+
+  if (vehicleType === 'ojek' || vehicleType === 'bajaj') {
+    const startFreq = vehicleType === 'bajaj' ? 62 : 66;
+    const span = vehicleType === 'bajaj' ? 78 : 94;
+    const baseFreq =
+      startFreq + Math.pow(Math.min(1.25, sr), 0.78) * span + nitroFreq;
+    return {
+      gear: 1,
+      baseFreq,
+      subRatio: 0.5,
+      cutoffHz: 240 + sr * 460 + nitroCut,
+    };
+  }
+
+  const isHeavy =
+    vehicleType === 'transjakarta' ||
+    vehicleType === 'metromini' ||
+    vehicleType === 'barracuda';
+  const shiftPoints = isHeavy
+    ? [0, 0.28, 0.56, 0.86, 1.38]
+    : [0, 0.22, 0.44, 0.68, 0.88, 1.42];
+
+  let gear = shiftPoints.length - 1;
+  let gearProgress = 1;
+  for (let g = 0; g < shiftPoints.length - 1; g++) {
+    if (sr < shiftPoints[g + 1] || g === shiftPoints.length - 2) {
+      gear = g + 1;
+      gearProgress = Math.max(
+        0,
+        Math.min(
+          1,
+          (sr - shiftPoints[g]) /
+            Math.max(0.01, shiftPoints[g + 1] - shiftPoints[g])
+        )
+      );
+      break;
+    }
+  }
+
+  const gearBase = isHeavy
+    ? 34 + gear * 4
+    : vehicleType === 'supercar'
+    ? 54 + gear * 7
+    : 44 + gear * 5.5;
+  const revClimb =
+    (isHeavy ? 26 : vehicleType === 'supercar' ? 56 : 42) * gearProgress;
+  const baseFreq = Math.max(28, gearBase + revClimb + nitroFreq);
+  const subRatio = vehicleType === 'supercar' ? 1.5 : 0.5;
+  const cutoffHz =
+    (isHeavy ? 140 : 190) + gearProgress * 460 + gear * 35 + nitroCut;
+
+  return { gear, baseFreq, subRatio, cutoffHz };
+}
+
 class SoundEngine {
   private ctx: AudioContext | null = null;
   public muted: boolean = false;
@@ -508,24 +587,18 @@ class SoundEngine {
       }
 
       const sr = Math.max(0, Math.min(1.4, speedRatio));
-      const pitchOffset =
-        vehicleType === 'ojek' || vehicleType === 'bajaj'
-          ? 18
-          : vehicleType === 'supercar'
-          ? 24
-          : vehicleType === 'transjakarta' || vehicleType === 'barracuda' || vehicleType === 'metromini'
-          ? -10
-          : 0;
-      const baseFreq = isAircraft
-        ? 54 + sr * 52 + (nitroActive ? 22 : 0)
-        : Math.max(28, 42 + pitchOffset + sr * 76 + (nitroActive ? 26 : 0));
-      const cutoff = 180 + sr * 520 + (nitroActive ? 240 : 0);
+      const { baseFreq, subRatio, cutoffHz } = computeEngineTransmissionRpm(
+        sr,
+        vehicleType,
+        isAircraft,
+        nitroActive
+      );
       const gainTarget =
         (0.02 + Math.min(1, sr) * 0.028 + (nitroActive ? 0.012 : 0)) * sfxMult;
 
       this.engineOsc.frequency.setTargetAtTime(baseFreq, now, 0.08);
-      this.engineSubOsc.frequency.setTargetAtTime(baseFreq * 0.5, now, 0.08);
-      this.engineFilter.frequency.setTargetAtTime(cutoff, now, 0.08);
+      this.engineSubOsc.frequency.setTargetAtTime(baseFreq * subRatio, now, 0.08);
+      this.engineFilter.frequency.setTargetAtTime(cutoffHz, now, 0.08);
       this.engineGain.gain.setTargetAtTime(Math.max(0.0001, gainTarget), now, 0.09);
     } catch {
       // Ignore Web Audio errors on locked contexts

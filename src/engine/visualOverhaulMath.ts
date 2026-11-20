@@ -99,13 +99,19 @@ export function computeChaseCameraFov(
 }
 
 /**
- * Determines whether a world coordinate lies on one of Jakarta's main paved boulevards or plaza.
+ * Determines whether a world coordinate lies on one of Jakarta's main paved boulevards, outer ring, JORR, or plaza.
  */
 export function isOnPavedCorridor(x: number, z: number): boolean {
-  const onMainNS = Math.abs(x) <= 7.6;
-  const onMainEW = Math.abs(z) <= 7.6;
-  const onRingNS = Math.abs(Math.abs(x) - 32) <= 5.6;
-  const onRingEW = Math.abs(Math.abs(z) - 32) <= 5.6;
+  const onMainNS = Math.abs(x) <= 7.6 && z >= -74 && z <= 218;
+  const onMainEW = Math.abs(z) <= 7.6 && Math.abs(x) <= 218;
+  const onRingNS = Math.abs(Math.abs(x) - 32) <= 5.6 && z >= -74 && z <= 218;
+  const onRingEW = Math.abs(Math.abs(z) - 32) <= 5.6 && Math.abs(x) <= 218;
+  const onOuterRingNS = Math.abs(Math.abs(x) - 128) <= 6.6 && z >= -70 && z <= 216;
+  const onOuterRingSouth = Math.abs(z - 128) <= 6.6 && Math.abs(x) <= 216;
+  const onJorrNS = Math.abs(Math.abs(x) - 208) <= 7.6 && z >= -72 && z <= 216;
+  const onJorrSouth = Math.abs(z - 208) <= 7.6 && Math.abs(x) <= 216;
+  const onCoastalWings =
+    Math.abs(z + 66) <= 6.2 && Math.abs(x) >= 120 && Math.abs(x) <= 216;
   const onMonasPlaza = x * x + z * z <= 19.2 * 19.2;
   const onElevatedToll = z >= -30.5 && z <= -21.5 && Math.abs(x) <= 68;
   return (
@@ -113,6 +119,11 @@ export function isOnPavedCorridor(x: number, z: number): boolean {
     onMainEW ||
     onRingNS ||
     onRingEW ||
+    onOuterRingNS ||
+    onOuterRingSouth ||
+    onJorrNS ||
+    onJorrSouth ||
+    onCoastalWings ||
     onMonasPlaza ||
     onElevatedToll
   );

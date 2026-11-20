@@ -3,16 +3,21 @@ import { proceduralTextures } from '../../engine/ProceduralTextures';
 import type { BuildingFootprint } from '../types';
 
 export function createContactShadowDisc(radius: number): THREE.Mesh {
-  const geo = new THREE.CircleGeometry(radius, 20);
+  const size = radius * 2.2;
+  const geo = new THREE.PlaneGeometry(size, size);
   geo.rotateX(-Math.PI / 2);
   const mat = new THREE.MeshBasicMaterial({
-    color: 0x040609,
+    map: proceduralTextures.getContactShadowTexture(),
+    color: 0xffffff,
     transparent: true,
-    opacity: 0.48,
+    opacity: 0.92,
     depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
   });
   const disc = new THREE.Mesh(geo, mat);
-  disc.position.y = 0.02;
+  disc.position.y = 0.032;
   return disc;
 }
 
