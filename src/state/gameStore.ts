@@ -85,6 +85,7 @@ import {
   setActiveSaveSlot,
 } from '../game/save';
 import { soundEngine } from '../game/sound';
+import { cityAudio } from '../engine/CityAudio';
 
 export const STREET_BOUNTIES: StreetBountySpec[] = [
   {
@@ -181,6 +182,15 @@ export interface RadarEnemyBlip {
   alive: boolean;
 }
 
+export interface ProjectedWorldCallout {
+  id: string;
+  text: string;
+  screenX: number;
+  screenY: number;
+  opacity: number;
+  visible: boolean;
+}
+
 export interface EngineTelemetrySnapshot {
   playerX: number;
   playerY: number;
@@ -192,6 +202,7 @@ export interface EngineTelemetrySnapshot {
   policeCones: PoliceVisionCone[];
   squadMembers: TrioSquadTelemetryMember[];
   raceRivals: RaceRivalTelemetry[];
+  worldCallouts: ProjectedWorldCallout[];
   crosshairSpread: number;
   inCover: boolean;
   stuntAirTimeSec: number;
@@ -227,6 +238,7 @@ export const engineTelemetryRef: EngineTelemetrySnapshot = {
   policeCones: [],
   squadMembers: [],
   raceRivals: [],
+  worldCallouts: [],
   crosshairSpread: 0,
   inCover: false,
   stuntAirTimeSec: 0,
@@ -1031,6 +1043,7 @@ export const gameStore = {
 
   toggleMute: () => {
     soundEngine.muted = !soundEngine.muted;
+    cityAudio.syncMuteState(soundEngine.muted);
     if (soundEngine.muted) {
       soundEngine.stopEngineAudio(true);
       soundEngine.stopAmbientSoundscape(true);

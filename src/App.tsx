@@ -61,6 +61,8 @@ import { WarungSnackModal } from './components/WarungSnackModal';
 import { CinematicOverlay } from './components/CinematicOverlay';
 import { MobileTouchControls } from './components/MobileTouchControls';
 import { PhotoModeOverlay } from './components/PhotoModeOverlay';
+import { WorldCalloutOverlay } from './components/WorldCalloutOverlay';
+import { cityAudio } from './engine/CityAudio';
 import { soundEngine } from './game/sound';
 import { speakDialogueLine } from './game/voiceClient';
 import {
@@ -77,6 +79,12 @@ import {
 } from './state/gameStore';
 
 const WEATHER_ORDER: WeatherMode[] = ['senja', 'malam', 'siang', 'hujan'];
+const WEATHER_PRESET_MINUTES: Record<WeatherMode, number> = {
+  siang: 780, // 13:00 WIB Siang Cerah
+  senja: 1050, // 17:30 WIB Senja Emas
+  malam: 1320, // 22:00 WIB Malam Neon
+  hujan: 960, // 16:00 WIB Hujan Deras
+};
 
 export default function App() {
   const gameState = useGameStore((s) => s.gameState);
@@ -202,6 +210,7 @@ export default function App() {
   useEffect(() => {
     const unlockAmbience = () => {
       soundEngine.unlockAudio();
+      cityAudio.unlock();
       const s = gameStore.getState();
       if (s.gameState !== 'playing' || s.muted) return;
       const isOutdoor = s.playerState.currentInterior === 'exterior';
@@ -407,7 +416,11 @@ export default function App() {
   const cycleWeather = useCallback(() => {
     gameStore.setState((prev) => {
       const idx = WEATHER_ORDER.indexOf(prev.weatherMode);
-      return { weatherMode: WEATHER_ORDER[(idx + 1) % WEATHER_ORDER.length] };
+      const nextMode = WEATHER_ORDER[(idx + 1) % WEATHER_ORDER.length];
+      return {
+        weatherMode: nextMode,
+        worldTimeMinutes: WEATHER_PRESET_MINUTES[nextMode],
+      };
     });
     soundEngine.playPickup();
   }, []);
@@ -661,11 +674,15 @@ export default function App() {
         }));
       } else if (e.code === 'KeyH') {
         e.preventDefault();
-        gameStore.setState((prev) => ({
-          heistBoardOpen: !prev.heistBoardOpen,
-          phoneOpen: false,
-          wheelMode: null,
-        }));
+        if (s.drivingVehicle) {
+          controllerRef.current?.triggerHorn();
+        } else {
+          gameStore.setState((prev) => ({
+            heistBoardOpen: !prev.heistBoardOpen,
+            phoneOpen: false,
+            wheelMode: null,
+          }));
+        }
       } else if (e.code === 'KeyB') {
         e.preventDefault();
         gameStore.setState((prev) => ({
@@ -1642,6 +1659,9 @@ export default function App() {
         />
       )}
 
+      {/* FLOATING WORLD-SPACE NPC & TRAFFIC REACTION CALLOUTS */}
+      {gameState === 'playing' && !photoModeOpen && <WorldCalloutOverlay />}
+
       {/* DUAL-THUMB MOBILE TOUCH CONTROLS OVERLAY */}
       {gameState === 'playing' &&
         !photoModeOpen &&
@@ -1672,7 +1692,10 @@ export default function App() {
         <PhotoModeOverlay
           weatherMode={weatherMode}
           onChangeWeather={(w) => {
-            gameStore.setState({ weatherMode: w });
+            gameStore.setState({
+              weatherMode: w,
+              worldTimeMinutes: WEATHER_PRESET_MINUTES[w],
+            });
             soundEngine.playPickup();
           }}
           onCapturePng={handleCapturePhoto}
@@ -1799,7 +1822,10 @@ export default function App() {
           onBuyProperty={handleBuyProperty}
           onCompleteSideHustle={(rp) => handleCompleteSideHustle(rp)}
           onChangeWeather={(w) => {
-            gameStore.setState({ weatherMode: w });
+            gameStore.setState({
+              weatherMode: w,
+              worldTimeMinutes: WEATHER_PRESET_MINUTES[w],
+            });
             soundEngine.playPickup();
           }}
           onRecruitCrew={handleRecruitCrew}
@@ -1857,7 +1883,10 @@ export default function App() {
             gameStore.setState({ dialogueMission: m })
           }
           onChangeWeather={(w) => {
-            gameStore.setState({ weatherMode: w });
+            gameStore.setState({
+              weatherMode: w,
+              worldTimeMinutes: WEATHER_PRESET_MINUTES[w],
+            });
             soundEngine.playPickup();
           }}
           onChangeRadio={handleChangeRadio}

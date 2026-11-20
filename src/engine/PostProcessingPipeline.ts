@@ -6,6 +6,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import type { GraphicsQualityTier, PhotoFilterId } from '../game/types';
+import { computeTimeOfDayToneState } from './visualOverhaulMath';
 
 export type ResolvedQualityTier = Exclude<GraphicsQualityTier, 'auto'>;
 
@@ -88,6 +89,7 @@ const CinematicGradeShader = {
 export interface PostProcessingFrameParams {
   dt: number;
   nightFactor: number;
+  wetnessFactor?: number;
   speedRatio: number;
   fokusActive: boolean;
   damagePulse: number;
@@ -144,9 +146,9 @@ export class PostProcessingPipeline {
 
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(Math.max(1, Math.floor(this.width / 2)), Math.max(1, Math.floor(this.height / 2))),
-      0.12,
-      0.28,
-      1.02
+      0.32,
+      0.4,
+      0.85
     );
     this.composer.addPass(this.bloomPass);
 
@@ -293,10 +295,14 @@ export class PostProcessingPipeline {
     }
 
     // Dynamic Bloom & Grade tuning based on Jakarta time-of-day + Fokus + Speed
+    const tone = computeTimeOfDayToneState(
+      params.nightFactor,
+      params.wetnessFactor ?? 0
+    );
     this.bloomPass.strength =
-      0.08 + params.nightFactor * 0.12 + (params.fokusActive ? 0.06 : 0);
-    this.bloomPass.radius = 0.24 + params.nightFactor * 0.12;
-    this.bloomPass.threshold = 1.04 - params.nightFactor * 0.05;
+      tone.bloomStrength + (params.fokusActive ? 0.06 : 0);
+    this.bloomPass.radius = tone.bloomRadius;
+    this.bloomPass.threshold = tone.bloomThreshold;
 
     const u = this.gradePass.material.uniforms;
     u.uChromatic.value =

@@ -19,13 +19,19 @@ export function buildThreeTierBuildingLOD(
   highDetailGroup.rotation.set(0, 0, 0);
   lod.addLevel(highDetailGroup, 0);
 
-  // Medium-Detail Tier (distance >= 72m): Primary tower + roof crown
+  // Reuse high-detail textured/emissive facade material on LOD1 so distant skyscrapers retain lit windows
+  const highNightMats = highDetailGroup.userData.nightEmissiveMats as
+    | THREE.MeshStandardMaterial[]
+    | undefined;
   const medGroup = new THREE.Group();
-  const medMat = new THREE.MeshStandardMaterial({
-    color: spec.primaryColor,
-    roughness: 0.72,
-    metalness: 0.18,
-  });
+  const medMat =
+    highNightMats && highNightMats.length > 0
+      ? highNightMats[0]
+      : new THREE.MeshStandardMaterial({
+          color: spec.primaryColor,
+          roughness: 0.62,
+          metalness: 0.28,
+        });
   const bodyGeo = new THREE.BoxGeometry(spec.width, spec.height, spec.depth);
   bodyGeo.translate(0, spec.height * 0.5, 0);
   const bodyMesh = new THREE.Mesh(bodyGeo, medMat);
@@ -41,18 +47,18 @@ export function buildThreeTierBuildingLOD(
   crownGeo.translate(0, spec.height + 0.5, 0);
   const crownMat = new THREE.MeshStandardMaterial({
     color: spec.accentColor,
-    roughness: 0.55,
-    metalness: 0.25,
+    roughness: 0.52,
+    metalness: 0.32,
   });
   medGroup.add(new THREE.Mesh(crownGeo, crownMat));
-  lod.addLevel(medGroup, 72);
+  lod.addLevel(medGroup, 130);
 
-  // Low-Detail Silhouette Tier (distance >= 135m): Single hull mesh
+  // Low-Detail Silhouette Tier (distance >= 210m): Single hull mesh
   const lowMat = new THREE.MeshBasicMaterial({
     color: spec.primaryColor,
   });
   const lowMesh = new THREE.Mesh(bodyGeo, lowMat);
-  lod.addLevel(lowMesh, 135);
+  lod.addLevel(lowMesh, 210);
 
   lod.frustumCulled = true;
   return lod;

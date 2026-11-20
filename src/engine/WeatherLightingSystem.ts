@@ -5,6 +5,7 @@ import {
   createInitialWeatherTransitionState,
   stepWeatherTransitionInPlace,
 } from '../game/rules';
+import { snapShadowCoordToTexel } from './visualOverhaulMath';
 
 export class WeatherLightingSystem {
   private scene: THREE.Scene;
@@ -240,32 +241,6 @@ export class WeatherLightingSystem {
     }
     scene.add(this.rainInst);
 
-    // Lightweight Volumetric Sunset God-Ray Shafts (Tropical Vice-Jakarta)
-    this.sunShaftGroup = new THREE.Group();
-    this.sunShaftMat = new THREE.MeshBasicMaterial({
-      color: 0xff9a6c,
-      transparent: true,
-      opacity: isSoftwareGl ? 0 : 0.085,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const shaftGeo = new THREE.ConeGeometry(16, 78, 12, 1, true);
-    const shaftOffsets: [number, number, number][] = [
-      [-18, 34, -22],
-      [14, 36, -42],
-      [2, 32, 14],
-    ];
-    for (const [sx, sy, sz] of shaftOffsets) {
-      const cone = new THREE.Mesh(shaftGeo, this.sunShaftMat);
-      cone.position.set(sx, sy, sz);
-      cone.rotation.z = -0.34;
-      cone.rotation.x = 0.24;
-      this.sunShaftGroup.add(cone);
-    }
-    this.sunShaftGroup.visible = !isSoftwareGl;
-    scene.add(this.sunShaftGroup);
-
     // Pooled 3D Jagged Monsoon Lightning Bolt (strikes skyline during heavy storms)
     this.lightningBoltGroup = new THREE.Group();
     const boltPts: THREE.Vector3[] = [];
@@ -300,9 +275,6 @@ export class WeatherLightingSystem {
 
     this.transitionState = createInitialWeatherTransitionState(initialWeather);
   }
-
-  private readonly sunShaftGroup: THREE.Group;
-  private readonly sunShaftMat: THREE.MeshBasicMaterial;
 
   public update(
     targetWeather: WeatherMode,
@@ -403,21 +375,6 @@ export class WeatherLightingSystem {
     this.skyUniforms.uNightFactor.value = this.transitionState.nightFactor;
     this.skyUniforms.uLightning.value = this.lightningStrength;
 
-    // Volumetric Sunset God-Ray Shafts fade in during Tropical Vice-Jakarta senja
-    const sunsetStrength =
-      this.transitionState.sunGlowStrength *
-      (1 - Math.max(0, wet - 0.55) * 1.8) *
-      (1 - Math.max(0, this.transitionState.nightFactor - 0.72) * 2.6);
-    if (this.sunShaftGroup.visible) {
-      this.sunShaftMat.opacity = Math.max(0, Math.min(0.11, sunsetStrength * 0.16));
-      this.sunShaftMat.color.setRGB(
-        this.transitionState.sunColorRgb.r,
-        this.transitionState.sunColorRgb.g * 0.86,
-        this.transitionState.sunColorRgb.b * 0.78
-      );
-      this.sunShaftGroup.position.set(playerX * 0.35, 0, playerZ * 0.35);
-    }
-
     if (this.scene.background instanceof THREE.Color) {
       this.scene.background.setRGB(
         this.transitionState.fogHorizonRgb.r,
@@ -431,7 +388,7 @@ export class WeatherLightingSystem {
         this.transitionState.fogHorizonRgb.g,
         this.transitionState.fogHorizonRgb.b
       );
-      this.scene.fog.density = Math.max(0.0034, this.transitionState.fogDensity);
+      this.scene.fog.density = Math.max(0.002, this.transitionState.fogDensity);
     }
 
     // Active rain drops only during monsoon downpour (wet > 0.58), preserving glossy post-rain asphalt in senja/malam
@@ -465,18 +422,25 @@ export class WeatherLightingSystem {
       this.rainInst.visible = false;
     }
 
-    // Texel-snapped directional sun shadow frustum tracking player
-    if (this.sunLight.castShadow) {
-      const texelWorldSize = (this.shadowHalfExtent * 2) / this.shadowMapSize;
-      const snapX = Math.round(playerX / texelWorldSize) * texelWorldSize;
-      const snapZ = Math.round(playerZ / texelWorldSize) * texelWorldSize;
-      this.sunLight.target.position.set(snapX, 0, snapZ);
-      this.sunLight.position.set(
-        snapX + this.sunOffset.x,
-        this.sunOffset.y,
-        snapZ + this.sunOffset.z
-      );
-    }
+    // Dynamic Time-of-Day Sun/Moon direction + texel-snapped directional shadow frustum tracking player
+    const sunDirX = this.transitionState.sunDir[0];
+    const sunDirY = Math.max(0.32, this.transitionState.sunDir[1]);
+    const sunDirZ = this.transitionState.sunDir[2];
+    const sunDist = 84;
+    this.sunOffset.set(sunDirX * sunDist, sunDirY * sunDist, sunDirZ * sunDist);
+
+    const snapX = this.sunLight.castShadow
+      ? snapShadowCoordToTexel(playerX, this.shadowHalfExtent, this.shadowMapSize)
+      : playerX;
+    const snapZ = this.sunLight.castShadow
+      ? snapShadowCoordToTexel(playerZ, this.shadowHalfExtent, this.shadowMapSize)
+      : playerZ;
+    this.sunLight.target.position.set(snapX, 0, snapZ);
+    this.sunLight.position.set(
+      snapX + this.sunOffset.x,
+      this.sunOffset.y,
+      snapZ + this.sunOffset.z
+    );
 
     this.skyDomeMesh.position.copy(cameraPosition);
 
@@ -492,10 +456,6 @@ export class WeatherLightingSystem {
     this.skyDomeMat.dispose();
     this.rainGeo.dispose();
     this.rainMat.dispose();
-    this.sunShaftMat.dispose();
-    this.sunShaftGroup.traverse((o) => {
-      if (o instanceof THREE.Mesh) o.geometry.dispose();
-    });
     this.lightningBoltLine.geometry.dispose();
     this.lightningBoltMat.dispose();
     this.lightningBoltCore.geometry.dispose();

@@ -38,6 +38,12 @@ import { SimWorkerClient } from './simWorkerClient';
 import { spatialAudio } from './spatialAudio';
 import { TrafficSystem } from './TrafficSystem';
 import { WeatherLightingSystem } from './WeatherLightingSystem';
+import { cityAudio } from './CityAudio';
+import { proceduralTextures } from './ProceduralTextures';
+import {
+  computeTimeOfDayToneState,
+  pickHornReactionCallout,
+} from './visualOverhaulMath';
 import type { MultiplayerRoomMode } from '../game/types';
 
 export interface WorldControllerHandle {
@@ -141,6 +147,17 @@ export class WorldEngine {
   private hudSyncAccumulator = 0;
   private rollingFps = 60;
   private readonly _camRight = new THREE.Vector3();
+  private readonly _projVec = new THREE.Vector3();
+  private readonly activeWorldCallouts: {
+    id: string;
+    text: string;
+    x: number;
+    y: number;
+    z: number;
+    createdAt: number;
+    durationMs: number;
+  }[] = [];
+  private calloutCounter = 0;
   private viralThumbCanvas: HTMLCanvasElement | null = null;
   private lastViralMomentAt = 0;
   private lastWantedLevelSeen = 0;
@@ -169,7 +186,7 @@ export class WorldEngine {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.85;
+    this.renderer.toneMappingExposure = 1.05;
     this.renderer.setPixelRatio(
       this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2)
     );
@@ -188,7 +205,7 @@ export class WorldEngine {
     const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
     const roomEnv = new RoomEnvironment();
     this.scene.environment = pmremGenerator.fromScene(roomEnv, 0.04).texture;
-    this.scene.environmentIntensity = 0.12;
+    this.scene.environmentIntensity = 0.62;
     roomEnv.dispose();
     pmremGenerator.dispose();
 
@@ -256,6 +273,47 @@ export class WorldEngine {
         onEnterOrExitInterior: (t) => this.props.onEnterOrExitInterior(t),
         onCombatHitFeedback: (evt) => this.props.onCombatHitFeedback?.(evt),
         onPlayerHitAngle: (ang) => this.props.onPlayerHitAngle?.(ang),
+        onHornTriggered: (hx, _hy, hz) => {
+          const reactedVehicles = this.trafficSystem.notifyHorn(hx, hz);
+          let reactedPeds = this.crowdSystem.reactToHorn(hx, hz, 24);
+          if (reactedVehicles.length === 0 && reactedPeds.length === 0) {
+            reactedPeds = this.crowdSystem.reactToHorn(hx, hz, 38);
+          }
+          const nowTs = performance.now();
+          const spawnCallout = (cx: number, cy: number, cz: number) => {
+            this.calloutCounter += 1;
+            const text = pickHornReactionCallout(
+              this.calloutCounter + Math.round(cx + cz)
+            );
+            this.activeWorldCallouts.push({
+              id: `callout_${this.calloutCounter}`,
+              text,
+              x: cx,
+              y: cy,
+              z: cz,
+              createdAt: nowTs,
+              durationMs: 1850,
+            });
+          };
+          for (let i = 0; i < reactedVehicles.length; i++) {
+            const rv = reactedVehicles[i];
+            spawnCallout(rv.x, rv.y, rv.z);
+          }
+          for (let i = 0; i < reactedPeds.length; i++) {
+            const rp = reactedPeds[i];
+            spawnCallout(rp.x, rp.y, rp.z);
+          }
+          // If honked in a clear stretch ahead of the player with reacting entities behind camera,
+          // also echo a roadside pedestrian callout just ahead on the curb
+          if (reactedVehicles.length + reactedPeds.length === 0) {
+            const fwdX = Math.sin(this.playerController.playerPhys.facing);
+            const fwdZ = Math.cos(this.playerController.playerPhys.facing);
+            spawnCallout(hx + fwdX * 7 + fwdZ * 4.2, 2.2, hz + fwdZ * 7 - fwdX * 4.2);
+          }
+          while (this.activeWorldCallouts.length > 5) {
+            this.activeWorldCallouts.shift();
+          }
+        },
         onWeaponNoise: (wx, wz, radius, isBlast) => {
           this.crowdSystem.triggerPanicNear(wx, wz, radius);
           if (radius >= 16) {
@@ -598,10 +656,20 @@ export class WorldEngine {
         this.camera.position,
         dt
       );
+    const tone = computeTimeOfDayToneState(nightFactor, wetnessFactor);
+    this.renderer.toneMappingExposure = tone.exposure;
+    this.scene.environmentIntensity = tone.envIntensity;
+
     if (lightningTriggered && currentGameState === 'playing') {
       soundEngine.playThunderBoom();
     }
     this.cityRenderer.setWeatherTransition(nightFactor, wetnessFactor, dt);
+    this.cityRenderer.updateStreetlightPool(
+      phys.x,
+      phys.z,
+      nightFactor,
+      wetnessFactor
+    );
 
     this.trafficSystem.updateVisualsAndAircraft(
       dt,
@@ -610,7 +678,8 @@ export class WorldEngine {
       pState,
       currentGameState === 'playing',
       phys.x,
-      phys.z
+      phys.z,
+      nightFactor
     );
 
     const nextStoryMission = this.playerController.updateWorldActors(
@@ -1020,11 +1089,72 @@ export class WorldEngine {
       soundEngine.updateEngineAudio(0, false, false, false, false);
     }
 
+    // Update procedural Web Audio engine & urban ambience layers
+    const isDrivingNow =
+      currentGameState === 'playing' && Boolean(phys.drivingVehicleId);
+    cityAudio.updateEngine(speedRatio, isDrivingNow);
+    cityAudio.updateUrbanAmbience(
+      currentGameState === 'playing' && pState.currentInterior === 'exterior',
+      nightFactor
+    );
+
+    // Project active 3D horn/street reaction callouts to viewport coordinates
+    if (this.activeWorldCallouts.length > 0) {
+      const vw = this.container.clientWidth || window.innerWidth;
+      const vh = this.container.clientHeight || window.innerHeight;
+      const out = engineTelemetryRef.worldCallouts;
+      let writeIdx = 0;
+      for (let i = this.activeWorldCallouts.length - 1; i >= 0; i--) {
+        const c = this.activeWorldCallouts[i];
+        const age = now - c.createdAt;
+        if (age >= c.durationMs) {
+          this.activeWorldCallouts.splice(i, 1);
+          continue;
+        }
+        const progress = age / c.durationMs;
+        this._projVec.set(c.x, c.y + progress * 1.15, c.z);
+        this._projVec.project(this.camera);
+        const inFront = this._projVec.z >= -1 && this._projVec.z <= 1;
+        const sx = (this._projVec.x * 0.5 + 0.5) * vw;
+        const sy = (-this._projVec.y * 0.5 + 0.5) * vh;
+        const visible =
+          inFront && sx >= 24 && sx <= vw - 24 && sy >= 36 && sy <= vh - 24;
+        const opacity =
+          progress < 0.15
+            ? progress / 0.15
+            : progress > 0.72
+            ? Math.max(0, (1 - progress) / 0.28)
+            : 1;
+        if (!out[writeIdx]) {
+          out[writeIdx] = {
+            id: c.id,
+            text: c.text,
+            screenX: sx,
+            screenY: sy,
+            opacity,
+            visible,
+          };
+        } else {
+          out[writeIdx].id = c.id;
+          out[writeIdx].text = c.text;
+          out[writeIdx].screenX = sx;
+          out[writeIdx].screenY = sy;
+          out[writeIdx].opacity = opacity;
+          out[writeIdx].visible = visible;
+        }
+        writeIdx++;
+      }
+      out.length = writeIdx;
+    } else if (engineTelemetryRef.worldCallouts.length > 0) {
+      engineTelemetryRef.worldCallouts.length = 0;
+    }
+
     const storeSnap = gameStore.getState();
     this.postProcessing.render(
       {
         dt,
         nightFactor,
+        wetnessFactor,
         speedRatio,
         fokusActive: pState.fokusActive,
         damagePulse: this.playerController.getDamagePulse(),
@@ -1063,6 +1193,8 @@ export class WorldEngine {
     this.cityRenderer.dispose();
     this.weatherSystem.dispose();
     this.postProcessing.dispose();
+    cityAudio.dispose();
+    proceduralTextures.disposeAll();
     this.scene.environment?.dispose();
     this.renderer.dispose();
 

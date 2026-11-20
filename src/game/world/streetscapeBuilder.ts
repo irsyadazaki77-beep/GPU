@@ -1,16 +1,15 @@
 import * as THREE from 'three';
+import { proceduralTextures } from '../../engine/ProceduralTextures';
+import type { Point2D } from '../../engine/visualOverhaulMath';
 import { ENTERABLE_INTERIORS } from '../heists';
 import type { TrafficSignalPhase, WeatherMode } from '../types';
 import { isNearBuilding, isOnRoadway } from './spatial';
-import {
-  SidewalkRect,
-  createGantrySignTexture,
-  createSidewalkTexture,
-} from './textures';
+import { SidewalkRect, createGantrySignTexture } from './textures';
 
 export function buildJakartaStreetscape(maxAnisotropy: number): {
   group: THREE.Group;
   sidewalkRects: SidewalkRect[];
+  pjuLightAnchors: Point2D[];
   setWeatherVisuals: (weather: WeatherMode) => void;
   setWeatherTransition: (
     nightFactor: number,
@@ -22,20 +21,25 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   const group = new THREE.Group();
   const sidewalkRects: SidewalkRect[] = [];
 
-  const sidewalkTex = createSidewalkTexture(maxAnisotropy);
-  sidewalkTex.repeat.set(1, 5);
+  const sidewalkSet = proceduralTextures.getSidewalkTextures(maxAnisotropy);
+  sidewalkSet.map.repeat.set(1, 5);
+  sidewalkSet.bumpMap.repeat.set(1, 5);
+  sidewalkSet.roughnessMap.repeat.set(1, 5);
   const sidewalkMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    map: sidewalkTex,
-    roughness: 0.94,
-    metalness: 0.02,
-    envMapIntensity: 0.06,
+    map: sidewalkSet.map,
+    bumpMap: sidewalkSet.bumpMap,
+    bumpScale: 0.035,
+    roughnessMap: sidewalkSet.roughnessMap,
+    roughness: 0.9,
+    metalness: 0.04,
+    envMapIntensity: 0.34,
   });
   const curbYellowMat = new THREE.MeshStandardMaterial({
-    color: 0xb45309,
-    roughness: 0.88,
-    metalness: 0.02,
-    envMapIntensity: 0.06,
+    color: 0xd97706,
+    roughness: 0.82,
+    metalness: 0.04,
+    envMapIntensity: 0.25,
   });
 
   const addSidewalkSlab = (
@@ -180,20 +184,17 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     emissiveIntensity: 0.95,
     roughness: 0.25,
   });
+  const radialPoolTex = proceduralTextures.getRadialLightPoolTexture();
   const lightPoolMat = new THREE.MeshBasicMaterial({
-    color: 0xfbbf24,
+    map: radialPoolTex,
+    color: 0xffd27d,
     transparent: true,
-    opacity: 0.08,
-    depthWrite: false,
-  });
-
-  const lightConeMat = new THREE.MeshBasicMaterial({
-    color: 0xfde68a,
-    transparent: true,
-    opacity: 0.06,
+    opacity: 0.14,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
-    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
   });
 
   const pCount = polePositions.length;
@@ -209,14 +210,10 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   pjuLampGeo.translate(1.65, 6.56, 0);
   const pjuLampInst = new THREE.InstancedMesh(pjuLampGeo, pjuBulbMat, pCount);
 
-  const poolGeo = new THREE.CircleGeometry(3.8, 18);
+  const poolGeo = new THREE.PlaneGeometry(8.6, 8.6);
   poolGeo.rotateX(-Math.PI / 2);
-  poolGeo.translate(1.8, 0.056, 0);
+  poolGeo.translate(1.8, 0.048, 0);
   const poolInst = new THREE.InstancedMesh(poolGeo, lightPoolMat, pCount);
-
-  const coneGeo = new THREE.ConeGeometry(2.6, 6.4, 12, 1, true);
-  coneGeo.translate(1.65, 3.3, 0);
-  const coneInst = new THREE.InstancedMesh(coneGeo, lightConeMat, pCount);
 
   polePositions.forEach((pp, i) => {
     dummy.position.set(pp.x, 0, pp.z);
@@ -227,14 +224,12 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     pjuArmInst.setMatrixAt(i, dummy.matrix);
     pjuLampInst.setMatrixAt(i, dummy.matrix);
     poolInst.setMatrixAt(i, dummy.matrix);
-    coneInst.setMatrixAt(i, dummy.matrix);
   });
   pjuMastInst.instanceMatrix.needsUpdate = true;
   pjuArmInst.instanceMatrix.needsUpdate = true;
   pjuLampInst.instanceMatrix.needsUpdate = true;
   poolInst.instanceMatrix.needsUpdate = true;
-  coneInst.instanceMatrix.needsUpdate = true;
-  group.add(pjuMastInst, pjuArmInst, pjuLampInst, poolInst, coneInst);
+  group.add(pjuMastInst, pjuArmInst, pjuLampInst, poolInst);
 
   const signalCorners: {
     x: number;
@@ -431,39 +426,55 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   }
 
   const tCount = treeCoords.length;
-  const trunkGeo = new THREE.CylinderGeometry(0.16, 0.36, 3.4, 8);
-  trunkGeo.translate(0, 1.7, 0);
+  const trunkGeo = new THREE.CylinderGeometry(0.14, 0.34, 3.45, 7);
+  trunkGeo.translate(0, 1.72, 0);
   const trunkMat = new THREE.MeshStandardMaterial({
     color: 0x4a3525,
     roughness: 0.94,
     metalness: 0.02,
-    envMapIntensity: 0.18,
+    flatShading: true,
+    envMapIntensity: 0.16,
   });
   const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, tCount);
   trunkInst.castShadow = true;
 
-  const branchGeo = new THREE.CylinderGeometry(0.08, 0.15, 1.6, 6);
-  branchGeo.rotateZ(0.52);
-  branchGeo.translate(-0.42, 3.1, 0);
+  const branchGeo = new THREE.CylinderGeometry(0.07, 0.15, 1.75, 5);
+  branchGeo.rotateZ(0.56);
+  branchGeo.translate(-0.46, 3.05, 0.12);
   const branchInst = new THREE.InstancedMesh(branchGeo, trunkMat, tCount);
 
-  const crownCenterGeo = new THREE.DodecahedronGeometry(1.65, 1);
-  crownCenterGeo.scale(1.32, 0.66, 1.28);
-  crownCenterGeo.translate(0, 3.85, 0);
+  const branchBGeo = new THREE.CylinderGeometry(0.06, 0.13, 1.45, 5);
+  branchBGeo.rotateZ(-0.48);
+  branchBGeo.rotateY(0.65);
+  branchBGeo.translate(0.42, 3.25, -0.18);
+  const branchBInst = new THREE.InstancedMesh(branchBGeo, trunkMat, tCount);
 
-  const crownSideAGeo = new THREE.DodecahedronGeometry(1.22, 1);
-  crownSideAGeo.scale(1.18, 0.68, 1.15);
-  crownSideAGeo.translate(-0.92, 3.55, 0.42);
+  // Multi-cluster faceted low-poly tropical canopies (asymmetric organic silhouettes, zero smooth spheres)
+  const crownCenterGeo = new THREE.DodecahedronGeometry(1.48, 0);
+  crownCenterGeo.scale(1.26, 0.72, 1.18);
+  crownCenterGeo.rotateY(0.35);
+  crownCenterGeo.translate(0.08, 4.05, -0.05);
 
-  const crownSideBGeo = new THREE.DodecahedronGeometry(1.18, 1);
-  crownSideBGeo.scale(1.15, 0.72, 1.18);
-  crownSideBGeo.translate(0.84, 4.35, -0.36);
+  const crownSideAGeo = new THREE.DodecahedronGeometry(1.16, 0);
+  crownSideAGeo.scale(1.22, 0.62, 1.05);
+  crownSideAGeo.rotateZ(0.22);
+  crownSideAGeo.translate(-1.02, 3.52, 0.48);
+
+  const crownSideBGeo = new THREE.DodecahedronGeometry(1.08, 0);
+  crownSideBGeo.scale(1.06, 0.74, 1.24);
+  crownSideBGeo.rotateX(-0.18);
+  crownSideBGeo.translate(0.92, 4.38, -0.44);
+
+  const crownTopGeo = new THREE.IcosahedronGeometry(0.92, 0);
+  crownTopGeo.scale(1.18, 0.68, 1.08);
+  crownTopGeo.translate(-0.22, 4.92, 0.24);
 
   const foliageMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    roughness: 0.96,
+    roughness: 0.92,
     metalness: 0.0,
-    envMapIntensity: 0.04,
+    flatShading: true,
+    envMapIntensity: 0.14,
   });
   const crownCenterInst = new THREE.InstancedMesh(
     crownCenterGeo,
@@ -480,50 +491,82 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     foliageMat,
     tCount
   );
+  const crownTopInst = new THREE.InstancedMesh(
+    crownTopGeo,
+    foliageMat,
+    tCount
+  );
   crownCenterInst.castShadow = true;
   crownSideAInst.castShadow = true;
+  crownTopInst.castShadow = true;
 
   const clr = new THREE.Color();
+  const trunkClr = new THREE.Color();
   treeCoords.forEach((tc, i) => {
+    const leanX = Math.sin(i * 2.13) * 0.085;
+    const leanZ = Math.cos(i * 1.71) * 0.085;
+    const yaw = (i * 1.618 * Math.PI) % (Math.PI * 2);
     dummy.position.set(tc.x, 0, tc.z);
-    dummy.rotation.set(0, (i * 1.37) % (Math.PI * 2), 0);
+    dummy.rotation.set(leanX, yaw, leanZ);
     const s = tc.scale;
+    const widthJitter = 0.86 + ((i * 29) % 30) / 100;
+    const heightJitter = 0.88 + ((i * 17) % 28) / 100;
     dummy.scale.set(
-      tc.isPalm ? s * 0.85 : s * 1.05,
-      tc.isPalm ? s * 1.22 : s * 0.95,
-      tc.isPalm ? s * 0.85 : s * 1.05
+      tc.isPalm ? s * 0.78 * widthJitter : s * 1.06 * widthJitter,
+      tc.isPalm ? s * 1.24 * heightJitter : s * 0.98 * heightJitter,
+      tc.isPalm ? s * 0.78 * widthJitter : s * 1.04 * widthJitter
     );
     dummy.updateMatrix();
     trunkInst.setMatrixAt(i, dummy.matrix);
     branchInst.setMatrixAt(i, dummy.matrix);
+    branchBInst.setMatrixAt(i, dummy.matrix);
     crownCenterInst.setMatrixAt(i, dummy.matrix);
     crownSideAInst.setMatrixAt(i, dummy.matrix);
     crownSideBInst.setMatrixAt(i, dummy.matrix);
+    crownTopInst.setMatrixAt(i, dummy.matrix);
 
-    clr.setHSL(0.35 + ((i % 5) - 2) * 0.015, 0.64, 0.16 + (i % 3) * 0.03);
+    trunkClr.setHSL(0.075 + ((i % 3) - 1) * 0.01, 0.34, 0.19 + (i % 3) * 0.025);
+    trunkInst.setColorAt(i, trunkClr);
+
+    // Rich tropical foliage palette variation (deep emerald, warm olive, sun-kissed angsana leaf)
+    const hueBase = tc.isPalm ? 0.28 : 0.32;
+    clr.setHSL(
+      hueBase + ((i % 7) - 3) * 0.018,
+      0.56 + (i % 3) * 0.08,
+      0.16 + (i % 4) * 0.032
+    );
     crownCenterInst.setColorAt(i, clr);
-    clr.offsetHSL(-0.01, 0.04, -0.02);
+    clr.offsetHSL(-0.018, 0.05, -0.025);
     crownSideAInst.setColorAt(i, clr);
-    clr.offsetHSL(0.02, 0.02, 0.04);
+    clr.offsetHSL(0.032, 0.04, 0.045);
     crownSideBInst.setColorAt(i, clr);
+    clr.offsetHSL(0.015, -0.02, 0.055);
+    crownTopInst.setColorAt(i, clr);
   });
   trunkInst.instanceMatrix.needsUpdate = true;
   branchInst.instanceMatrix.needsUpdate = true;
+  branchBInst.instanceMatrix.needsUpdate = true;
   crownCenterInst.instanceMatrix.needsUpdate = true;
   crownSideAInst.instanceMatrix.needsUpdate = true;
   crownSideBInst.instanceMatrix.needsUpdate = true;
+  crownTopInst.instanceMatrix.needsUpdate = true;
+  if (trunkInst.instanceColor) trunkInst.instanceColor.needsUpdate = true;
   if (crownCenterInst.instanceColor)
     crownCenterInst.instanceColor.needsUpdate = true;
   if (crownSideAInst.instanceColor)
     crownSideAInst.instanceColor.needsUpdate = true;
   if (crownSideBInst.instanceColor)
     crownSideBInst.instanceColor.needsUpdate = true;
+  if (crownTopInst.instanceColor)
+    crownTopInst.instanceColor.needsUpdate = true;
   group.add(
     trunkInst,
     branchInst,
+    branchBInst,
     crownCenterInst,
     crownSideAInst,
-    crownSideBInst
+    crownSideBInst,
+    crownTopInst
   );
 
   // Elevated MRT Jakarta "Ratangga" Viaduct & Moving 3-Car Train along Sudirman Corridor
@@ -606,10 +649,9 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     elapsedTime: number = 0
   ) => {
     const n = Math.max(0, Math.min(1, nightFactor));
-    pjuBulbMat.emissiveIntensity = 0.1 + n * 1.25;
-    lightPoolMat.opacity = n * 0.12;
-    lightConeMat.opacity = n * 0.075;
-    coneInst.visible = n > 0.05;
+    pjuBulbMat.emissiveIntensity = 0.15 + n * 1.35;
+    lightPoolMat.opacity = n * 0.16;
+    poolInst.visible = n > 0.06;
     shelterTrimMat.emissiveIntensity = 0.15 + Math.min(1, n * 1.5) * 0.3;
     mrtWinMat.emissiveIntensity = 0.14 + n * 0.48;
 
@@ -641,6 +683,7 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   return {
     group,
     sidewalkRects,
+    pjuLightAnchors: polePositions.map((p) => ({ x: p.x, z: p.z })),
     setWeatherVisuals,
     setWeatherTransition,
     setTrafficSignalPhase,
@@ -790,37 +833,69 @@ export function buildInteriorPortalsAndStage(): {
 } {
   const portalsGroup = new THREE.Group();
 
+  const radialGlowTex = proceduralTextures.getRadialLightPoolTexture();
+  const pulseRings: THREE.Mesh[] = [];
+
   for (const spec of ENTERABLE_INTERIORS) {
     const pGroup = new THREE.Group();
     pGroup.position.set(spec.portalX, 0, spec.portalZ);
 
-    const ringGeo = new THREE.RingGeometry(1.4, 2.0, 24);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: spec.accentHex,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.position.y = 0.07;
-    pGroup.add(ring);
-
-    const archMat = new THREE.MeshBasicMaterial({
+    // Clean, low-profile glowing ground ring (never obstructs warung stalls or doorways)
+    const outerRingGeo = new THREE.RingGeometry(1.18, 1.48, 32);
+    outerRingGeo.rotateX(-Math.PI / 2);
+    const outerRingMat = new THREE.MeshBasicMaterial({
       color: spec.accentHex,
       transparent: true,
-      opacity: 0.28,
+      opacity: 0.78,
       side: THREE.DoubleSide,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
     });
-    const cyl = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.65, 1.65, 5.5, 16, 1, true),
-      archMat
-    );
-    cyl.position.y = 2.75;
-    pGroup.add(cyl);
+    const outerRing = new THREE.Mesh(outerRingGeo, outerRingMat);
+    outerRing.position.y = 0.042;
+    pGroup.add(outerRing);
+
+    const pulseRingGeo = new THREE.RingGeometry(0.84, 1.0, 28);
+    pulseRingGeo.rotateX(-Math.PI / 2);
+    const pulseRingMat = new THREE.MeshBasicMaterial({
+      color: spec.accentHex,
+      transparent: true,
+      opacity: 0.55,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    const pulseRing = new THREE.Mesh(pulseRingGeo, pulseRingMat);
+    pulseRing.position.y = 0.046;
+    pGroup.add(pulseRing);
+    pulseRings.push(pulseRing);
+
+    // Subtle soft-fading radial floor decal (opacity <= 0.16)
+    const glowDiscGeo = new THREE.PlaneGeometry(3.1, 3.1);
+    glowDiscGeo.rotateX(-Math.PI / 2);
+    const glowDiscMat = new THREE.MeshBasicMaterial({
+      map: radialGlowTex,
+      color: spec.accentHex,
+      transparent: true,
+      opacity: 0.15,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    const glowDisc = new THREE.Mesh(glowDiscGeo, glowDiscMat);
+    glowDisc.position.y = 0.04;
+    pGroup.add(glowDisc);
 
     portalsGroup.add(pGroup);
   }
+  portalsGroup.userData.pulseRings = pulseRings;
 
   const interiorStageGroup = new THREE.Group();
   interiorStageGroup.position.set(0, 68, 0);

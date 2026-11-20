@@ -1581,10 +1581,10 @@ export const GameHud: React.FC<GameHudProps> = ({
                       <button
                         type="button"
                         onClick={onHonk}
-                        title="Bunyikan Klakson untuk reaksi Ojol/Angkot [K]"
+                        title="Bunyikan Klakson untuk reaksi Ojol/Angkot [H / K]"
                         className="text-[#facc15] hover:text-[#fef08a] cursor-pointer transition-colors"
                       >
-                        [K]<span className="hidden sm:inline"> Klakson</span>
+                        [H/K]<span className="hidden sm:inline"> Klakson</span>
                       </button>
                       <span className="text-white/20">·</span>
                     </>

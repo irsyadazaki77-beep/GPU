@@ -18,12 +18,16 @@ import {
   buildJakartaStreetscape,
   buildProceduralRoadDetailSystem,
   buildWarungStall,
-  createAsphaltNormalTexture,
-  createAsphaltRoadTexture,
-  createAsphaltRoughnessTexture,
 } from '../game/world/geometryBuilders';
+import { buildJakartaDistrictProps } from '../game/world/jakartaDistrictProps';
 import { buildThreeTierBuildingLOD } from './lodBuilder';
 import { SpatialChunkLoader } from './chunkLoader';
+import { proceduralTextures } from './ProceduralTextures';
+import {
+  Point2D,
+  computeTimeOfDayToneState,
+  selectNearestLightIndices,
+} from './visualOverhaulMath';
 
 function buildExpansionZonesGroup(): {
   group: THREE.Group;
@@ -177,12 +181,16 @@ export class CityRenderer {
   private readonly bayWaterMat: THREE.MeshStandardMaterial;
   private readonly floodDiscsGroup: THREE.Group;
   private readonly streetscape: ReturnType<typeof buildJakartaStreetscape>;
+  private readonly districtProps: ReturnType<typeof buildJakartaDistrictProps>;
   private readonly roadDetailSystem: ReturnType<
     typeof buildProceduralRoadDetailSystem
   >;
   private readonly roadsideSystem: ReturnType<
     typeof buildAuthenticRoadsideSystem
   >;
+  private readonly buildingEmissiveMats: THREE.MeshStandardMaterial[] = [];
+  private readonly streetlightAnchors: Point2D[] = [];
+  private readonly streetlightPool: THREE.PointLight[] = [];
   private readonly roadUniforms = {
     uWetness: { value: 0 },
     uNightFactor: { value: 0.5 },
@@ -249,23 +257,24 @@ export class CityRenderer {
     plazaCurbMesh.receiveShadow = true;
     this.rootGroup.add(plazaCurbMesh);
 
-    // 2. Asphalt Boulevards (PBR Albedo + Normal + Roughness + Wet Puddle Shader)
-    const roadTex = createAsphaltRoadTexture(maxAnisotropy);
-    roadTex.repeat.set(1, 18);
-    const roadNormalTex = createAsphaltNormalTexture(maxAnisotropy);
-    roadNormalTex.repeat.set(1, 18);
-    const roadRoughTex = createAsphaltRoughnessTexture(maxAnisotropy);
-    roadRoughTex.repeat.set(1, 18);
+    // 2. Asphalt Boulevards (Procedural PBR Albedo + Bump + Roughness + Wet Puddle Shader)
+    const asphaltPbr = proceduralTextures.getAsphaltTextures(
+      maxAnisotropy,
+      'standard'
+    );
+    asphaltPbr.map.repeat.set(1, 18);
+    asphaltPbr.bumpMap.repeat.set(1, 18);
+    asphaltPbr.roughnessMap.repeat.set(1, 18);
 
     this.roadMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      map: roadTex,
-      normalMap: roadNormalTex,
-      normalScale: new THREE.Vector2(0.28, 0.28),
-      roughnessMap: roadRoughTex,
-      roughness: 0.95,
-      metalness: 0.02,
-      envMapIntensity: 0.08,
+      map: asphaltPbr.map,
+      bumpMap: asphaltPbr.bumpMap,
+      bumpScale: 0.045,
+      roughnessMap: asphaltPbr.roughnessMap,
+      roughness: 0.88,
+      metalness: 0.04,
+      envMapIntensity: 0.34,
     });
 
     this.roadMat.onBeforeCompile = (shader) => {
@@ -371,6 +380,12 @@ if (uWetness > 0.04) {
     // 3. Tol Layang, Enterable Interior Stage & Warung Stalls
     this.rootGroup.add(buildElevatedHighwayMesh(this.roadMat));
     const { portalsGroup, interiorStageGroup } = buildInteriorPortalsAndStage();
+    const pulseRings = portalsGroup.userData.pulseRings as
+      | THREE.Mesh[]
+      | undefined;
+    if (pulseRings) {
+      this.portalPulseRings.push(...pulseRings);
+    }
     this.rootGroup.add(portalsGroup, interiorStageGroup);
 
     this.rootGroup.add(buildWarungStall(-11, 22, Math.PI / 4));
@@ -408,6 +423,24 @@ if (uWetness > 0.04) {
     const beaconPositions: { x: number; y: number; z: number; color: number }[] = [];
     for (const b of CITY_BUILDINGS) {
       const highDetail = buildJakartaBuilding(b, maxAnisotropy);
+      const nightMats = highDetail.userData.nightEmissiveMats as
+        | THREE.MeshStandardMaterial[]
+        | undefined;
+      if (nightMats) {
+        for (let ni = 0; ni < nightMats.length; ni++) {
+          this.buildingEmissiveMats.push(nightMats[ni]);
+        }
+      }
+      const flags = highDetail.userData.animatedFlags as
+        | {
+            geometry: THREE.PlaneGeometry;
+            basePositions: Float32Array;
+            phase: number;
+          }[]
+        | undefined;
+      if (flags) {
+        this.animatedFlags.push(...flags);
+      }
       this.rootGroup.add(buildThreeTierBuildingLOD(b, highDetail));
       if (b.style === 'skyscraper' && b.height >= 16) {
         beaconPositions.push({
@@ -443,9 +476,24 @@ if (uWetness > 0.04) {
       this.rootGroup.add(beaconInst);
     }
 
-    // 5. Jakarta Streetscape, Road Details & Authentic Halte/Toll/Dishub System
+    // 5. Jakarta Streetscape, Hero District Props, Road Details & Authentic Halte/Toll/Dishub System
     this.streetscape = buildJakartaStreetscape(maxAnisotropy);
     this.rootGroup.add(this.streetscape.group);
+
+    this.districtProps = buildJakartaDistrictProps(maxAnisotropy);
+    this.rootGroup.add(this.districtProps.group);
+
+    this.streetlightAnchors.push(
+      ...this.streetscape.pjuLightAnchors,
+      ...this.districtProps.lightAnchors
+    );
+    for (let li = 0; li < 4; li++) {
+      const pLight = new THREE.PointLight(0xffb347, 0, 24, 1.8);
+      pLight.castShadow = false;
+      pLight.position.set(0, 6.2, 0);
+      this.streetlightPool.push(pLight);
+      this.rootGroup.add(pLight);
+    }
 
     this.roadDetailSystem = buildProceduralRoadDetailSystem(
       this.streetscape.sidewalkRects,
@@ -471,6 +519,12 @@ if (uWetness > 0.04) {
   private readonly videotronMats: THREE.MeshStandardMaterial[] = [];
   private readonly palmCanopies: THREE.Object3D[] = [];
   private readonly rampChevronMats: THREE.MeshBasicMaterial[] = [];
+  private readonly portalPulseRings: THREE.Mesh[] = [];
+  private readonly animatedFlags: {
+    geometry: THREE.PlaneGeometry;
+    basePositions: Float32Array;
+    phase: number;
+  }[] = [];
   private floodZoneMat: THREE.MeshStandardMaterial | null = null;
 
   private buildViceJakartaAtmosphereProps(maxAnisotropy: number): THREE.Group {
@@ -942,21 +996,63 @@ if (uWetness > 0.04) {
     this.chunkLoader.updateAroundPlayer(playerX, playerZ, false);
   }
 
+  public updateStreetlightPool(
+    playerX: number,
+    playerZ: number,
+    nightFactor: number,
+    wetnessFactor: number
+  ): void {
+    const tone = computeTimeOfDayToneState(nightFactor, wetnessFactor);
+    const intensity = tone.streetlightIntensity;
+    if (intensity <= 0.02 || this.streetlightAnchors.length === 0) {
+      for (let i = 0; i < this.streetlightPool.length; i++) {
+        this.streetlightPool[i].intensity = 0;
+      }
+      return;
+    }
+
+    const nearest = selectNearestLightIndices(
+      this.streetlightAnchors,
+      playerX,
+      playerZ,
+      this.streetlightPool.length
+    );
+    for (let i = 0; i < this.streetlightPool.length; i++) {
+      const light = this.streetlightPool[i];
+      const idx = nearest[i];
+      if (idx === undefined) {
+        light.intensity = 0;
+        continue;
+      }
+      const anchor = this.streetlightAnchors[idx];
+      light.position.set(anchor.x, 5.8, anchor.z);
+      light.intensity = intensity;
+    }
+  }
+
   public setWeatherTransition(
     nightFactor: number,
     wetnessFactor: number,
     dt: number = 0.016
   ): void {
     this.elapsedTime += dt;
+    const tone = computeTimeOfDayToneState(nightFactor, wetnessFactor);
+
     this.roadUniforms.uWetness.value = wetnessFactor;
     this.roadUniforms.uNightFactor.value = nightFactor;
     this.roadUniforms.uTime.value = this.elapsedTime;
-    this.roadMat.roughness = 0.94 - wetnessFactor * 0.62;
-    this.roadMat.metalness = 0.02 + wetnessFactor * 0.22;
-    this.roadMat.envMapIntensity = 0.1 + wetnessFactor * 0.34;
+    this.roadMat.roughness = 0.88 - wetnessFactor * 0.58;
+    this.roadMat.metalness = 0.04 + wetnessFactor * 0.24;
+    this.roadMat.envMapIntensity = 0.34 + wetnessFactor * 0.42;
     this.spireBeaconMat.color.setScalar(0.55 + nightFactor * 0.45);
     this.floodDiscsGroup.visible = wetnessFactor > 0.65;
     this.bayWaterMat.roughness = 0.14 + Math.sin(this.elapsedTime * 1.8) * 0.04;
+
+    // Automatically illuminate Jakarta skyscraper offices & Blok M ruko windows at dusk/night
+    for (let i = 0; i < this.buildingEmissiveMats.length; i++) {
+      this.buildingEmissiveMats[i].emissiveIntensity =
+        tone.windowEmissiveIntensity;
+    }
 
     // Pulse Vice-Jakarta LED videotrons stronger at dusk/night
     const screenBoost = 0.62 + nightFactor * 0.85;
@@ -972,6 +1068,37 @@ if (uWetness > 0.04) {
         Math.sin(this.elapsedTime * 1.65 + i * 0.9) * windStrength;
       this.palmCanopies[i].rotation.x =
         Math.cos(this.elapsedTime * 1.25 + i * 0.7) * windStrength * 0.65;
+    }
+
+    // Subtle procedural cloth wave flutter on Monas Merah Putih flags
+    const flagWindAmp = 0.12 + wetnessFactor * 0.07;
+    for (let f = 0; f < this.animatedFlags.length; f++) {
+      const fl = this.animatedFlags[f];
+      const posAttr = fl.geometry.attributes.position as THREE.BufferAttribute;
+      const arr = posAttr.array as Float32Array;
+      const base = fl.basePositions;
+      for (let v = 0; v < posAttr.count; v++) {
+        const ix = v * 3;
+        const bx = base[ix];
+        const by = base[ix + 1];
+        const flutterWeight = Math.min(1, Math.max(0, bx / 1.82));
+        const wave =
+          Math.sin(bx * 3.6 - this.elapsedTime * 5.2 + fl.phase) *
+            flagWindAmp *
+            flutterWeight +
+          Math.sin(by * 2.4 - this.elapsedTime * 3.1 + fl.phase) *
+            0.03 *
+            flutterWeight;
+        arr[ix + 2] = base[ix + 2] + wave;
+      }
+      posAttr.needsUpdate = true;
+    }
+
+    // Subtle low-profile breathing pulse on interior & warung ground rings
+    for (let pr = 0; pr < this.portalPulseRings.length; pr++) {
+      const ring = this.portalPulseRings[pr];
+      const s = 0.94 + Math.sin(this.elapsedTime * 2.8 + pr * 0.8) * 0.1;
+      ring.scale.set(s, s, 1);
     }
 
     if (this.streetEventBeaconGroup.visible) {
@@ -1002,12 +1129,14 @@ if (uWetness > 0.04) {
       wetnessFactor,
       this.elapsedTime
     );
+    this.districtProps.setWeatherTransition(nightFactor, this.elapsedTime);
     this.roadDetailSystem.setWeatherTransition(wetnessFactor);
     this.roadsideSystem.setWeatherTransition(nightFactor, wetnessFactor);
   }
 
   public dispose(): void {
     this.chunkLoader.dispose();
+    this.districtProps.dispose();
     this.roadDetailSystem.dispose();
     this.roadsideSystem.dispose();
     disposeObjectTree(this.rootGroup);

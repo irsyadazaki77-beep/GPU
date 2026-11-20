@@ -36,6 +36,7 @@ import {
 import { soundEngine } from '../game/sound';
 import {
   INTERIOR_ROOM_CENTERS,
+  animateCharacterRig,
   buildCharacterRig,
   buildCombatDroneMesh,
 } from '../game/world/geometryBuilders';
@@ -50,6 +51,14 @@ import {
   type RadarEnemyBlip,
 } from '../state/gameStore';
 import { TrafficSystem, VehicleEntity } from './TrafficSystem';
+import { cityAudio } from './CityAudio';
+import {
+  canTriggerHorn,
+  computeChaseCameraFov,
+  computeOffRoadMicroShake,
+  computeStaggeredCrewPosition,
+  exponentialDampFactor,
+} from './visualOverhaulMath';
 
 export interface EnemyEntity {
   id: string;
@@ -113,6 +122,7 @@ export interface PlayerControllerCallbacks {
   onCombatHitFeedback?: (evt: CombatHitFeedbackEvent) => void;
   onPlayerHitAngle?: (angleRad: number) => void;
   onWeaponNoise?: (x: number, z: number, radius: number, isBlast: boolean) => void;
+  onHornTriggered?: (px: number, py: number, pz: number) => void;
   onViralMoment?: (
     kind: 'drift_stunt' | 'chain_explosion',
     summaryNote?: string
@@ -203,9 +213,14 @@ export class PlayerController {
   private driftChainScore = 0;
   private driftChainTimer = 0;
   private cameraNeedsSnap = true;
+  private camLookInitialized = false;
+  private lastHornMs = -9999;
+  private exhaustPuffAccum = 0;
   private lastAppliedOutfitId = '';
   private prevParticleCount = -1;
   private prevTracerCount = -1;
+  private beaconOuterRing!: THREE.Mesh;
+  private beaconChevron!: THREE.Mesh;
 
   // Wave 2: Tactical Gunplay, Cover, Trio Squad AI, Stunt Physics, Kill-Cam & Turf War
   private crosshairSpread = 0;
@@ -237,8 +252,8 @@ export class PlayerController {
     }
   > = {
     nabilo: {
-      x: -2.4,
-      z: 28,
+      x: -1.75,
+      z: 27.95,
       facing: Math.PI,
       walkDist: 0,
       fireCooldown: 0.4,
@@ -246,8 +261,8 @@ export class PlayerController {
       actionLabel: 'Mengawal',
     },
     raka: {
-      x: -3.2,
-      z: 28.5,
+      x: 1.65,
+      z: 27.95,
       facing: Math.PI,
       walkDist: 0,
       fireCooldown: 0.5,
@@ -255,8 +270,8 @@ export class PlayerController {
       actionLabel: 'Mengawal',
     },
     kirana: {
-      x: 3.2,
-      z: 28.5,
+      x: -1.9,
+      z: 28.45,
       facing: Math.PI,
       walkDist: 0,
       fireCooldown: 0.6,
@@ -284,6 +299,7 @@ export class PlayerController {
 
   private readonly _v1 = new THREE.Vector3();
   private readonly _v2 = new THREE.Vector3();
+  private readonly _camLookTarget = new THREE.Vector3();
   private readonly _scale = new THREE.Vector3();
   private readonly _quat = new THREE.Quaternion();
   private readonly _euler = new THREE.Euler();
@@ -312,31 +328,73 @@ export class PlayerController {
     this.traffic = traffic;
     this.callbacks = callbacks;
 
-    // 1. Mission Beacon Pillar + Ring
+    // 1. Clean Ground-to-Sky Mission Waypoint Beacon (Thin Soft Additive Beam + Dual Rings + Bobbing Chevron)
     this.beaconGroup = new THREE.Group();
     const beaconCyl = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.8, 1.8, 14, 16, 1, true),
+      new THREE.CylinderGeometry(0.32, 0.92, 42, 14, 1, true),
       new THREE.MeshBasicMaterial({
         color: 0xf59e0b,
         transparent: true,
-        opacity: 0.28,
+        opacity: 0.2,
         side: THREE.DoubleSide,
         depthWrite: false,
+        blending: THREE.AdditiveBlending,
       })
     );
-    beaconCyl.position.y = 7;
+    beaconCyl.position.y = 21;
     this.beaconGroup.add(beaconCyl);
 
-    const beaconRing = new THREE.Mesh(
-      new THREE.RingGeometry(1.6, 2.2, 24).rotateX(-Math.PI / 2),
+    const beaconCore = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.34, 34, 10, 1, true),
       new THREE.MeshBasicMaterial({
         color: 0xfef08a,
+        transparent: true,
+        opacity: 0.34,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    beaconCore.position.y = 17;
+    this.beaconGroup.add(beaconCore);
+
+    const beaconRing = new THREE.Mesh(
+      new THREE.RingGeometry(1.5, 2.2, 28).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({
+        color: 0xfef08a,
+        transparent: true,
+        opacity: 0.92,
         side: THREE.DoubleSide,
         depthWrite: false,
       })
     );
-    beaconRing.position.y = 0.06;
+    beaconRing.position.y = 0.08;
     this.beaconGroup.add(beaconRing);
+
+    this.beaconOuterRing = new THREE.Mesh(
+      new THREE.RingGeometry(2.5, 3.1, 32).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({
+        color: 0xf59e0b,
+        transparent: true,
+        opacity: 0.62,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    this.beaconOuterRing.position.y = 0.1;
+    this.beaconGroup.add(this.beaconOuterRing);
+
+    this.beaconChevron = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.95, 0),
+      new THREE.MeshBasicMaterial({
+        color: 0xfef08a,
+        transparent: true,
+        opacity: 0.92,
+      })
+    );
+    this.beaconChevron.position.y = 7.4;
+    this.beaconGroup.add(this.beaconChevron);
     scene.add(this.beaconGroup);
 
     // 1b. Custom GPS Waypoint Beacon (Tactical Purple/Cyan Pillar + Ring)
@@ -486,21 +544,23 @@ export class PlayerController {
       scene.add(rig.group);
     });
 
-    // 4. Crew & Rajawali Drone
+    // 4. Crew & Rajawali Drone (Spawn in Staggered V-Formation behind player)
     this.crewCompanions = [0, 1, 2].map((idx) => {
       const rig = buildCharacterRig('crew');
       rig.group.visible = false;
-      rig.group.position.set(
-        this.playerPhys.x - 2 + idx * 2,
-        0,
-        this.playerPhys.z + 2
+      const slotPos = computeStaggeredCrewPosition(
+        this.playerPhys.x,
+        this.playerPhys.z,
+        this.playerPhys.facing,
+        idx + 2
       );
+      rig.group.position.set(slotPos.x, 0, slotPos.z);
       scene.add(rig.group);
       return {
         rig,
-        x: this.playerPhys.x - 2 + idx * 2,
-        z: this.playerPhys.z + 2,
-        facing: Math.PI,
+        x: slotPos.x,
+        z: slotPos.z,
+        facing: this.playerPhys.facing,
         walkDist: 0,
         fireCooldown: 0.4 + idx * 0.3,
       };
@@ -876,15 +936,26 @@ export class PlayerController {
   }
 
   public triggerHorn(): void {
-    soundEngine.playHorn();
-    this.traffic.notifyHorn(this.playerPhys.x, this.playerPhys.z);
+    const now = performance.now();
+    if (!canTriggerHorn(now, this.lastHornMs)) return;
+    this.lastHornMs = now;
+    cityAudio.playHorn();
+    if (this.callbacks.onHornTriggered) {
+      this.callbacks.onHornTriggered(
+        this.playerPhys.x,
+        this.playerPhys.y,
+        this.playerPhys.z
+      );
+    } else {
+      this.traffic.notifyHorn(this.playerPhys.x, this.playerPhys.z);
+    }
     this.spawnParticles(
       this.playerPhys.x,
       this.playerPhys.y + 1.8,
       this.playerPhys.z,
-      4,
+      5,
       0xfacc15,
-      4
+      4.5
     );
   }
 
@@ -1474,6 +1545,12 @@ export class PlayerController {
       this.beaconGroup.visible = false;
     }
     this.beaconGroup.rotation.y += dt * 1.4;
+    if (this.beaconGroup.visible) {
+      const pulse = 1 + Math.sin(nowMs * 0.0052) * 0.18;
+      this.beaconOuterRing.scale.set(pulse, 1, pulse);
+      this.beaconChevron.position.y = 7.4 + Math.sin(nowMs * 0.0045) * 0.72;
+      this.beaconChevron.rotation.y -= dt * 2.4;
+    }
 
     // Update Custom GPS Waypoint 3D Beacon & Detour / Contract progression
     const storeSnap = gameStore.getState();
@@ -1814,7 +1891,11 @@ export class PlayerController {
       );
     }
 
-    if (this.keysJustPressed.has('KeyK') || virtualInputRef.hornTap) {
+    if (
+      this.keysJustPressed.has('KeyK') ||
+      virtualInputRef.hornTap ||
+      (this.keysJustPressed.has('KeyH') && Boolean(this.playerPhys.drivingVehicleId))
+    ) {
       virtualInputRef.hornTap = false;
       if (this.playerPhys.drivingVehicleId) {
         this.triggerHorn();
@@ -1831,6 +1912,16 @@ export class PlayerController {
       virtualInputRef.fireTap = false;
       if (!this.playerPhys.drivingVehicleId && !isPhotoMode) {
         this.triggerPlayerAttack();
+      } else if (
+        this.keysJustPressed.has('Space') &&
+        this.playerPhys.drivingVehicleId
+      ) {
+        const curVeh = this.traffic.vehicles.find(
+          (v) => v.id === this.playerPhys.drivingVehicleId
+        );
+        if (curVeh && !VEHICLE_SPECS[curVeh.type].isAircraft && Math.abs(curVeh.speed) < 2.2) {
+          this.triggerHorn();
+        }
       }
     }
 
@@ -2142,6 +2233,7 @@ export class PlayerController {
         activeVehicle.speed *= -0.35;
         this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.25);
         soundEngine.playHit(false);
+        cityAudio.playCollisionThud(Math.min(1, wallImpact / 16));
       }
       activeVehicle.x = col.x;
       activeVehicle.z = col.z;
@@ -2172,6 +2264,7 @@ export class PlayerController {
             7
           );
           soundEngine.playPropCrash(0);
+          cityAudio.playCollisionThud(0.75);
         }
       }
 
@@ -2230,6 +2323,7 @@ export class PlayerController {
                 7
               );
               soundEngine.playPropCrash(0);
+              cityAudio.playCollisionThud(Math.min(1, impactSpeed / 18));
             } else {
               activeVehicle.speed *= 0.82;
             }
@@ -2270,6 +2364,25 @@ export class PlayerController {
         activeVehicle.heading + activeVehicle.driftAngle * 0.45;
       activeVehicle.mesh.rotation.x = activeVehicle.pitchAngle;
       activeVehicle.mesh.rotation.z = activeVehicle.rollAngle;
+
+      // Pooled exhaust / dust puffs on hard launch acceleration from standstill or low speed
+      if (
+        !vSpec.isAircraft &&
+        activeVehicle.y < 1.2 &&
+        moveForward > 0.5 &&
+        activeVehicle.speed >= 0.4 &&
+        activeVehicle.speed < 9.5
+      ) {
+        this.exhaustPuffAccum += simDt;
+        if (this.exhaustPuffAccum >= 0.11) {
+          this.exhaustPuffAccum = 0;
+          const tailX = activeVehicle.x - Math.sin(activeVehicle.heading) * 1.75;
+          const tailZ = activeVehicle.z - Math.cos(activeVehicle.heading) * 1.75;
+          this.spawnParticles(tailX, activeVehicle.y + 0.3, tailZ, 2, 0x94a3b8, 2.2);
+        }
+      } else {
+        this.exhaustPuffAccum = 0;
+      }
 
       // Tire smoke, asphalt skidmarks & live Drift Combo Scoring during drift
       const driftSkillLv = pState.characterSkills?.driftControl ?? 1;
@@ -2450,21 +2563,14 @@ export class PlayerController {
       const stepDist =
         Math.hypot(this.playerPhys.vx, this.playerPhys.vz) * simDt;
       this.playerPhys.walkDist += stepDist;
-      if (mag > 0.01) {
-        const swing = Math.sin(this.playerPhys.walkDist * 2.2) * 0.55;
-        this.playerRig.leftLeg.rotation.x = swing;
-        this.playerRig.rightLeg.rotation.x = -swing;
-      } else {
-        this.playerRig.leftLeg.rotation.x *= 0.8;
-        this.playerRig.rightLeg.rotation.x *= 0.8;
-      }
-
-      this.playerRig.rightArm.rotation.x = THREE.MathUtils.damp(
-        this.playerRig.rightArm.rotation.x,
-        isTpsAim ? -Math.PI * 0.42 : 0,
-        12,
-        simDt
-      );
+      animateCharacterRig(this.playerRig, {
+        elapsedTime: nowMs * 0.001,
+        walkDist: this.playerPhys.walkDist,
+        isMoving: mag > 0.01,
+        isAiming: isTpsAim,
+        phaseOffset: 0,
+        dt: simDt,
+      });
 
       const targetScaleY =
         storeState.inCover && this.playerPhys.attackCooldown <= 0.08 ? 0.8 : 1.0;
@@ -2530,7 +2636,7 @@ export class PlayerController {
       }
     }
 
-    // Crew Companions
+    // Crew Companions (Outer Diagonal V-Formation behind player)
     for (let cIdx = 0; cIdx < this.crewCompanions.length; cIdx++) {
       const comp = this.crewCompanions[cIdx];
       const shouldShow =
@@ -2540,15 +2646,18 @@ export class PlayerController {
       comp.rig.group.visible = shouldShow;
       if (!shouldShow) continue;
 
-      const formAngle =
-        this.playerPhys.facing + Math.PI + (cIdx - 1) * 0.65;
-      const targetCX = this.playerPhys.x + Math.sin(formAngle) * 2.6;
-      const targetCZ = this.playerPhys.z + Math.cos(formAngle) * 2.6;
-      const dxC = targetCX - comp.x;
-      const dzC = targetCZ - comp.z;
+      const slotTarget = computeStaggeredCrewPosition(
+        this.playerPhys.x,
+        this.playerPhys.z,
+        this.playerPhys.facing,
+        cIdx + 2
+      );
+      const dxC = slotTarget.x - comp.x;
+      const dzC = slotTarget.z - comp.z;
       const distC = Math.hypot(dxC, dzC);
+      const crewMoving = distC > 0.35;
 
-      if (distC > 0.35) {
+      if (crewMoving) {
         const stepC = Math.min(distC, 9.2 * simDt);
         const safeCrew = resolveCircleAABBCollision(
           comp.x + (dxC / distC) * stepC,
@@ -2561,14 +2670,9 @@ export class PlayerController {
         comp.z = safeCrew.z;
         comp.facing = Math.atan2(dxC, dzC);
         comp.walkDist += stepC;
-        const swing = Math.sin(comp.walkDist * 2.2) * 0.5;
-        comp.rig.leftLeg.rotation.x = swing;
-        comp.rig.rightLeg.rotation.x = -swing;
-      } else {
-        comp.rig.leftLeg.rotation.x *= 0.8;
-        comp.rig.rightLeg.rotation.x *= 0.8;
       }
 
+      let crewFiring = false;
       comp.fireCooldown -= simDt;
       if (comp.fireCooldown <= 0) {
         let targetEn: EnemyEntity | null = null;
@@ -2582,6 +2686,7 @@ export class PlayerController {
           }
         }
         if (targetEn) {
+          crewFiring = true;
           comp.fireCooldown = 1.05;
           comp.facing = Math.atan2(
             targetEn.x - comp.x,
@@ -2599,12 +2704,14 @@ export class PlayerController {
         }
       }
 
-      comp.rig.rightArm.rotation.x = THREE.MathUtils.damp(
-        comp.rig.rightArm.rotation.x,
-        0,
-        10,
-        simDt
-      );
+      animateCharacterRig(comp.rig, {
+        elapsedTime: nowMs * 0.001,
+        walkDist: comp.walkDist,
+        isMoving: crewMoving,
+        isAiming: crewFiring,
+        phaseOffset: 1.7 + cIdx * 1.15,
+        dt: simDt,
+      });
       comp.rig.group.position.set(
         comp.x,
         getGroundElevationAt(comp.x, comp.z),
@@ -2613,7 +2720,7 @@ export class PlayerController {
       comp.rig.group.rotation.y = comp.facing;
     }
 
-    // Wave 2: Autonomous 3D Trio Squad AI (Raka & Kirana / Active Wingmen)
+    // Wave 2: Autonomous 3D Trio Squad AI (Raka & Kirana / Active Wingmen in Inner Diagonal V-Formation)
     const wingmen = getActiveWingmanIds(pState.activeProtagonist);
     const squadOrder = storeState.squadOrder;
     engineTelemetryRef.squadMembers.length = wingmen.length;
@@ -2630,17 +2737,23 @@ export class PlayerController {
         this.playerPhys.z - rt.z
       );
       if (distToPlayer > 34 || !showWingman) {
-        // Snap into tactical formation if player drove away or exited vehicle
-        const snapAng = this.playerPhys.facing + Math.PI + (wIdx === 0 ? -0.75 : 0.75);
+        // Snap into staggered diagonal V-formation if player drove away or exited vehicle
+        const snapPos = computeStaggeredCrewPosition(
+          this.playerPhys.x,
+          this.playerPhys.z,
+          this.playerPhys.facing,
+          wIdx
+        );
         const safeSnap = resolveCircleAABBCollision(
-          this.playerPhys.x + Math.sin(snapAng) * 3.4,
-          this.playerPhys.z + Math.cos(snapAng) * 3.4,
+          snapPos.x,
+          snapPos.z,
           0.7,
           undefined,
           this.buildingGrid
         );
         rt.x = safeSnap.x;
         rt.z = safeSnap.z;
+        rt.facing = this.playerPhys.facing;
       }
 
       if (showWingman && simDt > 0) {
@@ -2668,17 +2781,22 @@ export class PlayerController {
           goalZ = targetEn.z + Math.cos(ang) * keepDist;
           rt.actionLabel = wId === 'raka' ? 'Menyerbu!' : 'Taktis Serang';
         } else {
-          const formAng =
-            this.playerPhys.facing + Math.PI + (wIdx === 0 ? -0.7 : 0.7);
-          goalX = this.playerPhys.x + Math.sin(formAng) * 3.4;
-          goalZ = this.playerPhys.z + Math.cos(formAng) * 3.4;
+          const vSlot = computeStaggeredCrewPosition(
+            this.playerPhys.x,
+            this.playerPhys.z,
+            this.playerPhys.facing,
+            wIdx
+          );
+          goalX = vSlot.x;
+          goalZ = vSlot.z;
           rt.actionLabel = targetEn ? 'Kawal & Tembak' : 'Mengawal';
         }
 
         const dxW = goalX - rt.x;
         const dzW = goalZ - rt.z;
         const distW = Math.hypot(dxW, dzW);
-        if (distW > 0.45) {
+        const wingMoving = distW > 0.45;
+        if (wingMoving) {
           const stepW = Math.min(distW, (squadOrder === 'attack' ? 10.6 : 9.4) * simDt);
           const safeW = resolveCircleAABBCollision(
             rt.x + (dxW / distW) * stepW,
@@ -2691,13 +2809,16 @@ export class PlayerController {
           rt.z = safeW.z;
           rt.facing = Math.atan2(dxW, dzW);
           rt.walkDist += stepW;
-          const sw = Math.sin(rt.walkDist * 2.3) * 0.52;
-          rig.leftLeg.rotation.x = sw;
-          rig.rightLeg.rotation.x = -sw;
-        } else {
-          rig.leftLeg.rotation.x *= 0.8;
-          rig.rightLeg.rotation.x *= 0.8;
         }
+
+        animateCharacterRig(rig, {
+          elapsedTime: nowMs * 0.001,
+          walkDist: rt.walkDist,
+          isMoving: wingMoving,
+          isAiming: Boolean(targetEn),
+          phaseOffset: 0.85 + wIdx * 1.4,
+          dt: simDt,
+        });
 
         // Wingman gunfire & signature abilities (Raka Breach Burst / Kirana EMP Pulse)
         rt.fireCooldown -= simDt;
@@ -3053,11 +3174,13 @@ export class PlayerController {
         : 70
       : camMode === 'cinematic'
       ? 56 + speedRatio * 8
-      : isDriving
-      ? 60 + speedRatio * 12 + (pState.fokusActive ? 4.5 : 0)
-      : 60;
-    if (Math.abs(camera.fov - targetFov) > 0.15) {
-      camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, dt * 8);
+      : computeChaseCameraFov(speedRatio, isDriving, pState.fokusActive);
+    if (Math.abs(camera.fov - targetFov) > 0.12) {
+      camera.fov = THREE.MathUtils.lerp(
+        camera.fov,
+        targetFov,
+        exponentialDampFactor(7.5, dt)
+      );
       camera.updateProjectionMatrix();
     }
 
@@ -3329,11 +3452,12 @@ export class PlayerController {
         this.buildingGrid
       );
 
-      const dampFactor =
+      const snapNow =
         this.cameraNeedsSnap ||
-        Math.abs(camera.position.y - pulledCam.y) > 25
-          ? 1
-          : 1 - Math.exp(-(isTpsAim ? 14 : isCinematic ? 5.5 : 9.5) * dt);
+        Math.abs(camera.position.y - pulledCam.y) > 25;
+      const dampFactor = snapNow
+        ? 1
+        : exponentialDampFactor(isTpsAim ? 14 : isCinematic ? 5.5 : 8.8, dt);
       this.cameraNeedsSnap = false;
 
       camera.position.x = THREE.MathUtils.lerp(
@@ -3352,6 +3476,20 @@ export class PlayerController {
         dampFactor
       );
 
+      // Subtle off-road rumble micro-shake when speeding off paved asphalt corridors
+      if (isDriving && activeVehicle) {
+        const offRoadShake = computeOffRoadMicroShake(
+          activeVehicle.x,
+          activeVehicle.z,
+          Math.abs(activeVehicle.speed),
+          Boolean(VEHICLE_SPECS[activeVehicle.type].isAircraft)
+        );
+        if (offRoadShake > 0.001) {
+          camera.position.x += Math.sin(nowMs * 0.042) * offRoadShake;
+          camera.position.y += Math.cos(nowMs * 0.056) * offRoadShake * 0.75;
+        }
+      }
+
       if (this.cameraTrauma > 0) {
         const shake = this.cameraTrauma * this.cameraTrauma * 0.38;
         camera.position.x += (Math.random() - 0.5) * shake;
@@ -3359,14 +3497,21 @@ export class PlayerController {
         this.cameraTrauma = Math.max(0, this.cameraTrauma - dt * 2.2);
       }
 
-      const lookDist = isTpsAim ? 14 : 5.2;
+      const lookDist = isTpsAim ? 14 : isDriving ? 6.2 + speedRatio * 2.4 : 5.2;
       const lookPitchShift = (0.28 - this.camPitch) * (isTpsAim ? 9.5 : 4.5);
       this._v2.set(
         this.playerPhys.x + orbitFwdX * lookDist,
         baseElevY + (isTpsAim ? 1.7 : 2.15) + lookPitchShift,
         this.playerPhys.z + orbitFwdZ * lookDist
       );
-      camera.lookAt(this._v2);
+      if (snapNow || !this.camLookInitialized) {
+        this._camLookTarget.copy(this._v2);
+        this.camLookInitialized = true;
+      } else {
+        const lookDamp = exponentialDampFactor(isTpsAim ? 18 : 11.5, dt);
+        this._camLookTarget.lerp(this._v2, lookDamp);
+      }
+      camera.lookAt(this._camLookTarget);
     }
 
     return {

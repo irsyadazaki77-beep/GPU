@@ -21,23 +21,23 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
 
   const bodyMat = new THREE.MeshPhysicalMaterial({
     color: spec.colorHex,
-    roughness: 0.46,
-    metalness: 0.24,
-    clearcoat: 0.32,
-    clearcoatRoughness: 0.34,
-    envMapIntensity: 0.16,
+    roughness: 0.24,
+    metalness: 0.48,
+    clearcoat: 0.84,
+    clearcoatRoughness: 0.14,
+    envMapIntensity: 1.08,
   });
   const trimMat = new THREE.MeshStandardMaterial({
     color: spec.accentHex,
-    roughness: 0.68,
-    metalness: 0.2,
-    envMapIntensity: 0.14,
+    roughness: 0.46,
+    metalness: 0.36,
+    envMapIntensity: 0.72,
   });
   const darkGrilleMat = new THREE.MeshStandardMaterial({
     color: 0x090d16,
-    roughness: 0.78,
-    metalness: 0.2,
-    envMapIntensity: 0.1,
+    roughness: 0.68,
+    metalness: 0.32,
+    envMapIntensity: 0.42,
   });
   const underglowGeo = new THREE.RingGeometry(
     spec.radius * 0.55,
@@ -62,36 +62,62 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
 
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: 0x070d19,
-    roughness: 0.32,
-    metalness: 0.28,
-    clearcoat: 0.38,
-    envMapIntensity: 0.18,
+    roughness: 0.12,
+    metalness: 0.38,
+    clearcoat: 0.92,
+    clearcoatRoughness: 0.08,
+    envMapIntensity: 1.2,
   });
   const tireMat = new THREE.MeshStandardMaterial({
     color: 0x14161b,
     roughness: 0.88,
     metalness: 0.06,
-    envMapIntensity: 0.15,
+    envMapIntensity: 0.25,
   });
   const alloyMat = new THREE.MeshStandardMaterial({
-    color: 0x94a3b8,
-    roughness: 0.3,
-    metalness: 0.72,
-    envMapIntensity: 0.4,
+    color: 0xb0bec5,
+    roughness: 0.22,
+    metalness: 0.86,
+    envMapIntensity: 1.1,
   });
   const headlightMat = new THREE.MeshStandardMaterial({
     color: 0xfef9c3,
-    emissive: 0xfde047,
-    emissiveIntensity: 0.65,
-    roughness: 0.2,
+    emissive: 0xfef08a,
+    emissiveIntensity: 1.15,
+    roughness: 0.16,
   });
   const taillightMat = new THREE.MeshStandardMaterial({
-    color: 0xef4444,
-    emissive: 0xdc2626,
-    emissiveIntensity: 0.75,
-    roughness: 0.25,
+    color: 0xff1a1a,
+    emissive: 0xff1a1a,
+    emissiveIntensity: 0.95,
+    roughness: 0.2,
   });
+  group.userData.headlightMat = headlightMat;
   group.userData.taillightMat = taillightMat;
+
+  // Translucent night headlight light cones (automatically fade in at dusk/night)
+  if (!spec.isAircraft) {
+    const beamConeMat = new THREE.MeshBasicMaterial({
+      color: 0xfef3c7,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const beamConeGeo = new THREE.ConeGeometry(1.15, 6.4, 10, 1, true);
+    beamConeGeo.rotateX(Math.PI / 2);
+    beamConeGeo.translate(0, 0, 3.2);
+    const frontZ = type === 'ojek' ? 0.9 : type === 'bajaj' ? 1.2 : 2.1;
+    const beamOffsets = type === 'ojek' || type === 'bajaj' ? [0] : [-0.62, 0.62];
+    for (const bx of beamOffsets) {
+      const cone = new THREE.Mesh(beamConeGeo, beamConeMat);
+      cone.position.set(bx, 0.68, frontZ);
+      cone.rotation.x = 0.09;
+      group.add(cone);
+    }
+    group.userData.headlightConeMat = beamConeMat;
+  }
 
   const collectWheels = (root: THREE.Group) => {
     const wheels: THREE.Object3D[] = [];
@@ -640,20 +666,20 @@ export function applyVehicleCustomizationToMesh(
   if (bodyMat) {
     bodyMat.color.setHex(paintSpec.primaryHex);
     if (paintSpec.finish === 'chrome') {
-      bodyMat.metalness = 0.85;
-      bodyMat.roughness = 0.14;
-      bodyMat.clearcoat = 0.9;
-      bodyMat.envMapIntensity = 0.55;
+      bodyMat.metalness = 0.92;
+      bodyMat.roughness = 0.1;
+      bodyMat.clearcoat = 0.95;
+      bodyMat.envMapIntensity = 1.35;
     } else if (paintSpec.finish === 'matte') {
-      bodyMat.metalness = 0.1;
-      bodyMat.roughness = 0.82;
-      bodyMat.clearcoat = 0.05;
-      bodyMat.envMapIntensity = 0.25;
+      bodyMat.metalness = 0.14;
+      bodyMat.roughness = 0.78;
+      bodyMat.clearcoat = 0.08;
+      bodyMat.envMapIntensity = 0.42;
     } else {
-      bodyMat.metalness = 0.36;
-      bodyMat.roughness = 0.32;
-      bodyMat.clearcoat = 0.65;
-      bodyMat.envMapIntensity = 0.38;
+      bodyMat.metalness = 0.52;
+      bodyMat.roughness = 0.22;
+      bodyMat.clearcoat = 0.86;
+      bodyMat.envMapIntensity = 1.1;
     }
   }
   if (trimMat) {

@@ -188,6 +188,30 @@ export class CrowdSystem {
     return triggerCrowdSocialFilming(this.agents, worldX, worldZ, 6.5, maxRadius, 5.5);
   }
 
+  public reactToHorn(
+    worldX: number,
+    worldZ: number,
+    radius: number = 20
+  ): { x: number; y: number; z: number }[] {
+    const reacting: { dist: number; x: number; y: number; z: number }[] = [];
+    for (let i = 0; i < this.agents.length; i++) {
+      const ag = this.agents[i];
+      const dx = ag.x - worldX;
+      const dz = ag.z - worldZ;
+      const dist = Math.hypot(dx, dz);
+      if (dist <= radius) {
+        const inv = dist > 0.01 ? 1 / dist : 1;
+        ag.state = 'FLEEING';
+        ag.panicTimer = Math.max(ag.panicTimer, 1.55);
+        ag.panicVx = dx * inv * 3.8;
+        ag.panicVz = dz * inv * 3.8;
+        reacting.push({ dist, x: ag.x, y: 2.05, z: ag.z });
+      }
+    }
+    reacting.sort((a, b) => a.dist - b.dist);
+    return reacting.slice(0, 2).map(({ x, y, z }) => ({ x, y, z }));
+  }
+
   public getAgents(): readonly PedestrianAiAgent[] {
     return this.agents;
   }

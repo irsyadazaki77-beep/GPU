@@ -36,6 +36,7 @@ import {
   buildPolicePursuitHeliWithSpotlight,
 } from '../game/world/geometryBuilders';
 import { gameStore, type RadarVehicleBlip } from '../state/gameStore';
+import { cityAudio } from './CityAudio';
 import { spatialAudio } from './spatialAudio';
 
 export interface VehicleEntity extends TrafficAISteppable {
@@ -385,18 +386,51 @@ export class TrafficSystem {
     scene.add(this.roadEventGroup);
   }
 
-  public notifyHorn(px: number, pz: number): void {
+  public notifyHorn(
+    px: number,
+    pz: number
+  ): { x: number; y: number; z: number; type: VehicleType }[] {
     this.pendingHornPulse = true;
+    const reacting: {
+      dist: number;
+      x: number;
+      y: number;
+      z: number;
+      type: VehicleType;
+    }[] = [];
+
     for (const v of this.vehicles) {
       if (!v.isTraffic) continue;
-      if (Math.hypot(v.x - px, v.z - pz) < 30) {
-        v.hornReactionTimer = 1.6;
+      const dist = Math.hypot(v.x - px, v.z - pz);
+      if (dist < 30) {
+        v.hornReactionTimer = 1.65;
+        // Visible startled swerve / defensive brake reaction
+        const sideSign = (v.x - px) * Math.cos(v.heading) - (v.z - pz) * Math.sin(v.heading) >= 0 ? 1 : -1;
+        v.weaveOffset = sideSign * 0.85;
+        v.rollAngle = -sideSign * 0.08;
         if (v.type === 'angkot') {
           v.ngetemTimer = 0;
           v.stopTimer = 0;
+          v.speed = Math.max(v.speed, v.preferredSpeed * 0.95);
+        } else {
+          v.speed = Math.max(2.5, v.speed * 0.72);
         }
+        reacting.push({ dist, x: v.x, y: v.y + 2.35, z: v.z, type: v.type });
       }
     }
+
+    reacting.sort((a, b) => a.dist - b.dist);
+    if (reacting.length > 0) {
+      const pitch =
+        reacting[0].type === 'transjakarta' || reacting[0].type === 'metromini'
+          ? 0.72
+          : reacting[0].type === 'ojek' || reacting[0].type === 'bajaj'
+          ? 1.32
+          : 1.04;
+      cityAudio.playTrafficResponseHorn(pitch, 0.17);
+    }
+
+    return reacting.slice(0, 2).map(({ x, y, z, type }) => ({ x, y, z, type }));
   }
 
   public spawnVehicleNearPlayer(
@@ -567,7 +601,8 @@ export class TrafficSystem {
     pState: PlayerProgressState,
     isPlaying: boolean,
     playerX: number,
-    playerZ: number
+    playerZ: number,
+    nightFactor: number = 0.5
   ): void {
     const customs = pState.vehicleCustoms;
     const customsKey = `${customs.paintId}|${customs.underglowId}|${customs.armorPlatingLevel}|${customs.nitroEnabled}`;
@@ -595,7 +630,7 @@ export class TrafficSystem {
         }
       }
 
-      // Brake / taillight emissive boost when stopped or handbrake drifting
+      // Brake / taillight emissive boost (#ff1a1a) when braking, reversing, or drifting
       const tailMat = v.mesh.userData.taillightMat as
         | THREE.MeshStandardMaterial
         | undefined;
@@ -603,8 +638,26 @@ export class TrafficSystem {
         const isBraking =
           v.isDrifting ||
           (v.id === drivingVehicleId && v.speed < -0.2) ||
-          (v.isTraffic && v.speed < 1.2);
-        tailMat.emissiveIntensity = isBraking ? 2.4 : 0.9;
+          (v.isTraffic && (v.speed < 1.5 || (v.hornReactionTimer ?? 0) > 1.0));
+        tailMat.emissiveIntensity = isBraking ? 3.2 : 0.72 + nightFactor * 0.65;
+      }
+
+      // Night headlight glow & subtle additive headlight cones on ground vehicles
+      const headMat = v.mesh.userData.headlightMat as
+        | THREE.MeshStandardMaterial
+        | undefined;
+      if (headMat) {
+        headMat.emissiveIntensity = 0.55 + nightFactor * 2.25;
+      }
+      const coneMat = v.mesh.userData.headlightConeMat as
+        | THREE.MeshBasicMaterial
+        | undefined;
+      if (coneMat) {
+        const activeOrMoving = v.id === drivingVehicleId || v.isTraffic;
+        coneMat.opacity =
+          activeOrMoving && nightFactor > 0.16
+            ? (nightFactor - 0.16) * (v.id === drivingVehicleId ? 0.24 : 0.14)
+            : 0;
       }
 
       // Alternating red/blue police lightbars on Patwal & Barracuda units

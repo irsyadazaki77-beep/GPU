@@ -1,6 +1,6 @@
 import * as THREE from 'three';
+import { proceduralTextures } from '../../engine/ProceduralTextures';
 import type { BuildingFootprint } from '../types';
-import { createBuildingFacadeTextures } from './textures';
 
 export function createContactShadowDisc(radius: number): THREE.Mesh {
   const geo = new THREE.CircleGeometry(radius, 20);
@@ -16,28 +16,31 @@ export function createContactShadowDisc(radius: number): THREE.Mesh {
   return disc;
 }
 
-export function buildMonasLandmark(): THREE.Group {
+export function buildMonasLandmark(maxAnisotropy: number = 4): THREE.Group {
   const group = new THREE.Group();
 
+  const marbleSet = proceduralTextures.getMarbleTextures(maxAnisotropy);
   const marbleMat = new THREE.MeshStandardMaterial({
-    color: 0xe2e8f0,
-    roughness: 0.78,
-    metalness: 0.04,
-    envMapIntensity: 0.08,
+    color: 0xf8f6f0,
+    map: marbleSet.map,
+    roughnessMap: marbleSet.roughnessMap,
+    roughness: 0.55,
+    metalness: 0.06,
+    envMapIntensity: 0.72,
   });
   const darkStoneMat = new THREE.MeshStandardMaterial({
     color: 0x3f3f46,
-    roughness: 0.86,
-    metalness: 0.08,
-    envMapIntensity: 0.08,
+    roughness: 0.72,
+    metalness: 0.14,
+    envMapIntensity: 0.48,
   });
   const goldFlameMat = new THREE.MeshStandardMaterial({
-    color: 0xfbbf24,
-    emissive: 0xd97706,
-    emissiveIntensity: 0.45,
-    metalness: 0.65,
-    roughness: 0.32,
-    envMapIntensity: 0.2,
+    color: 0xffd166,
+    emissive: 0xffaa00,
+    emissiveIntensity: 1.6,
+    metalness: 0.88,
+    roughness: 0.16,
+    envMapIntensity: 1.25,
   });
 
   const lowerStep = new THREE.Mesh(
@@ -111,37 +114,56 @@ export function buildMonasLandmark(): THREE.Group {
     metalness: 0.85,
     roughness: 0.2,
   });
-  const redFlagMat = new THREE.MeshStandardMaterial({
-    color: 0xdc2626,
-    roughness: 0.65,
-  });
-  const whiteFlagMat = new THREE.MeshStandardMaterial({
-    color: 0xe2e8f0,
-    roughness: 0.65,
+  const flagTex = proceduralTextures.getMerahPutihFlagTexture(maxAnisotropy);
+  const flagClothMat = new THREE.MeshStandardMaterial({
+    map: flagTex,
+    roughness: 0.78,
+    metalness: 0.04,
+    side: THREE.DoubleSide,
+    envMapIntensity: 0.35,
   });
 
-  for (const fx of [-7.5, 7.5]) {
+  const animatedFlags: {
+    geometry: THREE.PlaneGeometry;
+    basePositions: Float32Array;
+    phase: number;
+  }[] = [];
+
+  for (let fIdx = 0; fIdx < 2; fIdx++) {
+    const fx = fIdx === 0 ? -7.5 : 7.5;
     const pole = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.12, 8.5, 8),
+      new THREE.CylinderGeometry(0.08, 0.12, 8.6, 8),
       poleMat
     );
-    pole.position.set(fx, 4.25, 9.5);
+    pole.position.set(fx, 4.3, 9.5);
     group.add(pole);
 
-    const flagRed = new THREE.Mesh(
-      new THREE.BoxGeometry(1.6, 0.48, 0.06),
-      redFlagMat
+    // Finial gold sphere atop flagpole
+    const finial = new THREE.Mesh(
+      new THREE.SphereGeometry(0.14, 8, 8),
+      goldFlameMat
     );
-    flagRed.position.set(fx + 0.82, 8.1, 9.5);
-    group.add(flagRed);
+    finial.position.set(fx, 8.65, 9.5);
+    group.add(finial);
 
-    const flagWhite = new THREE.Mesh(
-      new THREE.BoxGeometry(1.6, 0.48, 0.06),
-      whiteFlagMat
-    );
-    flagWhite.position.set(fx + 0.82, 7.62, 9.5);
-    group.add(flagWhite);
+    // Subdivided cloth flag anchored at x = 0 so wind flutter wave travels pole -> fly edge
+    const flagGeo = new THREE.PlaneGeometry(1.82, 1.04, 10, 4);
+    flagGeo.translate(0.91, 0, 0);
+    const posAttr = flagGeo.attributes.position as THREE.BufferAttribute;
+    const basePositions = new Float32Array(posAttr.array);
+    const flagMesh = new THREE.Mesh(flagGeo, flagClothMat);
+    flagMesh.position.set(fx + 0.06, 7.92, 9.5);
+    flagMesh.castShadow = true;
+    group.add(flagMesh);
+
+    animatedFlags.push({
+      geometry: flagGeo,
+      basePositions,
+      phase: fIdx * 1.65,
+    });
   }
+
+  group.userData.animatedFlags = animatedFlags;
 
   return group;
 }
@@ -156,17 +178,19 @@ export function buildWarungStall(
   group.rotation.y = rotY;
 
   const tarpMat = new THREE.MeshStandardMaterial({
-    color: 0xb45309,
-    roughness: 0.88,
+    color: 0xc2410c,
+    roughness: 0.86,
     metalness: 0.02,
-    envMapIntensity: 0.06,
+    envMapIntensity: 0.12,
   });
+  const bannerTex = proceduralTextures.getWarungBannerTexture();
   const bannerMat = new THREE.MeshStandardMaterial({
-    color: 0xfde68a,
-    emissive: 0xd97706,
-    emissiveIntensity: 0.22,
-    roughness: 0.72,
-    envMapIntensity: 0.06,
+    map: bannerTex,
+    emissive: 0xf59e0b,
+    emissiveMap: bannerTex,
+    emissiveIntensity: 0.28,
+    roughness: 0.68,
+    envMapIntensity: 0.14,
   });
   const woodMat = new THREE.MeshStandardMaterial({
     color: 0x78350f,
@@ -177,11 +201,37 @@ export function buildWarungStall(
     metalness: 0.7,
     roughness: 0.4,
   });
+  const cordMat = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
+    roughness: 0.85,
+  });
+  const bulbMat = new THREE.MeshStandardMaterial({
+    color: 0xfff7ed,
+    emissive: 0xffb74d,
+    emissiveIntensity: 1.65,
+    roughness: 0.2,
+  });
 
   const counter = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.9, 1.4), woodMat);
   counter.position.set(0, 0.45, 0);
   counter.castShadow = true;
+  counter.receiveShadow = true;
   group.add(counter);
+
+  // Glass food display cabinet (etalase warung) on counter
+  const etalaseMat = new THREE.MeshStandardMaterial({
+    color: 0xdbeafe,
+    transparent: true,
+    opacity: 0.45,
+    roughness: 0.18,
+    metalness: 0.15,
+  });
+  const etalase = new THREE.Mesh(
+    new THREE.BoxGeometry(1.15, 0.52, 0.56),
+    etalaseMat
+  );
+  etalase.position.set(-0.65, 1.16, 0.15);
+  group.add(etalase);
 
   for (const px of [-1.2, 1.2]) {
     for (const pz of [-0.6, 0.6]) {
@@ -194,15 +244,28 @@ export function buildWarungStall(
     }
   }
 
-  const canopy = new THREE.Mesh(new THREE.ConeGeometry(2.3, 1.1, 4), tarpMat);
+  const canopy = new THREE.Mesh(new THREE.ConeGeometry(2.35, 1.05, 4), tarpMat);
   canopy.rotation.y = Math.PI / 4;
   canopy.position.set(0, 2.55, 0);
   canopy.castShadow = true;
   group.add(canopy);
 
-  const sign = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.42, 0.08), bannerMat);
-  sign.position.set(0, 1.88, 0.95);
+  // Procedural Jakarta warung tenda vinyl banner suspended cleanly under front canopy edge
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(2.65, 0.52, 0.06), bannerMat);
+  sign.position.set(0, 1.88, 0.98);
   group.add(sign);
+
+  // Warm hanging tungsten bulb under canopy roof
+  const cord = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.015, 0.015, 0.42, 6),
+    cordMat
+  );
+  cord.position.set(0, 2.15, 0.12);
+  group.add(cord);
+
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), bulbMat);
+  bulb.position.set(0, 1.9, 0.12);
+  group.add(bulb);
 
   return group;
 }
@@ -212,7 +275,7 @@ export function buildJakartaBuilding(
   maxAnisotropy: number
 ): THREE.Group {
   if (b.style === 'monas') {
-    const monas = buildMonasLandmark();
+    const monas = buildMonasLandmark(maxAnisotropy);
     monas.position.set(b.x, 0, b.z);
     return monas;
   }
@@ -220,32 +283,33 @@ export function buildJakartaBuilding(
   const group = new THREE.Group();
   group.position.set(b.x, 0, b.z);
 
-  const { map: facadeTex, roughnessMap } = createBuildingFacadeTextures(
-    b.primaryColor,
-    b.accentColor,
-    b.style,
-    maxAnisotropy
-  );
+  const { map: facadeTex, roughnessMap, emissiveMap } =
+    proceduralTextures.getBuildingFacadeTextures(
+      b.primaryColor,
+      b.accentColor,
+      b.style,
+      maxAnisotropy
+    );
 
   const podiumMat = new THREE.MeshStandardMaterial({
-    color: 0x1e2430,
-    roughness: 0.88,
-    metalness: 0.08,
-    envMapIntensity: 0.08,
+    color: 0x1e2636,
+    roughness: 0.74,
+    metalness: 0.16,
+    envMapIntensity: 0.5,
   });
   const lobbyGlassMat = new THREE.MeshStandardMaterial({
     color: 0x0f172a,
-    emissive: 0xd97706,
-    emissiveIntensity: 0.06,
-    roughness: 0.62,
-    metalness: 0.18,
-    envMapIntensity: 0.1,
+    emissive: 0xf59e0b,
+    emissiveIntensity: 0.28,
+    roughness: 0.2,
+    metalness: 0.42,
+    envMapIntensity: 1.05,
   });
   const mullionMat = new THREE.MeshStandardMaterial({
     color: 0x111827,
-    roughness: 0.78,
-    metalness: 0.22,
-    envMapIntensity: 0.08,
+    roughness: 0.56,
+    metalness: 0.48,
+    envMapIntensity: 0.65,
   });
 
   const podiumH = b.style === 'skyscraper' ? 3.8 : 2.8;
@@ -289,19 +353,24 @@ export function buildJakartaBuilding(
     color: 0xffffff,
     map: facadeTex,
     roughnessMap,
-    roughness: b.style === 'skyscraper' ? 0.86 : 0.9,
-    metalness: b.style === 'skyscraper' ? 0.08 : 0.04,
-    envMapIntensity: 0.08,
+    emissive: new THREE.Color(0xffffff),
+    emissiveMap,
+    emissiveIntensity: 0.65,
+    roughness: b.style === 'skyscraper' ? 0.92 : 0.94,
+    metalness: b.style === 'skyscraper' ? 0.44 : 0.14,
+    envMapIntensity: b.style === 'skyscraper' ? 1.12 : 0.55,
   });
 
   const accentMat = new THREE.MeshStandardMaterial({
     color: b.accentColor,
     emissive: b.accentColor,
-    emissiveIntensity: 0.14,
-    roughness: 0.68,
-    metalness: 0.18,
-    envMapIntensity: 0.08,
+    emissiveIntensity: 0.42,
+    roughness: 0.42,
+    metalness: 0.42,
+    envMapIntensity: 0.85,
   });
+
+  group.userData.nightEmissiveMats = [bodyMat, lobbyGlassMat, accentMat];
 
   if (b.style === 'skyscraper') {
     const lowerH = totalBodyH * 0.68;
