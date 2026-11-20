@@ -303,13 +303,15 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
       aria-label="Smartphone iFruit Jakarta"
       className="fixed inset-0 z-30 flex items-end justify-end p-4 md:p-6 pointer-events-none"
     >
-      <div className="w-full max-w-[348px] h-[640px] max-h-[84vh] bg-[#0a0d14] border-[3px] border-[#2d3748] rounded-[36px] shadow-[0_24px_60px_rgba(0,0,0,0.9)] flex flex-col justify-between overflow-hidden text-[#f4f1ea] pointer-events-auto animate-phone-in">
-        {/* Top Phone Bezel & Clean Status Bar */}
-        <div className="bg-[#0e131d] border-b border-white/10 px-5 pt-3 pb-2.5 flex flex-col gap-2 shrink-0">
-          <div className="flex items-center justify-between text-[10px] font-mono-num text-[#94a3b8]">
-            <span>{formatJakartaClock(worldTimeMinutes)} WIB</span>
-            <div className="w-16 h-3 bg-[#05070b] rounded-full border border-white/10" />
-            <span className="text-[#22c55e] font-semibold">
+      <div className="w-full max-w-[344px] h-[644px] max-h-[84vh] aaa-phone-wallpaper border-[2px] border-white/20 ring-4 ring-black/65 rounded-[40px] shadow-[0_28px_72px_rgba(0,0,0,0.92)] flex flex-col justify-between overflow-hidden text-[#f4f1ea] pointer-events-auto animate-phone-in">
+        {/* Top Phone Bezel & Dynamic Island Status Bar */}
+        <div className="bg-[#090d16]/85 border-b border-white/10 px-5 pt-3 pb-2.5 flex flex-col gap-2 shrink-0">
+          <div className="flex items-center justify-between text-[10px] font-mono-num text-[#cbd5e1]">
+            <span>{formatJakartaClock(worldTimeMinutes)}</span>
+            <div className="w-20 h-3.5 bg-[#030508] rounded-full border border-white/10 flex items-center justify-end pr-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#1e293b]" />
+            </div>
+            <span className="text-[#4ade80] font-bold">
               {formatRupiah(playerState.rupiah)}
             </span>
           </div>
@@ -319,19 +321,19 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
               <button
                 type="button"
                 onClick={() => setScreen('home')}
-                className="text-xs font-medium text-[#38bdf8] hover:text-white cursor-pointer flex items-center gap-1"
+                className="text-xs font-semibold text-[#38bdf8] hover:text-white cursor-pointer flex items-center gap-1"
               >
                 <span aria-hidden="true">‹</span> Beranda
               </button>
             ) : (
-              <span className="text-xs font-semibold text-[#94a3b8]">
-                iFruit OS · Jakarta
+              <span className="text-[11px] font-mono-num uppercase tracking-wider text-[#94a3b8]">
+                iFruit OS
               </span>
             )}
 
             <span className="font-display text-base font-bold uppercase tracking-wide text-[#f4f1ea]">
               {screen === 'home'
-                ? 'Menu Utama'
+                ? 'Jakarta'
                 : IFRUIT_APPS.find((a) => a.id === screen)?.name}
             </span>
 
@@ -350,40 +352,52 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
           {screen === 'home' && (
             <>
               {/* Active Protagonist Summary Strip */}
-              <div className="flex items-center justify-between gap-3 pb-3 border-b border-white/10">
+              <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-2xl bg-white/5 border border-white/10">
                 <div className="min-w-0">
-                  <div className="font-display text-xl font-extrabold uppercase text-[#f4f1ea] leading-none truncate">
+                  <div className="font-display text-lg font-extrabold uppercase text-[#f4f1ea] leading-none truncate">
                     {PROTAGONIST_PROFILES[playerState.activeProtagonist].name}
                   </div>
                   <div className="text-[11px] text-[#94a3b8] mt-1 truncate">
                     {dominantFaction.title} · +{formatRupiah(passiveIncome)}/4d
                   </div>
                 </div>
-                <span className="font-mono-num text-xs font-semibold text-[#22c55e] shrink-0">
-                  {playerState.completedMissions.length}/15 Misi
+                <span className="font-mono-num text-[11px] font-bold text-[#4ade80] bg-[#22c55e]/15 px-2 py-0.5 rounded-full shrink-0">
+                  {playerState.completedMissions.length}/15
                 </span>
               </div>
 
-              {/* 4x3 Crisp Icon App Launcher */}
+              {/* 4x3 Crisp Icon App Launcher with Specular Glass Sheen */}
               <div className="grid grid-cols-3 gap-x-3 gap-y-3.5 py-0.5">
-                {IFRUIT_APPS.map((app) => (
-                  <button
-                    key={app.id}
-                    type="button"
-                    onClick={() => setScreen(app.id)}
-                    className="flex flex-col items-center gap-1 cursor-pointer group"
-                  >
-                    <div
-                      className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform"
-                      style={{ backgroundColor: app.color }}
+                {IFRUIT_APPS.map((app) => {
+                  const hasClaimable =
+                    app.id === 'imperium' &&
+                    dailyChallenges.items.some(
+                      (c) => !c.claimed && c.progress >= c.target
+                    );
+                  return (
+                    <button
+                      key={app.id}
+                      type="button"
+                      onClick={() => setScreen(app.id)}
+                      className="flex flex-col items-center gap-1.5 cursor-pointer group"
                     >
-                      <AppGlyph id={app.id} />
-                    </div>
-                    <span className="text-[11px] font-medium text-[#e2e8f0] group-hover:text-white">
-                      {app.name}
-                    </span>
-                  </button>
-                ))}
+                      <div
+                        className="relative w-12 h-12 rounded-[15px] flex items-center justify-center shadow-[0_8px_18px_rgba(0,0,0,0.45)] group-hover:scale-105 group-active:scale-95 transition-transform border border-white/25"
+                        style={{
+                          background: `linear-gradient(155deg, ${app.color} 0%, ${app.color}cc 100%)`,
+                        }}
+                      >
+                        <AppGlyph id={app.id} />
+                        {hasClaimable && (
+                          <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[#22c55e] border-2 border-[#090d16]" />
+                        )}
+                      </div>
+                      <span className="text-[11px] font-medium text-[#e2e8f0] group-hover:text-white leading-none">
+                        {app.name}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
 
               {/* Direct Links for Heist Board, Customs 360 & Photo Mode */}

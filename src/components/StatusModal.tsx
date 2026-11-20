@@ -123,7 +123,7 @@ export const StatusModal: React.FC<StatusModalProps> = ({
     calculatePassivePropertyIncome(snapshot.ownedProperties) +
     calculateTurfWarsIncome(snapshot);
 
-  /* ==================== VICTORY / WASTED WIDESCREEN STAMP ==================== */
+  /* ==================== VICTORY / WASTED WIDESCREEN STAMP (ROCKSTAR LETTERBOX) ==================== */
   if (mode !== 'paused') {
     const isVictory = mode === 'victory';
     return (
@@ -131,66 +131,49 @@ export const StatusModal: React.FC<StatusModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="status-modal-heading"
-        className="fixed inset-0 z-40 flex items-center justify-center p-6 pointer-events-auto"
+        className="fixed inset-0 z-40 flex items-center justify-center pointer-events-auto"
         style={{
           background: isVictory
-            ? 'rgba(7, 10, 16, 0.86)'
-            : 'radial-gradient(circle, rgba(127,29,29,0.5) 0%, rgba(5,8,14,0.92) 100%)',
+            ? 'radial-gradient(circle, rgba(245,158,11,0.16) 0%, rgba(5,8,14,0.88) 100%)'
+            : 'radial-gradient(circle, rgba(185,28,28,0.34) 0%, rgba(4,6,11,0.92) 100%)',
         }}
       >
-        <div className="w-full max-w-2xl aaa-glass rounded-2xl p-8 shadow-2xl flex flex-col gap-6 animate-stamp-in">
-          <div className="text-center border-b border-white/10 pb-6">
+        <div
+          className={`w-full py-10 px-6 bg-[#05080f]/92 border-y ${
+            isVictory ? 'border-[#f59e0b]/45' : 'border-[#ef4444]/45'
+          } shadow-[0_24px_80px_rgba(0,0,0,0.92)] flex flex-col items-center gap-5 animate-stamp-in`}
+        >
+          <div className="text-center max-w-2xl">
             <div
-              className={`text-xs font-mono-num font-semibold uppercase tracking-[0.22em] ${
-                isVictory ? 'text-[#22c55e]' : 'text-[#ef4444]'
+              className={`text-[11px] font-mono-num font-bold uppercase tracking-[0.28em] ${
+                isVictory ? 'text-[#22c55e]' : 'text-[#f87171]'
               }`}
             >
-              {dominant.title}
+              {isVictory ? dominant.title : 'RS Cipto Mangunkusumo · Evakuasi Medis'}
             </div>
             <h2
               id="status-modal-heading"
-              className={`font-display text-6xl font-extrabold italic uppercase tracking-wide mt-1 hud-stroke ${
+              className={`font-display text-6xl sm:text-7xl font-extrabold italic uppercase tracking-wider mt-1 hud-stroke leading-none ${
                 isVictory ? 'text-[#f59e0b]' : 'text-[#ef4444]'
               }`}
             >
-              {isVictory ? 'Misi Jakarta Tuntas' : 'Wasted'}
+              {isVictory ? 'Misi Tuntas' : 'Wasted'}
             </h2>
-            <p className="text-sm md:text-base text-[#cbd5e1] mt-3 max-w-lg mx-auto leading-relaxed">
+            <p className="text-sm text-[#cbd5e1] mt-3 max-w-lg mx-auto leading-relaxed">
               {isVictory
                 ? outcomeNarrative || dominant.endingSummary
-                : 'Aparat dan sindikat rival berhasil melumpuhkanmu di jalanan Jakarta.'}
+                : 'Kamu tumbang di jalanan Jakarta. Seluruh senjata, properti, dan progres misi tetap aman saat keluar dari rumah sakit.'}
             </p>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <div className="text-xs text-[#94a3b8]">Skor Tertinggi</div>
-              <div className="font-mono-num text-xl font-bold text-[#f4f1ea] mt-1">
-                {Math.round(snapshot.score)} / {Math.round(snapshot.bestScore)}
-              </div>
-            </div>
-            <div>
-              <div className="text-xs text-[#94a3b8]">Saldo Kas</div>
-              <div className="font-mono-num text-xl font-bold text-[#22c55e] mt-1">
-                {formatRupiah(snapshot.rupiah)}
-              </div>
-            </div>
-            <div>
-              <div className="text-xs text-[#94a3b8]">Progres Kampanye</div>
-              <div className="font-mono-num text-xl font-bold text-[#38bdf8] mt-1">
-                {snapshot.completedMissions.length} / 15
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-1 w-full max-w-xl">
             {!isVictory && onHospitalRespawn ? (
               <button
                 type="button"
                 data-start="true"
                 data-testid="hospital-respawn-btn"
                 onClick={onHospitalRespawn}
-                className="flex-1 min-w-[220px] py-3 px-6 rounded-lg bg-[#f59e0b] hover:bg-[#fbbf24] text-[#090c12] font-display text-xl font-extrabold uppercase tracking-wider cursor-pointer transition-colors"
+                className="flex-1 min-w-[220px] py-3 px-6 rounded-xl aaa-btn-primary font-display text-xl font-extrabold uppercase tracking-wider cursor-pointer transition-all"
               >
                 Keluar RS Cipto (Biaya 5%)
               </button>
@@ -199,7 +182,7 @@ export const StatusModal: React.FC<StatusModalProps> = ({
                 type="button"
                 data-start="true"
                 onClick={onRestart}
-                className="flex-1 min-w-[200px] py-3 px-6 rounded-lg bg-[#f59e0b] hover:bg-[#fbbf24] text-[#090c12] font-display text-xl font-extrabold uppercase tracking-wider cursor-pointer transition-colors"
+                className="flex-1 min-w-[200px] py-3 px-6 rounded-xl aaa-btn-primary font-display text-xl font-extrabold uppercase tracking-wider cursor-pointer transition-all"
               >
                 Mainkan Lagi
               </button>
@@ -208,7 +191,7 @@ export const StatusModal: React.FC<StatusModalProps> = ({
               <button
                 type="button"
                 onClick={onRestart}
-                className="py-3 px-5 rounded-lg bg-white/10 hover:bg-white/15 text-[#cbd5e1] font-display text-base font-bold uppercase tracking-wider cursor-pointer transition-colors"
+                className="py-3 px-5 rounded-xl bg-white/8 hover:bg-white/15 border border-white/10 text-[#cbd5e1] font-display text-base font-bold uppercase tracking-wider cursor-pointer transition-colors"
               >
                 Ulang Awal
               </button>
@@ -216,7 +199,7 @@ export const StatusModal: React.FC<StatusModalProps> = ({
             <button
               type="button"
               onClick={onReturnTitle}
-              className="py-3 px-6 rounded-lg bg-white/10 hover:bg-white/15 text-[#f4f1ea] font-display text-xl font-bold uppercase tracking-wider cursor-pointer transition-colors"
+              className="py-3 px-6 rounded-xl bg-white/8 hover:bg-white/15 border border-white/10 text-[#f4f1ea] font-display text-lg font-bold uppercase tracking-wider cursor-pointer transition-colors"
             >
               Menu Utama
             </button>
@@ -238,70 +221,75 @@ export const StatusModal: React.FC<StatusModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="status-modal-heading"
-      className="fixed inset-0 z-40 bg-[#060910]/94 flex flex-col pointer-events-auto animate-aaa-up"
+      className="fixed inset-0 z-40 bg-[#05080f]/95 flex flex-col pointer-events-auto animate-aaa-up"
     >
-      {/* Top 1-Row Rockstar Pause Header */}
-      <header className="w-full max-w-6xl mx-auto px-6 pt-6 pb-4 border-b border-white/10 flex flex-wrap items-center justify-between gap-4 shrink-0">
-        <div className="flex items-center gap-6">
-          <h2
-            id="status-modal-heading"
-            className="font-display text-3xl font-extrabold italic uppercase tracking-wide text-[#f4f1ea]"
-          >
-            GPU: <span className="text-[#f59e0b]">San Nabilo</span>
-          </h2>
+      {/* Top 1-Row Rockstar Widescreen Underline Header */}
+      <header className="w-full border-b border-white/10 bg-[#080c15]/90 shrink-0">
+        <div className="max-w-6xl mx-auto px-6 pt-5 flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-wrap items-end gap-8">
+            <h2
+              id="status-modal-heading"
+              className="font-display text-3xl font-extrabold italic uppercase tracking-wide text-[#f4f1ea] pb-3 leading-none"
+            >
+              GPU: <span className="text-[#f59e0b]">San Nabilo</span>
+            </h2>
 
-          {/* Clean Horizontal Tab Navigation */}
-          <nav className="flex items-center gap-1 bg-white/5 p-1 rounded-lg">
-            {(
-              [
-                { id: 'peta', label: 'Peta & Distrik' },
-                { id: 'misi', label: 'Kampanye & Misi' },
-                { id: 'aset', label: 'Statistik & Aset' },
-                { id: 'kontrol', label: 'Pengaturan & Kontrol' },
-              ] as { id: PauseTab; label: string }[]
-            ).map((tab) => {
-              const active = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                    active
-                      ? 'bg-[#f59e0b] text-[#090c12]'
-                      : 'text-[#cbd5e1] hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
+            {/* Rockstar Underline Tab Bar */}
+            <nav className="flex items-center gap-1">
+              {(
+                [
+                  { id: 'peta', label: 'Peta' },
+                  { id: 'misi', label: 'Misi' },
+                  { id: 'aset', label: 'Statistik' },
+                  { id: 'kontrol', label: 'Pengaturan' },
+                ] as { id: PauseTab; label: string }[]
+              ).map((tab) => {
+                const active = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`px-4 pb-3 pt-1 text-xs font-display font-bold uppercase tracking-[0.14em] transition-colors cursor-pointer whitespace-nowrap border-b-2 ${
+                      active
+                        ? 'border-[#f59e0b] text-[#f4f1ea]'
+                        : 'border-transparent text-[#94a3b8] hover:text-white'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
 
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={onResume}
-            className="px-4 py-2 rounded-lg bg-[#f59e0b] hover:bg-[#fbbf24] text-[#090c12] font-semibold text-xs cursor-pointer whitespace-nowrap"
-          >
-            Lanjutkan [Esc]
-          </button>
-          <button
-            type="button"
-            data-start="true"
-            onClick={onRestart}
-            className="px-3.5 py-2 rounded-lg bg-white/8 hover:bg-white/15 text-[#e2e8f0] text-xs font-medium cursor-pointer whitespace-nowrap"
-          >
-            Mulai Ulang
-          </button>
-          <button
-            type="button"
-            onClick={onReturnTitle}
-            className="px-3.5 py-2 rounded-lg bg-white/8 hover:bg-white/15 text-[#94a3b8] hover:text-white text-xs font-medium cursor-pointer whitespace-nowrap"
-          >
-            Menu Utama
-          </button>
+          <div className="flex items-center gap-2.5 pb-2.5">
+            <span className="hidden md:inline font-mono-num text-xs font-bold text-[#4ade80] mr-2">
+              {formatRupiah(snapshot.rupiah)}
+            </span>
+            <button
+              type="button"
+              onClick={onResume}
+              className="px-4 py-1.5 rounded-lg aaa-btn-primary font-semibold text-xs cursor-pointer whitespace-nowrap"
+            >
+              Lanjutkan [Esc]
+            </button>
+            <button
+              type="button"
+              data-start="true"
+              onClick={onRestart}
+              className="px-3 py-1.5 rounded-lg bg-white/8 hover:bg-white/15 text-[#e2e8f0] text-xs font-medium cursor-pointer whitespace-nowrap"
+            >
+              Mulai Ulang
+            </button>
+            <button
+              type="button"
+              onClick={onReturnTitle}
+              className="px-3 py-1.5 rounded-lg bg-white/8 hover:bg-white/15 text-[#94a3b8] hover:text-white text-xs font-medium cursor-pointer whitespace-nowrap"
+            >
+              Menu Utama
+            </button>
+          </div>
         </div>
       </header>
 

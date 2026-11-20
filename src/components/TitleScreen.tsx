@@ -109,6 +109,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   onStartGame,
 }) => {
   const [showNewGameSetup, setShowNewGameSetup] = useState<boolean>(!savedGame);
+  const [showSaveSlots, setShowSaveSlots] = useState<boolean>(false);
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
   const activeSaveSlot = useGameStore((s) => s.activeSaveSlot);
   const slotSummaries = listSaveSlotSummaries();
@@ -162,17 +163,21 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
       className="fixed inset-0 z-20 flex items-center px-6 py-6 md:px-14 pointer-events-none overflow-y-auto"
       style={{
         background:
-          'linear-gradient(92deg, rgba(7, 10, 16, 0.96) 0%, rgba(7, 10, 16, 0.8) 36%, rgba(7, 10, 16, 0.2) 60%, rgba(7, 10, 16, 0) 80%)',
+          'linear-gradient(95deg, rgba(6, 9, 15, 0.94) 0%, rgba(6, 9, 15, 0.72) 32%, rgba(6, 9, 15, 0.14) 56%, rgba(6, 9, 15, 0) 78%)',
       }}
     >
       {/* Left-Anchored Cinematic Rockstar Menu Column */}
-      <div className="w-full max-w-[420px] flex flex-col gap-4 pointer-events-auto my-auto">
+      <div className="w-full max-w-[396px] flex flex-col gap-5 pointer-events-auto my-auto">
         {/* Clean GTA-Inspired Wordmark & Monas Crest */}
-        <header className="flex flex-col gap-1.5">
+        <header className="flex flex-col gap-2">
+          <div className="inline-flex items-center gap-2 text-[10px] font-mono-num uppercase tracking-[0.26em] text-[#f59e0b]">
+            <span className="w-5 h-[2px] bg-[#f59e0b]" />
+            <span>Jakarta Open World</span>
+          </div>
           <div className="flex items-center gap-3.5">
             <svg
               viewBox="0 0 48 64"
-              className="w-9 h-12 shrink-0"
+              className="w-9 h-12 shrink-0 drop-shadow-[0_4px_12px_rgba(245,158,11,0.35)]"
               aria-hidden="true"
             >
               <polygon
@@ -183,86 +188,24 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               <circle cx="24" cy="11" r="3.5" fill="#fef08a" />
             </svg>
             <div>
-              <h1 className="font-display text-5xl md:text-6xl font-extrabold italic uppercase tracking-tight text-[#f4f1ea] leading-[0.9] hud-stroke">
+              <h1 className="font-display text-5xl md:text-6xl font-extrabold italic uppercase tracking-tight text-[#f4f1ea] leading-[0.88] hud-stroke">
                 GPU: <span className="text-[#f59e0b]">San Nabilo</span>
               </h1>
-              <p className="text-xs font-medium tracking-[0.18em] uppercase text-[#94a3b8] mt-1">
-                Grand Theft Nusantara · Jakarta Open World
+              <p className="text-[11px] font-medium tracking-[0.2em] uppercase text-[#94a3b8] mt-1.5">
+                Grand Theft Nusantara
               </p>
             </div>
           </div>
         </header>
 
-        {/* Multi-Slot Save Profile Switcher (Slot 1 / 2 / 3) + JSON Export/Import */}
-        <section className="flex flex-col gap-2 border-t border-white/10 pt-3">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold text-[#94a3b8]">
-              Profil Penyimpanan (Multi-Slot)
-            </span>
-            <div className="flex items-center gap-2 font-mono-num text-[11px]">
-              <button
-                type="button"
-                onClick={handleExportSlotJson}
-                className="text-[#38bdf8] hover:text-white cursor-pointer"
-              >
-                Ekspor JSON
-              </button>
-              <span className="text-white/20">·</span>
-              <label className="text-[#22c55e] hover:text-white cursor-pointer">
-                Impor JSON
-                <input
-                  type="file"
-                  accept="application/json,.json"
-                  onChange={handleImportSlotJson}
-                  className="hidden"
-                />
-              </label>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-1.5">
-            {slotSummaries.map((slot) => {
-              const active = activeSaveSlot === slot.slotId;
-              const snap = slot.snapshot;
-              return (
-                <button
-                  key={slot.slotId}
-                  type="button"
-                  onClick={() => gameStore.switchSaveSlot(slot.slotId as SaveSlotId)}
-                  className={`p-2 rounded-lg border text-left cursor-pointer transition-colors ${
-                    active
-                      ? 'bg-[#f59e0b]/20 border-[#f59e0b] text-[#f4f1ea]'
-                      : 'bg-white/5 border-white/10 text-[#94a3b8] hover:text-white'
-                  }`}
-                >
-                  <div className="font-display text-xs font-bold uppercase flex items-center justify-between">
-                    <span>Slot {slot.slotId}</span>
-                    {active && <span className="text-[10px] text-[#f59e0b]">Aktif</span>}
-                  </div>
-                  <div className="text-[10px] font-mono-num truncate mt-0.5">
-                    {snap
-                      ? `${snap.playerState.completedMissions.length}/15 · ${formatRupiah(snap.playerState.rupiah)}`
-                      : 'Kosong'}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          {backupStatus && (
-            <div className="text-[11px] font-mono-num text-[#38bdf8]">
-              {backupStatus}
-            </div>
-          )}
-        </section>
-
-        {/* Auto-Saved Campaign Resume Block */}
+        {/* Auto-Saved Campaign Resume Block (Front & Center) */}
         {savedGame && onContinueGame && (
-          <section className="flex flex-col gap-2.5 border-t border-white/10 pt-4">
+          <section className="flex flex-col gap-2.5 pt-1">
             <button
               type="button"
               data-continue="true"
               onClick={onContinueGame}
-              className="w-full py-3.5 px-5 rounded-lg bg-[#f59e0b] hover:bg-[#fbbf24] active:scale-[0.99] text-[#090c12] shadow-[0_10px_30px_rgba(245,158,11,0.28)] transition-all cursor-pointer flex items-center justify-between gap-3 text-left"
+              className="w-full py-3.5 px-5 rounded-xl aaa-btn-primary active:scale-[0.99] transition-all cursor-pointer flex items-center justify-between gap-3 text-left"
             >
               <div>
                 <div className="font-display text-2xl font-extrabold uppercase tracking-wider leading-none">
@@ -274,25 +217,97 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                   {formatRupiah(savedGame.playerState.rupiah)}
                 </div>
               </div>
-              <span className="font-mono-num text-xs font-bold px-2 py-0.5 rounded bg-[#090c12]/15 shrink-0">
+              <span className="font-mono-num text-[11px] font-bold px-2 py-0.5 rounded bg-[#090c12]/15 shrink-0">
                 Enter
               </span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => setShowNewGameSetup((prev) => !prev)}
-              className="w-full py-2.5 px-4 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-[#cbd5e1] font-display text-base font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-between"
-            >
-              <span>
-                {showNewGameSetup
-                  ? 'Tutup Pengaturan Kampanye Baru'
-                  : 'Permainan Baru'}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setShowNewGameSetup((prev) => !prev)}
+                className="py-2.5 px-3.5 rounded-xl aaa-glass-subtle hover:bg-white/10 text-[#e2e8f0] font-display text-sm font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-between"
+              >
+                <span>Kampanye Baru</span>
+                <span className="text-xs font-mono-num text-[#94a3b8]">
+                  {showNewGameSetup ? '−' : '+'}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSaveSlots((prev) => !prev)}
+                className="py-2.5 px-3.5 rounded-xl aaa-glass-subtle hover:bg-white/10 text-[#cbd5e1] font-display text-sm font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-between"
+              >
+                <span>Slot {activeSaveSlot}</span>
+                <span className="text-xs font-mono-num text-[#94a3b8]">
+                  {showSaveSlots ? '−' : '▾'}
+                </span>
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* Collapsible Multi-Slot Save Profile Switcher (kept clean out of the way until opened) */}
+        {(!savedGame || showSaveSlots) && (
+          <section className="flex flex-col gap-2 aaa-glass-subtle rounded-xl p-3 animate-aaa-up">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-semibold text-[#94a3b8] uppercase tracking-wider">
+                Slot Penyimpanan
               </span>
-              <span className="text-xs font-mono-num text-[#94a3b8]">
-                {showNewGameSetup ? '−' : '+'}
-              </span>
-            </button>
+              <div className="flex items-center gap-2 font-mono-num text-[10px]">
+                <button
+                  type="button"
+                  onClick={handleExportSlotJson}
+                  className="text-[#38bdf8] hover:text-white cursor-pointer"
+                >
+                  Ekspor
+                </button>
+                <span className="text-white/20">·</span>
+                <label className="text-[#22c55e] hover:text-white cursor-pointer">
+                  Impor
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={handleImportSlotJson}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5">
+              {slotSummaries.map((slot) => {
+                const active = activeSaveSlot === slot.slotId;
+                const snap = slot.snapshot;
+                return (
+                  <button
+                    key={slot.slotId}
+                    type="button"
+                    onClick={() => gameStore.switchSaveSlot(slot.slotId as SaveSlotId)}
+                    className={`p-2 rounded-lg border text-left cursor-pointer transition-colors ${
+                      active
+                        ? 'bg-[#f59e0b]/18 border-[#f59e0b] text-[#f4f1ea]'
+                        : 'bg-white/4 border-white/10 text-[#94a3b8] hover:text-white'
+                    }`}
+                  >
+                    <div className="font-display text-xs font-bold uppercase flex items-center justify-between">
+                      <span>Slot {slot.slotId}</span>
+                      {active && <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b]" />}
+                    </div>
+                    <div className="text-[10px] font-mono-num truncate mt-0.5 text-[#cbd5e1]">
+                      {snap
+                        ? `${snap.playerState.completedMissions.length}/15 · ${formatRupiah(snap.playerState.rupiah)}`
+                        : 'Kosong'}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {backupStatus && (
+              <div className="text-[10px] font-mono-num text-[#38bdf8]">
+                {backupStatus}
+              </div>
+            )}
           </section>
         )}
 
@@ -430,10 +445,10 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 type="button"
                 data-start="true"
                 onClick={onStartGame}
-                className={`w-full py-3.5 px-6 rounded-lg active:scale-[0.99] font-display text-2xl font-extrabold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-between ${
+                className={`w-full py-3.5 px-6 rounded-xl active:scale-[0.99] font-display text-2xl font-extrabold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-between ${
                   savedGame
                     ? 'bg-white/12 hover:bg-white/20 text-[#f4f1ea] border border-white/20'
-                    : 'bg-[#f59e0b] hover:bg-[#fbbf24] text-[#090c12] shadow-[0_10px_30px_rgba(245,158,11,0.28)]'
+                    : 'aaa-btn-primary'
                 }`}
               >
                 <span>
@@ -449,9 +464,15 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
           </>
         )}
 
-        <p className="text-[11px] text-[#cbd5e1] hud-stroke-sm">
-          Seret mouse di kanvas untuk memutar kamera. Tekan Esc saat bermain untuk membuka peta distrik dan daftar kontrol.
+        <p className="text-[11px] text-[#94a3b8] hud-stroke-sm leading-relaxed">
+          WASD gerak · Tahan Klik Kanan bidik · [F] kendaraan · [Tab] HP · [Esc] peta & kontrol.
         </p>
+      </div>
+
+      {/* Subtle Bottom-Right Live Engine Watermark over Open Jakarta Skyline */}
+      <div className="hidden lg:flex fixed right-8 bottom-6 items-center gap-2 text-[10px] font-mono-num uppercase tracking-[0.2em] text-[#cbd5e1]/70 hud-stroke-sm pointer-events-none">
+        <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e]" />
+        <span>Jakarta Live 3D · Rapier Physics</span>
       </div>
     </main>
   );
