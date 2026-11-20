@@ -1648,6 +1648,13 @@ export const GameHud: React.FC<GameHudProps> = ({
                   >
                     [B]<span className="hidden sm:inline"> Bengkel</span>
                   </button>
+                  <span className="text-white/20">·</span>
+                  <span
+                    title="Klik Kiri mouse sambil menyetir untuk tembak Drive-By 360°"
+                    className="text-[#f87171] font-semibold"
+                  >
+                    [Klik] Drive-By
+                  </span>
                 </div>
               </div>
             </div>

@@ -6,6 +6,7 @@ import {
   EnterableInteriorSpec,
   GameSettings,
   GameState,
+  NUSANTARA_PACKAGES,
   PlayerProgressState,
   ProtagonistId,
   STUNT_RAMPS_CATALOG,
@@ -807,6 +808,21 @@ export class WorldEngine {
 
       this.cityRenderer.setTrafficSignalPhase(stepRes.signalPhase);
       this.cityRenderer.updateChunksAroundPlayer(phys.x, phys.z);
+      const collectedIds = pState.collectedPackages || [];
+      this.cityRenderer.syncCollectibles(collectedIds, dt);
+      if (pState.currentInterior === 'exterior') {
+        for (const pkg of NUSANTARA_PACKAGES) {
+          if (collectedIds.includes(pkg.id)) continue;
+          if (
+            Math.hypot(phys.x - pkg.x, phys.z - pkg.z) < 4.2 &&
+            Math.abs(phys.y - pkg.y) < 4.5
+          ) {
+            if (gameStore.collectHiddenPackage(pkg.id)) {
+              this.playerController.spawnParticles(pkg.x, pkg.y + 0.6, pkg.z, 26, 0xfacc15, 10);
+            }
+          }
+        }
+      }
       gameStore.stepKiranaHackTick(dt);
       this._camRight.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
       spatialAudio.syncCameraListener({

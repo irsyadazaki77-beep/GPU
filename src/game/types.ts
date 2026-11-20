@@ -483,6 +483,7 @@ export interface PlayerProgressState {
   unlockedSafehouses?: string[];
   ownedBusinesses?: Partial<Record<BusinessId, number>>;
   customRaceTracks?: CustomRaceTrackSpec[];
+  collectedPackages?: string[];
 }
 
 export interface BuildingFootprint {

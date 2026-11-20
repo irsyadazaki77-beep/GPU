@@ -207,6 +207,9 @@ export function migrateSavedGame(raw: unknown): SavedGameSnapshot | null {
     customRaceTracks: Array.isArray(savedState.customRaceTracks)
       ? savedState.customRaceTracks
       : fallbackState.customRaceTracks,
+    collectedPackages: Array.isArray(savedState.collectedPackages)
+      ? savedState.collectedPackages.filter((s): s is string => typeof s === 'string')
+      : fallbackState.collectedPackages || [],
   };
 
   const maxCoordBound = parsed.version && parsed.version < 3 ? 88 : 156;

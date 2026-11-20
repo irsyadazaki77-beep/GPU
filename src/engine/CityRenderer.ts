@@ -3,6 +3,7 @@ import {
   BuildingFootprint,
   CITY_BUILDINGS,
   JAKARTA_FLOOD_ZONES,
+  NUSANTARA_PACKAGES,
   STUNT_RAMPS_CATALOG,
   SpatialHashGrid,
   TrafficSignalPhase,
@@ -32,6 +33,7 @@ import {
 function buildExpansionZonesGroup(): {
   group: THREE.Group;
   bayWaterMat: THREE.MeshStandardMaterial;
+  bayWaterGeo: THREE.BufferGeometry;
   floodDiscsGroup: THREE.Group;
 } {
   const group = new THREE.Group();
@@ -130,7 +132,7 @@ function buildExpansionZonesGroup(): {
   floodDiscsGroup.visible = false;
   group.add(floodDiscsGroup);
 
-  return { group, bayWaterMat, floodDiscsGroup };
+  return { group, bayWaterMat, bayWaterGeo: bayGeo, floodDiscsGroup };
 }
 
 function bayMatOrFallback(mat: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
@@ -179,7 +181,9 @@ export class CityRenderer {
   private readonly roadMat: THREE.MeshStandardMaterial;
   private readonly spireBeaconMat: THREE.MeshBasicMaterial;
   private readonly bayWaterMat: THREE.MeshStandardMaterial;
+  private readonly bayWaterGeo: THREE.BufferGeometry;
   private readonly floodDiscsGroup: THREE.Group;
+  private readonly collectibleMeshes = new Map<string, THREE.Group>();
   private readonly streetscape: ReturnType<typeof buildJakartaStreetscape>;
   private readonly districtProps: ReturnType<typeof buildJakartaDistrictProps>;
   private readonly roadDetailSystem: ReturnType<
@@ -209,8 +213,39 @@ export class CityRenderer {
 
     const expZones = buildExpansionZonesGroup();
     this.bayWaterMat = expZones.bayWaterMat;
+    this.bayWaterGeo = expZones.bayWaterGeo;
     this.floodDiscsGroup = expZones.floodDiscsGroup;
     this.rootGroup.add(expZones.group);
+
+    // 10 Glowing Koper Emas Nusantara Collectibles
+    const pkgMat = new THREE.MeshStandardMaterial({
+      color: 0xfacc15,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 1.4,
+      metalness: 0.85,
+      roughness: 0.22,
+    });
+    const pkgRingMat = new THREE.MeshBasicMaterial({
+      color: 0x22d3ee,
+      transparent: true,
+      opacity: 0.65,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const pkgBoxGeo = new THREE.BoxGeometry(0.92, 0.58, 0.42);
+    const pkgRingGeo = new THREE.RingGeometry(0.95, 1.25, 20);
+    pkgRingGeo.rotateX(-Math.PI / 2);
+    for (const pkg of NUSANTARA_PACKAGES) {
+      const g = new THREE.Group();
+      const box = new THREE.Mesh(pkgBoxGeo, pkgMat);
+      box.position.y = 0.55;
+      const ring = new THREE.Mesh(pkgRingGeo, pkgRingMat);
+      ring.position.y = -0.52;
+      g.add(box, ring);
+      g.position.set(pkg.x, pkg.y, pkg.z);
+      this.rootGroup.add(g);
+      this.collectibleMeshes.set(pkg.id, g);
+    }
 
     // 1. Extended Terrain & Monas Plaza
     const groundGeo = new THREE.PlaneGeometry(520, 520);
@@ -1012,6 +1047,20 @@ if (uWetness > 0.04) {
     this.chunkLoader.updateAroundPlayer(playerX, playerZ, false);
   }
 
+  public syncCollectibles(collectedIds: readonly string[], dt: number): void {
+    const set = new Set(collectedIds);
+    for (const pkg of NUSANTARA_PACKAGES) {
+      const grp = this.collectibleMeshes.get(pkg.id);
+      if (!grp) continue;
+      const visible = !set.has(pkg.id);
+      grp.visible = visible;
+      if (visible) {
+        grp.rotation.y += dt * 1.9;
+        grp.position.y = pkg.y + Math.sin(this.elapsedTime * 3.1 + pkg.x) * 0.18;
+      }
+    }
+  }
+
   public updateStreetlightPool(
     playerX: number,
     playerZ: number,
@@ -1063,6 +1112,20 @@ if (uWetness > 0.04) {
     this.spireBeaconMat.color.setScalar(0.55 + nightFactor * 0.45);
     this.floodDiscsGroup.visible = wetnessFactor > 0.65;
     this.bayWaterMat.roughness = 0.14 + Math.sin(this.elapsedTime * 1.8) * 0.04;
+
+    // Animated Teluk Jakarta ocean waves
+    const bayPos = this.bayWaterGeo.attributes.position as THREE.BufferAttribute;
+    if (bayPos) {
+      for (let i = 0; i < bayPos.count; i++) {
+        const vx = bayPos.getX(i);
+        const vz = bayPos.getZ(i);
+        const waveY =
+          Math.sin(vx * 0.14 + this.elapsedTime * 2.1) * 0.09 +
+          Math.cos(vz * 0.18 + this.elapsedTime * 2.6) * 0.07;
+        bayPos.setY(i, waveY);
+      }
+      bayPos.needsUpdate = true;
+    }
 
     // Automatically illuminate Jakarta skyscraper offices & Blok M ruko windows at dusk/night
     for (let i = 0; i < this.buildingEmissiveMats.length; i++) {

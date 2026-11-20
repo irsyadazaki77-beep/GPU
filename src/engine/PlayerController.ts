@@ -824,11 +824,18 @@ export class PlayerController {
       }
     }
     if (nearest) {
+      const wasOccupiedTraffic = nearest.isTraffic;
       nearest.isTraffic = false;
       this.playerPhys.drivingVehicleId = nearest.id;
       this.playerRig.group.visible = false;
       gameStore.setCoverState(false, 'none');
       soundEngine.playVehicleDoor();
+      if (wasOccupiedTraffic) {
+        this.callbacks.onWeaponNoise?.(nearest.x, nearest.z, 18, false);
+        gameStore.setState({
+          lastOutcomeText: `Pembajakan ${VEHICLE_SPECS[nearest.type].name}! Warga sekitar panik melapor!`,
+        });
+      }
     }
   }
 
@@ -983,9 +990,18 @@ export class PlayerController {
     );
   }
 
-  private triggerPlayerAttack(): void {
+  private triggerPlayerAttack(isDriveBy: boolean = false): void {
     const pState = this.callbacks.getPlayerState();
-    const wSpec = getEffectiveWeaponSpec(pState.activeWeapon, pState);
+    const effectiveWeaponId =
+      isDriveBy && (pState.activeWeapon === 'fist' || pState.activeWeapon === 'golok')
+        ? pState.unlockedWeapons.includes('rifle')
+          ? 'rifle'
+          : pState.unlockedWeapons.includes('pistol')
+          ? 'pistol'
+          : pState.activeWeapon
+        : pState.activeWeapon;
+    const wSpec = getEffectiveWeaponSpec(effectiveWeaponId, pState);
+    if (isDriveBy && wSpec.isMelee) return;
     if (this.playerPhys.attackCooldown > 0) return;
 
     if (!wSpec.isMelee) {
@@ -1005,11 +1021,12 @@ export class PlayerController {
     soundEngine.playShoot(wSpec.id);
     this.playerRig.rightArm.rotation.x = -Math.PI * 0.75;
 
-    const fwdX = Math.sin(this.playerPhys.facing);
-    const fwdZ = Math.cos(this.playerPhys.facing);
-    const muzzleX = this.playerPhys.x + fwdX * 1.1;
-    const muzzleY = this.playerPhys.y + 1.25;
-    const muzzleZ = this.playerPhys.z + fwdZ * 1.1;
+    const aimYaw = isDriveBy ? this.camYaw : this.playerPhys.facing;
+    const fwdX = Math.sin(aimYaw);
+    const fwdZ = Math.cos(aimYaw);
+    const muzzleX = this.playerPhys.x + fwdX * (isDriveBy ? 1.6 : 1.1);
+    const muzzleY = this.playerPhys.y + (isDriveBy ? 1.35 : 1.25);
+    const muzzleZ = this.playerPhys.z + fwdZ * (isDriveBy ? 1.6 : 1.1);
 
     if (!wSpec.isMelee) {
       this.muzzleFlashLight.position.set(muzzleX, muzzleY + 0.15, muzzleZ);
@@ -1174,6 +1191,33 @@ export class PlayerController {
     }
 
     if (!wSpec.isMelee) {
+      // Allow bullets to damage NPC traffic & police vehicles (GTA-style vehicle shootouts!)
+      for (const veh of this.traffic.vehicles) {
+        if (veh.id === this.playerPhys.drivingVehicleId || veh.damage.exploded) {
+          continue;
+        }
+        const vdx = veh.x - this.playerPhys.x;
+        const vdz = veh.z - this.playerPhys.z;
+        const vDist = Math.hypot(vdx, vdz);
+        if (vDist > wSpec.range || vDist < 1.2) continue;
+        const vDot = (vdx / vDist) * fwdX + (vdz / vDist) * fwdZ;
+        if (vDot >= 0.88) {
+          const vRes = this.traffic.applyVehicleImpact(
+            veh,
+            Math.max(4, wSpec.damage * 0.24),
+            'front'
+          );
+          tracerEndX = veh.x;
+          tracerEndZ = veh.z;
+          hitAny = true;
+          this.spawnParticles(veh.x, veh.y + 1.1, veh.z, 8, 0xfacc15, 7);
+          if (vRes.justCaughtFire) {
+            soundEngine.playPropCrash(0);
+          }
+          break;
+        }
+      }
+
       this.spawnTracer(
         muzzleX,
         muzzleY,
@@ -1743,7 +1787,13 @@ export class PlayerController {
     ) {
       virtualInputRef.fireTap = false;
       if (!this.playerPhys.drivingVehicleId && !isPhotoMode) {
-        this.triggerPlayerAttack();
+        this.triggerPlayerAttack(false);
+      } else if (
+        this.playerPhys.drivingVehicleId &&
+        !isPhotoMode &&
+        (this.mouseJustClicked || virtualInputRef.fireHeld || gpFireHeld)
+      ) {
+        this.triggerPlayerAttack(true);
       } else if (
         this.keysJustPressed.has('Space') &&
         this.playerPhys.drivingVehicleId
@@ -2207,8 +2257,30 @@ export class PlayerController {
       activeVehicle.mesh.rotation.x = activeVehicle.pitchAngle;
       activeVehicle.mesh.rotation.z = activeVehicle.rollAngle;
 
-      // Pooled exhaust / dust puffs on hard launch acceleration from standstill or low speed
-      if (
+      // Pooled exhaust / Nitro flames / boat wake foam
+      if (vSpec.isWatercraft && Math.abs(activeVehicle.speed) > 3.5) {
+        this.exhaustPuffAccum += simDt;
+        if (this.exhaustPuffAccum >= 0.055) {
+          this.exhaustPuffAccum = 0;
+          const tailX = activeVehicle.x - Math.sin(activeVehicle.heading) * 2.1;
+          const tailZ = activeVehicle.z - Math.cos(activeVehicle.heading) * 2.1;
+          this.spawnParticles(tailX, activeVehicle.y + 0.15, tailZ, 4, 0xbae6fd, 4.8);
+        }
+      } else if (
+        !vSpec.isAircraft &&
+        !vSpec.isWatercraft &&
+        (pState.fokusActive || abilitySurgeActive) &&
+        moveForward > 0.2
+      ) {
+        this.exhaustPuffAccum += simDt;
+        if (this.exhaustPuffAccum >= 0.045) {
+          this.exhaustPuffAccum = 0;
+          const tailX = activeVehicle.x - Math.sin(activeVehicle.heading) * 1.85;
+          const tailZ = activeVehicle.z - Math.cos(activeVehicle.heading) * 1.85;
+          this.spawnParticles(tailX, activeVehicle.y + 0.32, tailZ, 3, 0x38bdf8, 5.2);
+          this.spawnParticles(tailX, activeVehicle.y + 0.32, tailZ, 2, 0xf97316, 4.0);
+        }
+      } else if (
         !vSpec.isAircraft &&
         activeVehicle.y < 1.2 &&
         moveForward > 0.5 &&
@@ -2395,8 +2467,8 @@ export class PlayerController {
       const col =
         elevY > 2.5
           ? {
-              x: THREE.MathUtils.clamp(nextPX, -88, 88),
-              z: THREE.MathUtils.clamp(nextPZ, -88, 88),
+              x: THREE.MathUtils.clamp(nextPX, -156, 156),
+              z: THREE.MathUtils.clamp(nextPZ, -156, 156),
               collided: false,
             }
           : resolveCircleAABBCollision(

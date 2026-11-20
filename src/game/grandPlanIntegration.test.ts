@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  NUSANTARA_ALL_PACKAGES_BONUS_RP,
+  NUSANTARA_PACKAGES,
+  NUSANTARA_PACKAGE_REWARD_RP,
   TRAFFIC_ROUTES,
   WORLD_MAX_BOUND,
+  collectNusantaraPackage,
   createCustomRaceTrackSpec,
   createInitialPlayerState,
 } from './rules';
@@ -87,4 +91,38 @@ test('Trio active abilities, Kirana Cyber Hack, Safehouse rest, and Custom UGC r
   assert.equal(session.raceId, created.track.id);
   assert.equal(session.totalRacers, 4);
   assert.equal(gameStore.getState().activeRace?.status, 'countdown');
+});
+
+test('10 Koper Emas Nusantara collectibles grant per-package rewards and 2M grand bonus', () => {
+  assert.equal(NUSANTARA_PACKAGES.length, 10);
+  let state = createInitialPlayerState('mantan_kurir');
+  const startCash = state.rupiah;
+
+  for (let i = 0; i < NUSANTARA_PACKAGES.length - 1; i++) {
+    const res = collectNusantaraPackage(state, NUSANTARA_PACKAGES[i].id);
+    assert.equal(res.collected, true);
+    assert.equal(res.allCompleted, false);
+    assert.equal(res.rewardRp, NUSANTARA_PACKAGE_REWARD_RP);
+    state = res.nextState;
+  }
+
+  // Duplicate collection is ignored
+  const dup = collectNusantaraPackage(state, NUSANTARA_PACKAGES[0].id);
+  assert.equal(dup.collected, false);
+
+  // 10th package triggers grand bonus
+  const finalRes = collectNusantaraPackage(
+    state,
+    NUSANTARA_PACKAGES[NUSANTARA_PACKAGES.length - 1].id
+  );
+  assert.equal(finalRes.collected, true);
+  assert.equal(finalRes.allCompleted, true);
+  assert.equal(
+    finalRes.rewardRp,
+    NUSANTARA_PACKAGE_REWARD_RP + NUSANTARA_ALL_PACKAGES_BONUS_RP
+  );
+  assert.equal(
+    finalRes.nextState.rupiah,
+    startCash + 10 * NUSANTARA_PACKAGE_REWARD_RP + NUSANTARA_ALL_PACKAGES_BONUS_RP
+  );
 });

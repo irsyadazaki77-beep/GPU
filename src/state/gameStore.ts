@@ -61,6 +61,7 @@ import {
   calculateStreetRacePayout,
   captureDistrictTurf,
   claimDailyChallengeReward,
+  collectNusantaraPackage,
   computeViralCloutState,
   createDailyChallengesForDate,
   createInitialKiranaHackState,
@@ -1930,6 +1931,25 @@ export const gameStore = {
       lastOutcomeText: evt.detail || labelMap[evt.type],
     };
     emitChange();
+  },
+
+  collectHiddenPackage: (packageId: string): boolean => {
+    const res = collectNusantaraPackage(state.playerState, packageId);
+    if (!res.collected) return false;
+    soundEngine.playVictoryFanfare();
+    const nextClout = computeViralCloutState(
+      state.viralClout.xp + (res.allCompleted ? 180 : 45)
+    );
+    state = {
+      ...state,
+      playerState: res.nextState,
+      viralClout: nextClout,
+      lastOutcomeText: res.allCompleted
+        ? `SELURUH 10 KOPER EMAS NUSANTARA TERKUMPUL! Bonus +Rp ${res.rewardRp.toLocaleString('id-ID')}!`
+        : `Koper Emas Nusantara (${res.totalCollected}/10) ditemukan! +Rp ${res.rewardRp.toLocaleString('id-ID')}`,
+    };
+    emitChange();
+    return true;
   },
 };
 

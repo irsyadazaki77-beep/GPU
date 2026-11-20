@@ -7,6 +7,7 @@ export * from './racing';
 export * from './combat';
 export * from './wantedSystem';
 export * from './heistRoles';
+export * from './collectibles';
 export * from './nextGenSystems';
 export * from './wave2Systems';
 export {

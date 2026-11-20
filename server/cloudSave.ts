@@ -320,6 +320,7 @@ export function validateStrictSaveSchemaV3(
     'ownedProperties',
     'completedHeistSetups',
     'completedHeists',
+    'collectedPackages',
   ] as const;
 
   for (const field of boundedArrayFields) {
