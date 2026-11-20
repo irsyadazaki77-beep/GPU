@@ -22,8 +22,11 @@ import {
   WEAPON_RELOAD_SEC,
   applyCoverDamageMitigation,
   checkPlayerDetourProgress,
+  computeDriftCounterSteerBoost,
+  computeHeadshotResolution,
   computeNearMissBonus,
   computeSpeedSensitiveTurnRate,
+  computeVehicleArmorMitigation,
   evaluateCoverAvailability,
   evaluateFloodZoneAt,
   evaluateRoadEventImpactAt,
@@ -86,6 +89,8 @@ export interface EnemyEntity {
   windupTimer: number;
   cooldownTimer: number;
   phaseTimer: number;
+  staggerTimer?: number;
+  staggerType?: 'head' | 'chest' | 'leg';
 }
 
 export interface PlayerControllerCallbacks {
@@ -667,6 +672,15 @@ export class PlayerController {
         }
       }
     }
+    const dPlayer = Math.hypot(this.playerPhys.x - bx, this.playerPhys.z - bz);
+    if (dPlayer <= radius && !this.playerPhys.drivingVehicleId) {
+      const pDmg = Math.max(8, Math.round(45 * (1 - dPlayer / (radius * 1.2))));
+      this.callbacks.onPlayerDamage(pDmg);
+      const hitAngle =
+        Math.atan2(bx - this.playerPhys.x, bz - this.playerPhys.z) - this.camYaw;
+      this.callbacks.onPlayerHitAngle?.(hitAngle);
+      this.damagePulse = 1.0;
+    }
     for (const veh of this.traffic.vehicles) {
       if (veh.damage.exploded) continue;
       const d = Math.hypot(veh.x - bx, veh.z - bz);
@@ -949,21 +963,35 @@ export class PlayerController {
     }
   }
 
-  public startMissionObjective(choice: StoryChoiceOption): void {
+  public startMissionObjective(
+    choiceOrMission: StoryChoiceOption | StoryMission,
+    maybeChoice?: StoryChoiceOption
+  ): void {
+    const choice = maybeChoice || (choiceOrMission as StoryChoiceOption);
+    const mission = maybeChoice ? (choiceOrMission as StoryMission) : undefined;
     this.objectiveProgress = 0;
     this.checkpointStage = 0;
     while (this.enemies.length > 0) {
       const old = this.enemies.pop()!;
       this.scene.remove(old.rig.group);
     }
-    if (choice.objectiveType === 'combat_wave') {
-      this.spawnEnemyGroup(
-        choice.targetX,
-        choice.targetZ,
-        choice.objectiveTargetCount
-      );
-    } else if (choice.objectiveType === 'heist_escape') {
-      this.spawnEnemyGroup(choice.targetX, choice.targetZ, 3);
+    if (mission) {
+      const qState = gameStore.startQuest(mission, choice);
+      const stage0 = qState.stages[0];
+      if (stage0) {
+        choice.targetX = stage0.targetX;
+        choice.targetZ = stage0.targetZ;
+      }
+    } else {
+      if (choice.objectiveType === 'combat_wave') {
+        this.spawnEnemyGroup(
+          choice.targetX,
+          choice.targetZ,
+          choice.objectiveTargetCount
+        );
+      } else if (choice.objectiveType === 'heist_escape') {
+        this.spawnEnemyGroup(choice.targetX, choice.targetZ, 3);
+      }
     }
     soundEngine.playPickup();
   }
@@ -1146,9 +1174,14 @@ export class PlayerController {
     this.playerPhys.attackCooldown = wSpec.cooldown;
     this.crosshairSpread = Math.min(
       1.0,
-      this.crosshairSpread + (wSpec.isMelee ? 0.1 : 0.22)
+      this.crosshairSpread + (wSpec.isMelee ? 0.1 : 0.25)
     );
     soundEngine.playShoot(wSpec.id);
+    if (!wSpec.isMelee) {
+      const recoilPitch =
+        wSpec.id === 'mercon' || wSpec.id === 'gatotkaca' ? 0.026 : 0.013;
+      this.camPitch = Math.max(0.04, this.camPitch - recoilPitch);
+    }
     if (wSpec.isMelee && this.meleeComboStep === 1) {
       this.playerRig.leftArm.rotation.x = -Math.PI * 0.72;
     } else {
@@ -1297,7 +1330,35 @@ export class PlayerController {
 
       if (dot >= minDot || dist < 2.2) {
         const dmgMult = pState.fokusActive ? 1.75 : 1.0;
-        const dealtDmg = Math.round(wSpec.damage * dmgMult);
+        let dealtDmg = Math.round(wSpec.damage * dmgMult);
+        const isTpsAim = this.callbacks.getTpsAiming() || this.rightMouseHeld;
+        const isFirstPerson = gameStore.getState().cameraViewMode === 'first_person';
+        const headshotRes = computeHeadshotResolution(
+          isTpsAim,
+          wSpec.id,
+          pState.characterSkills?.aimPrecision ?? 1,
+          isFirstPerson,
+          dot
+        );
+
+        if (headshotRes.isHeadshot) {
+          dealtDmg = Math.round(dealtDmg * headshotRes.damageMultiplier);
+          en.staggerTimer = 0.45;
+          en.staggerType = 'head';
+          this.spawnParticles(en.x, 1.8, en.z, 16, 0xfacc15, 9);
+          soundEngine.playTone(920, 0.08, 'triangle', 0.25, 2.8);
+          if (pState.fokusEnergy < 100) {
+            pState.fokusEnergy = Math.min(
+              100,
+              pState.fokusEnergy + headshotRes.focusBonus
+            );
+          }
+        } else {
+          en.staggerTimer = 0.28;
+          en.staggerType = 'chest';
+          this.spawnParticles(en.x, 1.2, en.z, 14, 0xef4444, 8);
+        }
+
         en.hp -= dealtDmg;
         en.hitFlashTimer = 0.06;
         en.vx += dirX * (wSpec.isMelee ? 9.5 : 5.5);
@@ -1306,23 +1367,38 @@ export class PlayerController {
         tracerEndX = en.x;
         tracerEndZ = en.z;
 
-        this.spawnParticles(en.x, 1.2, en.z, 14, 0xef4444, 8);
-
         const ko = en.hp <= 0;
         const isCrit =
+          headshotRes.isHeadshot ||
           pState.fokusActive ||
           wSpec.id === 'pasopati' ||
           Math.random() < wSpec.critBonus;
-        const critDmg = isCrit ? Math.round(dealtDmg * 1.25) : dealtDmg;
-        if (isCrit && !ko) {
+        const critDmg =
+          isCrit && !headshotRes.isHeadshot
+            ? Math.round(dealtDmg * 1.25)
+            : dealtDmg;
+        if (isCrit && !headshotRes.isHeadshot && !ko) {
           en.hp -= critDmg - dealtDmg;
         }
+
         this.callbacks.onCombatHitFeedback?.({
-          id: Math.floor(performance.now() * 1000) + Math.floor(Math.random() * 999),
+          id:
+            Math.floor(performance.now() * 1000) +
+            Math.floor(Math.random() * 999),
           damage: critDmg,
           isCrit,
+          isHeadshot: headshotRes.isHeadshot,
           isKo: en.hp <= 0,
-          label: en.hp <= 0 ? 'K.O!' : isCrit ? 'KRITIS!' : `${critDmg}`,
+          label:
+            en.hp <= 0
+              ? headshotRes.isHeadshot
+                ? 'HEADSHOT K.O!'
+                : 'K.O!'
+              : headshotRes.isHeadshot
+              ? 'HEADSHOT!'
+              : isCrit
+              ? 'KRITIS!'
+              : `${critDmg}`,
           screenX: 46 + Math.random() * 8,
           screenY: 36 + Math.random() * 7,
         });
@@ -1330,9 +1406,14 @@ export class PlayerController {
         if (ko) {
           this.markEnemyKo(en, activeChoice);
         } else {
-          this.hitstopTimer = 0.042;
-          this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.22);
-          soundEngine.playHit(false);
+          this.hitstopTimer = headshotRes.isHeadshot ? 0.065 : 0.042;
+          this.cameraTrauma = Math.min(
+            1,
+            this.cameraTrauma + (headshotRes.isHeadshot ? 0.32 : 0.22)
+          );
+          if (!headshotRes.isHeadshot) {
+            soundEngine.playHit(false);
+          }
         }
 
         if (!wSpec.isMelee) break;
@@ -1448,6 +1529,40 @@ export class PlayerController {
         screenX: 50,
         screenY: 28,
       });
+    }
+
+    const qState = gameStore.getState().activeQuestState;
+    if (qState && !qState.isCompleted) {
+      const curStage = qState.stages[qState.currentStageIndex];
+      if (curStage && curStage.type === 'combat') {
+        const adv = gameStore.advanceQuestStage(
+          this.playerPhys.x,
+          this.playerPhys.z,
+          gameStore.getState().playerState.wantedLevel,
+          1
+        );
+        if (adv?.advancedStage) {
+          soundEngine.playTone(660, 0.16, 'triangle', 0.2, 1.8);
+          if (adv.missionJustCompleted) {
+            soundEngine.playMissionFanfare();
+            this.callbacks.onCompleteActiveObjective();
+          } else {
+            const nextStage =
+              adv.nextQuest.stages[adv.nextQuest.currentStageIndex];
+            if (nextStage && activeChoice) {
+              activeChoice.targetX = nextStage.targetX;
+              activeChoice.targetZ = nextStage.targetZ;
+              if (nextStage.type === 'escape') {
+                gameStore.updatePlayerState((prev) => ({
+                  ...prev,
+                  wantedLevel: Math.max(1, activeChoice.wantedDelta || 2),
+                }));
+              }
+            }
+          }
+          return;
+        }
+      }
     }
 
     if (activeChoice && activeChoice.objectiveType === 'combat_wave') {
@@ -2177,6 +2292,15 @@ export class PlayerController {
         8,
         simDt
       );
+      // Drift catch counter-steer boost on exiting a drift
+      const driftCatch = computeDriftCounterSteerBoost(
+        moveTurn,
+        activeVehicle.driftAngle,
+        Math.abs(activeVehicle.speed)
+      );
+      if (driftCatch.boosted) {
+        activeVehicle.speed *= 1 + (driftCatch.accelerationSurge - 1) * simDt * 3.5;
+      }
       const travelAngle =
         activeVehicle.heading - activeVehicle.driftAngle * 0.55;
 
@@ -2303,22 +2427,30 @@ export class PlayerController {
       if (col.collided) {
         const wallImpact = Math.abs(activeVehicle.speed);
         if (wallImpact > 4.5) {
+          const rawForce = wallImpact * 0.65;
+          const mitigated = computeVehicleArmorMitigation(
+            rawForce,
+            pState.vehicleCustoms?.armorPlatingLevel ?? 0
+          );
           this.traffic.applyVehicleImpact(
             activeVehicle,
-            wallImpact * 0.65,
+            mitigated,
             activeVehicle.speed >= 0 ? 'front' : 'rear'
           );
           this.spawnParticles(
             activeVehicle.x,
             activeVehicle.y + 0.8,
             activeVehicle.z,
-            9,
+            wallImpact > 10 ? 14 : 9,
             0xfbbf24,
-            7
+            8
           );
         }
         activeVehicle.speed *= -0.35;
-        this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.25);
+        this.cameraTrauma = Math.min(
+          1,
+          this.cameraTrauma + (wallImpact > 10 ? 0.42 : 0.25)
+        );
         soundEngine.playHit(false);
         cityAudio.playCollisionThud(Math.min(1, wallImpact / 16));
       }
@@ -2744,8 +2876,75 @@ export class PlayerController {
       );
     }
 
-    // Checkpoints / Heist Escape
+    // Active Staged Quest Director progression check
+    const questState = gameStore.getState().activeQuestState;
     if (
+      questState &&
+      !questState.isCompleted &&
+      questState.currentStageIndex < questState.stages.length
+    ) {
+      const curStage = questState.stages[questState.currentStageIndex];
+      if (curStage.type === 'travel') {
+        const distToStage = Math.hypot(
+          this.playerPhys.x - curStage.targetX,
+          this.playerPhys.z - curStage.targetZ
+        );
+        if (distToStage < 8.5) {
+          const adv = gameStore.advanceQuestStage(
+            this.playerPhys.x,
+            this.playerPhys.z,
+            pState.wantedLevel,
+            1
+          );
+          soundEngine.playTone(660, 0.16, 'triangle', 0.2, 1.8);
+          this.spawnParticles(
+            curStage.targetX,
+            this.playerPhys.y + 1.2,
+            curStage.targetZ,
+            18,
+            0x38bdf8,
+            8
+          );
+          if (adv?.advancedStage) {
+            if (adv.missionJustCompleted) {
+              soundEngine.playMissionFanfare();
+              this.callbacks.onCompleteActiveObjective();
+            } else {
+              const nextStage =
+                adv.nextQuest.stages[adv.nextQuest.currentStageIndex];
+              if (nextStage && activeChoice) {
+                activeChoice.targetX = nextStage.targetX;
+                activeChoice.targetZ = nextStage.targetZ;
+                if (nextStage.type === 'combat') {
+                  this.spawnEnemyGroup(
+                    nextStage.targetX,
+                    nextStage.targetZ,
+                    nextStage.targetCount
+                  );
+                }
+              }
+            }
+          }
+        }
+      } else if (curStage.type === 'escape') {
+        if (pState.wantedLevel <= 0) {
+          const adv = gameStore.advanceQuestStage(
+            this.playerPhys.x,
+            this.playerPhys.z,
+            pState.wantedLevel,
+            1
+          );
+          if (adv?.missionJustCompleted) {
+            soundEngine.playMissionFanfare();
+            this.callbacks.onCompleteActiveObjective();
+          }
+        }
+      }
+    }
+
+    // Checkpoints / Heist Escape fallback
+    if (
+      !questState &&
       activeChoice &&
       (activeChoice.objectiveType === 'checkpoint_drive' ||
         activeChoice.objectiveType === 'heist_escape')
@@ -3114,6 +3313,47 @@ export class PlayerController {
       en.phaseTimer += enemySimDt;
       const spec = ENEMY_ARCHETYPES[en.policy];
 
+      const isStaggered = Boolean(en.staggerTimer && en.staggerTimer > 0);
+      if (isStaggered && en.staggerTimer) {
+        en.staggerTimer -= enemySimDt;
+        en.windupTimer = 0;
+        if (en.staggerType === 'head') {
+          en.rig.headGroup.rotation.x = -0.55;
+          en.rig.bodyMesh.rotation.x = -0.22;
+          en.rig.leftArm.rotation.z = -0.65;
+          en.rig.rightArm.rotation.z = 0.65;
+        } else {
+          en.rig.bodyMesh.rotation.x = -0.38;
+          en.rig.leftArm.rotation.x = -0.55;
+          en.rig.rightArm.rotation.x = -0.55;
+        }
+      } else {
+        en.rig.headGroup.rotation.x = THREE.MathUtils.damp(
+          en.rig.headGroup.rotation.x,
+          0,
+          10,
+          dt
+        );
+        en.rig.bodyMesh.rotation.x = THREE.MathUtils.damp(
+          en.rig.bodyMesh.rotation.x,
+          0,
+          10,
+          dt
+        );
+        en.rig.leftArm.rotation.z = THREE.MathUtils.damp(
+          en.rig.leftArm.rotation.z,
+          0,
+          10,
+          dt
+        );
+        en.rig.rightArm.rotation.z = THREE.MathUtils.damp(
+          en.rig.rightArm.rotation.z,
+          0,
+          10,
+          dt
+        );
+      }
+
       if (en.hitFlashTimer > 0) {
         en.hitFlashTimer -= dt;
         (
@@ -3131,6 +3371,8 @@ export class PlayerController {
         this.playerPhys.z - en.z
       );
 
+      const effectiveEnemySpeed = isStaggered ? spec.speed * 0.35 : spec.speed;
+
       if (en.windupTimer <= 0 && distToPlayer < 48) {
         const moveRes = stepEnemyMovementPolicy(
           en.policy,
@@ -3138,7 +3380,7 @@ export class PlayerController {
           en.z,
           this.playerPhys.x,
           this.playerPhys.z,
-          spec.speed,
+          effectiveEnemySpeed,
           enemySimDt,
           en.phaseTimer
         );
@@ -3219,6 +3461,7 @@ export class PlayerController {
         if (
           distToPlayer <= spec.attackRange &&
           en.cooldownTimer <= 0 &&
+          !isStaggered &&
           activeAttackers < MAX_CONCURRENT_ATTACKERS
         ) {
           activeAttackers++;
@@ -3592,13 +3835,22 @@ export class PlayerController {
       const orbitRightX = -Math.cos(effectiveYaw);
       const orbitRightZ = Math.sin(effectiveYaw);
 
-      const camDist = isTpsAim
-        ? 4.4
-        : isCinematic
-        ? (isDriving ? 14.2 : 11.4) + speedRatio * 1.6
-        : isDriving
-        ? 12.2 + speedRatio * 1.4
-        : 9.8;
+      const gForceCamOffset =
+        isDriving && activeVehicle
+          ? moveForward > 0.4
+            ? 0.75
+            : activeVehicle.isBraking
+            ? -0.55
+            : 0
+          : 0;
+      const camDist =
+        (isTpsAim
+          ? 4.4
+          : isCinematic
+          ? (isDriving ? 14.2 : 11.4) + speedRatio * 1.6
+          : isDriving
+          ? 12.2 + speedRatio * 1.4
+          : 9.8) + gForceCamOffset;
       const effectivePitch = isCinematic ? 0.16 : this.camPitch;
       const horizDist = camDist * Math.cos(effectivePitch);
       const vertOffset = camDist * Math.sin(effectivePitch);
@@ -3681,6 +3933,13 @@ export class PlayerController {
         this._camLookTarget.lerp(this._v2, lookDamp);
       }
       camera.lookAt(this._camLookTarget);
+      if (isDriving && activeVehicle && camMode !== 'cinematic') {
+        const cornerRoll =
+          -moveTurn * 0.035 * Math.min(1, Math.abs(activeVehicle.speed) / 14);
+        camera.rotation.z = cornerRoll;
+      } else {
+        camera.rotation.z = 0;
+      }
     }
 
     return {

@@ -555,6 +555,7 @@ export default function App() {
       lastOutcomeText: choice.outcomeNarrative,
       activeMission: null,
       activeChoice: null,
+      activeQuestState: null,
     });
 
     if (mission.id.startsWith('heist_setup:')) {

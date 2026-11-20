@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   JAKARTA_DISTRICTS,
+  STORY_MISSIONS,
   COMBAT_COMBO_WINDOW_MS,
   NEAR_MISS_COOLDOWN_MS,
   NUSANTARA_ALL_PACKAGES_BONUS_RP,
@@ -341,4 +342,87 @@ test('Wave 6 transmission RPM shifting, tire skidmark wheel geometry, and scrubb
       `Found dev milestone tag in ${dist.id}: ${dist.subtitle}`
     );
   }
+});
+
+test('Gameplay Overhaul: Staged Quest Director, tactical headshots, vehicle armor, and drift catch boost', async () => {
+  const {
+    buildMissionStages,
+    createActiveQuestState,
+    stepQuestStageProgress,
+    shouldSuppressWorldClutter,
+  } = await import('./questDirector');
+  const {
+    computeHeadshotResolution,
+    computeVehicleArmorMitigation,
+    computeDriftCounterSteerBoost,
+  } = await import('./combat');
+
+  // 1. Staged Quest Director builds 3-stage flow for story mission
+  const mockMission = STORY_MISSIONS[0];
+  const mockChoice = mockMission.choices[0];
+  const stages = buildMissionStages(mockMission, mockChoice);
+  assert.ok(stages.length >= 2, 'Expected at least 2 stages for mission');
+  assert.equal(stages[0].type, 'travel');
+  assert.equal(stages[1].type, 'combat');
+
+  const quest = createActiveQuestState(mockMission, mockChoice);
+  assert.equal(quest.currentStageIndex, 0);
+  assert.equal(quest.isCompleted, false);
+
+  // Step 1: Reach travel waypoint
+  const step1 = stepQuestStageProgress(
+    quest,
+    stages[0].targetX,
+    stages[0].targetZ,
+    0,
+    0
+  );
+  assert.equal(step1.advancedStage, true);
+  assert.equal(step1.nextQuest.currentStageIndex, 1);
+
+  // Step 2: Fulfill combat takedowns
+  const step2 = stepQuestStageProgress(
+    step1.nextQuest,
+    stages[1].targetX,
+    stages[1].targetZ,
+    0,
+    stages[1].targetCount
+  );
+  assert.equal(step2.advancedStage, true);
+
+  // World clutter suppression
+  assert.equal(shouldSuppressWorldClutter(true), true);
+  assert.equal(shouldSuppressWorldClutter(false), false);
+
+  // 2. Headshot Resolution: Melee weapons cannot headshot, pistol with precision alignment deals 2.4x
+  const meleeRes = computeHeadshotResolution(true, 'fist', 1, false, 0.99);
+  assert.equal(meleeRes.isHeadshot, false);
+
+  const headshotRes = computeHeadshotResolution(true, 'pistol', 2, false, 0.96);
+  assert.equal(headshotRes.isHeadshot, true);
+  assert.equal(headshotRes.damageMultiplier, 2.4);
+  assert.equal(headshotRes.headshotLabel, 'HEADSHOT!');
+
+  const missHeadshot = computeHeadshotResolution(false, 'pistol', 1, false, 0.75);
+  assert.equal(missHeadshot.isHeadshot, false);
+
+  // 3. Vehicle Armor Mitigation: Level 0 = 0%, Level 2 = 36%, Level 3 = 54%
+  const unarmored = computeVehicleArmorMitigation(100, 0);
+  assert.equal(unarmored, 100);
+
+  const armorLv2 = computeVehicleArmorMitigation(100, 2);
+  assert.equal(armorLv2, 64); // 36% mitigated
+
+  const armorLv3 = computeVehicleArmorMitigation(100, 3);
+  assert.equal(armorLv3, 46); // 54% mitigated
+
+  // 4. Drift Catch Counter-Steer Boost
+  // Drift angle positive (sliding right), steering negative (counter-steering left)
+  const counterSteer = computeDriftCounterSteerBoost(-0.8, 0.35, 18.0);
+  assert.equal(counterSteer.boosted, true);
+  assert.ok(counterSteer.accelerationSurge > 1.0);
+
+  // Normal same-direction steering yields no boost
+  const normalSteer = computeDriftCounterSteerBoost(0.8, 0.35, 18.0);
+  assert.equal(normalSteer.boosted, false);
 });

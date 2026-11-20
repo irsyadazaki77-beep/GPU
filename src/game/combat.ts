@@ -1011,3 +1011,94 @@ export function computeHospitalRespawnState(
     spawnZ: 22,
   };
 }
+
+export interface HeadshotResolution {
+  isHeadshot: boolean;
+  damageMultiplier: number;
+  headshotLabel: string;
+  focusBonus: number;
+}
+
+/**
+ * Computes tactical headshot hit detection, critical multiplier, and feedback.
+ * Headshots deal 2.4x damage and provide bonus combat focus.
+ */
+export function computeHeadshotResolution(
+  isTpsAim: boolean,
+  weaponId: WeaponId,
+  aimPrecisionSkillLevel: number,
+  isFirstPerson: boolean = false,
+  aimDot: number = 0.95
+): HeadshotResolution {
+  if (weaponId === 'fist' || weaponId === 'golok' || weaponId === 'mercon') {
+    return {
+      isHeadshot: false,
+      damageMultiplier: 1.0,
+      headshotLabel: '',
+      focusBonus: 0,
+    };
+  }
+
+  const baseThreshold = 0.93;
+  const skillBonus = (aimPrecisionSkillLevel - 1) * 0.015;
+  const aimBonus = isTpsAim || isFirstPerson ? 0.05 : 0;
+  const effectiveThreshold = baseThreshold - skillBonus - aimBonus;
+
+  const isHeadshot = aimDot >= effectiveThreshold;
+  if (!isHeadshot) {
+    return {
+      isHeadshot: false,
+      damageMultiplier: 1.0,
+      headshotLabel: '',
+      focusBonus: 0,
+    };
+  }
+
+  return {
+    isHeadshot: true,
+    damageMultiplier: 2.4,
+    headshotLabel: 'HEADSHOT!',
+    focusBonus: 10,
+  };
+}
+
+/**
+ * Mitigates physical vehicle collision and gunshot damage based on garage armor plating level.
+ * Each armor tier absorbs 18% of incoming impact (up to 54% reduction at level 3).
+ */
+export function computeVehicleArmorMitigation(
+  rawDamage: number,
+  armorPlatingLevel: number
+): number {
+  if (armorPlatingLevel <= 0) return rawDamage;
+  const mitigationRate = Math.min(0.54, armorPlatingLevel * 0.18);
+  return Math.max(1, Math.round(rawDamage * (1 - mitigationRate)));
+}
+
+/**
+ * Computes GTA-style drift catch counter-steer boost:
+ * Snapping steering in the opposite direction of the lateral drift angle upon exiting a drift
+ * rewards the driver with an immediate forward acceleration surge.
+ */
+export function computeDriftCounterSteerBoost(
+  moveTurn: number,
+  driftAngle: number,
+  speedAbs: number
+): { boosted: boolean; accelerationSurge: number } {
+  if (speedAbs < 7.0 || Math.abs(driftAngle) < 0.12) {
+    return { boosted: false, accelerationSurge: 0 };
+  }
+  // Counter-steer: steering sign opposes current drift slip angle
+  const isCounterSteering =
+    Math.abs(moveTurn) > 0.15 && Math.sign(moveTurn) !== Math.sign(driftAngle);
+
+  if (isCounterSteering) {
+    return {
+      boosted: true,
+      accelerationSurge: 1.15,
+    };
+  }
+
+  return { boosted: false, accelerationSurge: 1.0 };
+}
+

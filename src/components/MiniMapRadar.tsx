@@ -28,6 +28,8 @@ interface MiniMapRadarProps {
 export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const customWaypoint = useGameStore((s) => s.customWaypoint);
+  const wantedLevel = useGameStore((s) => s.playerState.wantedLevel);
+  const wantedEvading = useGameStore((s) => s.playerState.wantedEvading);
 
   const staticLayout = useMemo(() => generateRoadsideSpawnLayout(), []);
 
@@ -659,10 +661,21 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
           GPS: {customWaypoint.label}
         </span>
       )}
+      {wantedLevel > 0 && wantedEvading && (
+        <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-[#070a10]/92 border border-slate-400 text-[8px] font-mono-num font-extrabold text-slate-200 pointer-events-none animate-pulse">
+          LOLOS DARI RADAR
+        </span>
+      )}
       <div
-        className="absolute inset-0 pointer-events-none"
+        className={`absolute inset-0 pointer-events-none transition-colors duration-150 ${
+          wantedLevel > 0
+            ? wantedEvading
+              ? 'border-2 border-slate-300/80 shadow-[inset_0_0_16px_rgba(203,213,225,0.45)]'
+              : 'border-2 border-red-500 shadow-[inset_0_0_18px_rgba(239,68,68,0.55)]'
+            : ''
+        }`}
         style={{
-          boxShadow: 'inset 0 0 14px rgba(0,0,0,0.55)',
+          boxShadow: wantedLevel > 0 ? undefined : 'inset 0 0 14px rgba(0,0,0,0.55)',
         }}
       />
     </div>

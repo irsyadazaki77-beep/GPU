@@ -846,6 +846,7 @@ export interface CombatHitFeedbackEvent {
   id: number;
   damage: number;
   isCrit: boolean;
+  isHeadshot?: boolean;
   isKo: boolean;
   label: string;
   screenX: number;

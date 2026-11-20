@@ -218,6 +218,7 @@ export const GameHud: React.FC<GameHudProps> = ({
   const inFloodZone = useGameStore((s) => s.inFloodZone);
   const combatCombo = useGameStore((s) => s.combatCombo);
   const nearMissBanner = useGameStore((s) => s.nearMissBanner);
+  const activeQuestState = useGameStore((s) => s.activeQuestState);
   const activeRoadEvent = worldClockEventState.activeEvent;
 
   const claimableChallengesCount = dailyChallenges.items.filter(
@@ -431,7 +432,9 @@ export const GameHud: React.FC<GameHudProps> = ({
             <div
               key={evt.id}
               className={`absolute -translate-x-1/2 -translate-y-1/2 font-display font-extrabold italic uppercase tracking-wider hud-stroke animate-aaa-up ${
-                evt.isKo
+                evt.isHeadshot
+                  ? 'text-2xl text-[#facc15] drop-shadow-[0_0_12px_rgba(250,204,21,0.85)]'
+                  : evt.isKo
                   ? 'text-2xl text-[#f59e0b]'
                   : evt.isCrit
                   ? 'text-lg text-[#38bdf8]'
@@ -442,8 +445,12 @@ export const GameHud: React.FC<GameHudProps> = ({
                 top: `${evt.screenY}%`,
               }}
             >
-              {evt.isKo ? `K.O! -${evt.damage}` : `-${evt.damage}`}
-              {evt.isCrit && !evt.isKo && ' KRITIS'}
+              {evt.isHeadshot
+                ? `HEADSHOT! -${evt.damage}`
+                : evt.isKo
+                ? `K.O! -${evt.damage}`
+                : `-${evt.damage}`}
+              {evt.isCrit && !evt.isKo && !evt.isHeadshot && ' KRITIS'}
             </div>
           ))}
         </div>
@@ -543,8 +550,18 @@ export const GameHud: React.FC<GameHudProps> = ({
             />
             {combatHitEvents.length > 0 && (
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="w-5 h-0.5 bg-[#f59e0b] rotate-45 absolute" />
-                <span className="w-5 h-0.5 bg-[#f59e0b] -rotate-45 absolute" />
+                {combatHitEvents.some((e) => e.isHeadshot) ? (
+                  <>
+                    <span className="w-6 h-0.5 bg-[#facc15] rotate-45 absolute shadow-[0_0_8px_#facc15]" />
+                    <span className="w-6 h-0.5 bg-[#facc15] -rotate-45 absolute shadow-[0_0_8px_#facc15]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#ef4444] absolute shadow-[0_0_8px_#ef4444]" />
+                  </>
+                ) : (
+                  <>
+                    <span className="w-5 h-0.5 bg-[#f59e0b] rotate-45 absolute" />
+                    <span className="w-5 h-0.5 bg-[#f59e0b] -rotate-45 absolute" />
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -763,7 +780,49 @@ export const GameHud: React.FC<GameHudProps> = ({
       <div className="flex items-start justify-between gap-2 sm:gap-4">
         {/* TOP-LEFT: Clean Contextual Mission / Contract / Police / GPS ONLY (GTA V style, zero permanent clutter) */}
         <div className="flex flex-col gap-2 flex-1 max-w-sm min-w-0">
-          {activeMission && activeChoice && (
+          {/* STAGED QUEST DIRECTOR BANNER (GTA V style clean staged progression) */}
+          {activeQuestState && !activeQuestState.isCompleted ? (
+            <div
+              data-testid="quest-director-banner"
+              className="aaa-glass-subtle rounded-lg px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-lg pointer-events-auto animate-aaa-up border-l-2 border-l-[#f59e0b]"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-mono-num font-extrabold uppercase tracking-wider text-[#f59e0b]">
+                  BABAK {activeQuestState.chapterNumber} · {activeQuestState.stages[activeQuestState.currentStageIndex]?.stageName ?? 'TAHAP AKTIF'}
+                </span>
+                <span className="font-mono-num text-[11px] font-extrabold text-[#38bdf8] bg-[#0c121e]/85 px-1.5 py-0.5 rounded">
+                  {activeQuestState.currentStageIndex + 1}/{activeQuestState.stages.length}
+                </span>
+              </div>
+              <h4 className="text-xs sm:text-sm font-bold text-[#f8fafc] truncate mt-0.5">
+                {activeQuestState.missionTitle}
+              </h4>
+              <p className="text-xs text-[#cbd5e1] mt-1 leading-snug font-medium">
+                {activeQuestState.stages[activeQuestState.currentStageIndex]?.instruction ?? activeChoice?.description}
+              </p>
+              {activeQuestState.stages[activeQuestState.currentStageIndex]?.type === 'combat' && (
+                <div className="flex items-center justify-between mt-1 text-[11px] font-mono-num text-[#f59e0b]">
+                  <span>Target Dilumpuhkan</span>
+                  <span className="font-bold">{objectiveProgress}/{activeQuestState.stages[activeQuestState.currentStageIndex]?.targetCount}</span>
+                </div>
+              )}
+              {/* Stage Progress Step Pills */}
+              <div className="flex items-center gap-1.5 mt-2">
+                {activeQuestState.stages.map((st, idx) => (
+                  <div
+                    key={idx}
+                    className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${
+                      idx < activeQuestState.currentStageIndex
+                        ? 'bg-[#22c55e]'
+                        : idx === activeQuestState.currentStageIndex
+                        ? 'bg-[#f59e0b] shadow-[0_0_8px_#f59e0b]'
+                        : 'bg-white/15'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : activeMission && activeChoice ? (
             <div className="aaa-glass-subtle rounded-lg px-3 py-2 sm:px-3.5 sm:py-2.5 shadow-lg pointer-events-auto animate-aaa-up">
               <div className="flex items-center justify-between gap-2 sm:gap-3">
                 <span className="text-xs font-semibold text-[#f59e0b] truncate">
@@ -790,10 +849,10 @@ export const GameHud: React.FC<GameHudProps> = ({
                 />
               </div>
             </div>
-          )}
+          ) : null}
 
-          {/* Active Open-World Street Contract */}
-          {activeContract && (
+          {/* Active Open-World Street Contract (suppressed during active story missions) */}
+          {activeContract && !activeQuestState && (
             <div className="aaa-glass-subtle rounded-lg border-l-2 border-l-[#22c55e] px-3 py-2 flex flex-col gap-1 pointer-events-auto animate-aaa-up max-w-xs">
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="font-bold text-[#22c55e] truncate">

@@ -10,6 +10,7 @@ export * from './heistRoles';
 export * from './collectibles';
 export * from './nextGenSystems';
 export * from './wave2Systems';
+export * from './questDirector';
 export {
   WORLD_MAX_BOUND,
   CITY_BUILDINGS,

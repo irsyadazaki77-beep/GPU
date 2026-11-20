@@ -3,6 +3,9 @@ import {
   ActiveStreetContractState,
   ActiveStreetRaceSession,
   ActiveTurfWarSession,
+  ActiveQuestState,
+  createActiveQuestState,
+  stepQuestStageProgress,
   AudioChannelVolumes,
   COMBAT_COMBO_WINDOW_MS,
   CameraViewMode,
@@ -362,6 +365,7 @@ export interface GameStoreSnapshot {
   dialogueMission: StoryMission | null;
   activeMission: StoryMission | null;
   activeChoice: StoryChoiceOption | null;
+  activeQuestState: ActiveQuestState | null;
   activeContract: ActiveStreetContractState | null;
   lastOutcomeText: string | null;
   phoneOpen: boolean;
@@ -557,6 +561,7 @@ let state: GameStoreSnapshot = {
   dialogueMission: null,
   activeMission: null,
   activeChoice: null,
+  activeQuestState: null,
   activeContract: null,
   lastOutcomeText: null,
   phoneOpen: false,
@@ -2068,12 +2073,59 @@ export const gameStore = {
       ghostHp: res.nextState.maxHp,
       activeMission: null,
       activeChoice: null,
+      activeQuestState: null,
       combatCombo: null,
       policeTactical: createInitialPoliceTacticalState(),
       lastOutcomeText: `Keluar RS Cipto Mangunkusumo · Biaya Medis -Rp ${res.billRp.toLocaleString('id-ID')}`,
     };
     emitChange();
     return res;
+  },
+
+  startQuest: (mission: StoryMission, choice: StoryChoiceOption) => {
+    const quest = createActiveQuestState(mission, choice);
+    state = {
+      ...state,
+      activeMission: mission,
+      activeChoice: choice,
+      activeQuestState: quest,
+    };
+    emitChange();
+    return quest;
+  },
+
+  advanceQuestStage: (
+    playerX: number,
+    playerZ: number,
+    wantedLevel: number,
+    additionalProgress: number = 0
+  ) => {
+    if (!state.activeQuestState) return null;
+    const res = stepQuestStageProgress(
+      state.activeQuestState,
+      playerX,
+      playerZ,
+      wantedLevel,
+      additionalProgress
+    );
+    if (res.advancedStage || res.nextQuest.stageProgress !== state.activeQuestState.stageProgress) {
+      state = {
+        ...state,
+        activeQuestState: res.nextQuest,
+      };
+      emitChange();
+    }
+    return res;
+  },
+
+  clearActiveQuest: () => {
+    state = {
+      ...state,
+      activeMission: null,
+      activeChoice: null,
+      activeQuestState: null,
+    };
+    emitChange();
   },
 };
 
