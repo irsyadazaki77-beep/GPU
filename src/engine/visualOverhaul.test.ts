@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as THREE from 'three';
 import {
   HORN_REACTION_CALLOUTS,
   canTriggerHorn,
@@ -105,4 +106,37 @@ test('snapShadowCoordToTexel quantizes coordinates cleanly to shadow-map texel s
   // Half extent 46 => frustum width 92; mapSize 920 => texel = 0.1
   assert.ok(Math.abs(snapShadowCoordToTexel(12.34, 46, 920) - 12.3) < 1e-9);
   assert.ok(Math.abs(snapShadowCoordToTexel(12.36, 46, 920) - 12.4) < 1e-9);
+});
+
+test('camera orientation maintains upright up-vector across all 360-degree lookAt azimuth angles without Euler gimbal flip', () => {
+  const cam = new THREE.PerspectiveCamera();
+  const upVec = new THREE.Vector3(0, 1, 0);
+
+  // Test looking from all compass points (North, South, East, West, diagonals)
+  const angles = [
+    0,
+    Math.PI * 0.25,
+    Math.PI * 0.5,
+    Math.PI * 0.75,
+    Math.PI,
+    Math.PI * 1.25,
+    Math.PI * 1.5,
+    Math.PI * 1.75,
+  ];
+  for (const ang of angles) {
+    cam.position.set(Math.sin(ang) * 10, 3.2, Math.cos(ang) * 10);
+    cam.lookAt(0, 1.7, 0);
+
+    // Subtle cornering roll via rotateZ must maintain upright world Y
+    const cornerRoll = -0.035;
+    if (Math.abs(cornerRoll) > 0.0001) {
+      cam.rotateZ(cornerRoll);
+    }
+
+    const worldUp = upVec.clone().applyQuaternion(cam.quaternion);
+    assert.ok(
+      worldUp.y > 0.6,
+      `Expected upright camera for angle ${ang}, but got worldUp.y=${worldUp.y}`
+    );
+  }
 });

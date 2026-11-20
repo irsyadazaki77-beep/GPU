@@ -3936,9 +3936,9 @@ export class PlayerController {
       if (isDriving && activeVehicle && camMode !== 'cinematic') {
         const cornerRoll =
           -moveTurn * 0.035 * Math.min(1, Math.abs(activeVehicle.speed) / 14);
-        camera.rotation.z = cornerRoll;
-      } else {
-        camera.rotation.z = 0;
+        if (Math.abs(cornerRoll) > 0.0001) {
+          camera.rotateZ(cornerRoll);
+        }
       }
     }
 
