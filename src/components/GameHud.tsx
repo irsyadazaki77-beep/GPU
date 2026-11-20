@@ -216,6 +216,8 @@ export const GameHud: React.FC<GameHudProps> = ({
   const kiranaHackState = useGameStore((s) => s.kiranaHackState);
   const trioAbilityBuffUntilMs = useGameStore((s) => s.trioAbilityBuffUntilMs);
   const inFloodZone = useGameStore((s) => s.inFloodZone);
+  const combatCombo = useGameStore((s) => s.combatCombo);
+  const nearMissBanner = useGameStore((s) => s.nearMissBanner);
   const activeRoadEvent = worldClockEventState.activeEvent;
 
   const claimableChallengesCount = dailyChallenges.items.filter(
@@ -576,6 +578,35 @@ export const GameHud: React.FC<GameHudProps> = ({
             <div className="font-display text-2xl md:text-3xl font-extrabold italic uppercase tracking-wider text-[#f59e0b] hud-stroke">
               {killCamBanner.label}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* COMBAT TAKEDOWN COMBO STREAK BADGE */}
+      {combatCombo && combatCombo.count >= 2 && (
+        <div
+          data-testid="combat-combo-badge"
+          className="fixed right-4 top-36 sm:top-40 z-20 pointer-events-none animate-stamp-in"
+        >
+          <div className="px-3.5 py-2 rounded-xl bg-[#1a0a0d]/92 border border-[#f59e0b]/70 shadow-xl text-right">
+            <div className="font-display text-lg font-extrabold italic uppercase text-[#facc15] leading-none">
+              x{combatCombo.count} {combatCombo.label}
+            </div>
+            <div className="font-mono-num text-[10px] text-[#34d399] font-bold mt-0.5">
+              Bonus +{formatRupiah(combatCombo.bonusRp)} · Adrenalin Aktif
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* HIGH-SPEED TRAFFIC NEAR-MISS ADRENALINE TOAST */}
+      {nearMissBanner && (
+        <div
+          data-testid="near-miss-toast"
+          className="fixed inset-x-0 bottom-32 sm:bottom-28 z-20 flex justify-center pointer-events-none px-4 animate-aaa-up"
+        >
+          <div className="px-4 py-1.5 rounded-full bg-[#090d16]/90 border border-[#22d3ee]/65 shadow-xl font-mono-num text-xs font-bold text-[#67e8f9]">
+            ⚡ {nearMissBanner.text}
           </div>
         </div>
       )}

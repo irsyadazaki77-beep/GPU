@@ -829,3 +829,85 @@ export function stepEnemyMovementPolicy(
   }
   return { nextX: ex, nextZ: ez, facingAngle };
 }
+
+export const COMBAT_COMBO_WINDOW_MS = 6500;
+export const NEAR_MISS_COOLDOWN_MS = 3200;
+
+export interface CombatComboEvaluation {
+  comboCount: number;
+  multiplier: number;
+  tierLabel: string;
+  bonusRp: number;
+  focusGain: number;
+  healGain: number;
+}
+
+/**
+ * Computes consecutive takedown streak rewards within the active combo window.
+ */
+export function resolveCombatComboState(
+  prevCount: number,
+  prevLastKoMs: number,
+  nowMs: number
+): CombatComboEvaluation {
+  const withinWindow = prevCount > 0 && nowMs - prevLastKoMs <= COMBAT_COMBO_WINDOW_MS;
+  const comboCount = withinWindow ? prevCount + 1 : 1;
+  const multiplier = Math.min(3.0, 1 + (comboCount - 1) * 0.25);
+  const tierLabel =
+    comboCount >= 5
+      ? 'RAJA JALANAN!'
+      : comboCount === 4
+      ? 'GANAS!'
+      : comboCount === 3
+      ? 'MENDOMINASI!'
+      : comboCount === 2
+      ? 'KOMBO GANDA!'
+      : 'TAKEDOWN';
+  const bonusRp = comboCount >= 2 ? comboCount * 12000 : 0;
+  const focusGain = comboCount >= 2 ? Math.min(18, 5 + comboCount * 2) : 4;
+  const healGain = comboCount >= 3 ? Math.min(10, comboCount * 2) : 0;
+
+  return {
+    comboCount,
+    multiplier,
+    tierLabel,
+    bonusRp,
+    focusGain,
+    healGain,
+  };
+}
+
+export interface NearMissEvaluation {
+  triggered: boolean;
+  rewardRp: number;
+  focusGain: number;
+  scoreDelta: number;
+}
+
+/**
+ * Evaluates whether weaving closely past moving traffic at high speed qualifies for an adrenaline bonus.
+ */
+export function computeNearMissBonus(
+  speedAbs: number,
+  closestTrafficDist: number,
+  isAircraft: boolean,
+  lastBonusMs: number,
+  nowMs: number
+): NearMissEvaluation {
+  if (
+    isAircraft ||
+    speedAbs < 19.5 ||
+    closestTrafficDist < 2.2 ||
+    closestTrafficDist > 4.4 ||
+    nowMs - lastBonusMs < NEAR_MISS_COOLDOWN_MS
+  ) {
+    return { triggered: false, rewardRp: 0, focusGain: 0, scoreDelta: 0 };
+  }
+  const speedTierBonus = speedAbs >= 28 ? 22000 : 15000;
+  return {
+    triggered: true,
+    rewardRp: speedTierBonus,
+    focusGain: 8,
+    scoreDelta: speedAbs >= 28 ? 110 : 75,
+  };
+}

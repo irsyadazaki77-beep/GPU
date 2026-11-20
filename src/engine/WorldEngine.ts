@@ -372,6 +372,18 @@ export class WorldEngine {
             summaryNote,
           });
         },
+        onCheckBarrelShot: (ox, oz, dx, dz, range) =>
+          this.destructibleProps.checkBarrelLineHit(ox, oz, dx, dz, range),
+        onExplosionShockwaveProps: (bx, bz, radius) => {
+          this._camRight.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
+          this.destructibleProps.applyBlastImpulse(
+            bx,
+            bz,
+            radius,
+            this._camRight.x,
+            this._camRight.z
+          );
+        },
       }
     );
 
@@ -475,15 +487,20 @@ export class WorldEngine {
             0x22d3ee,
             10
           );
+          this.playerController.spawnShockwave(phys.x, phys.y, phys.z, 22, 0x22d3ee, 0.55);
+          this.playerController.triggerFlashLight(phys.x, phys.y + 2.2, phys.z, 0x22d3ee, 14);
         } else {
+          const surgeColor = res.kind === 'raka_overdrive' ? 0x38bdf8 : 0xf59e0b;
           this.playerController.spawnParticles(
             phys.x,
             phys.y + 1.2,
             phys.z,
             20,
-            res.kind === 'raka_overdrive' ? 0x38bdf8 : 0xf59e0b,
+            surgeColor,
             8
           );
+          this.playerController.spawnShockwave(phys.x, phys.y, phys.z, 9.5, surgeColor, 0.42);
+          this.playerController.triggerFlashLight(phys.x, phys.y + 1.8, phys.z, surgeColor, 10);
         }
       },
       startCustomStreetRace: (track) => {
@@ -881,7 +898,7 @@ export class WorldEngine {
           ? Math.min(1.2, Math.abs(activeVeh.speed) / Math.max(1, vehSpec.maxSpeed))
           : 0;
 
-      this.destructibleProps.step(
+      const propStep = this.destructibleProps.step(
         dt,
         phys.x,
         phys.z,
@@ -891,6 +908,15 @@ export class WorldEngine {
         this._camRight.x,
         this._camRight.z
       );
+      for (const blast of propStep.triggeredBlasts) {
+        this.playerController.detonateExplosionAt(
+          blast.x,
+          blast.y,
+          blast.z,
+          11.5,
+          0xf97316
+        );
+      }
 
       this.crowdSystem.step(
         dt,
@@ -907,7 +933,16 @@ export class WorldEngine {
         dt,
         (x, y, z, count, colorHex, speed) =>
           this.playerController.spawnParticles(x, y, z, count, colorHex, speed),
-        (bx, _by, bz, explodedVeh) => {
+        (bx, by, bz, explodedVeh) => {
+          this.playerController.spawnShockwave(bx, by, bz, 13.5, 0xf97316, 0.52);
+          this.playerController.triggerFlashLight(bx, by + 2.4, bz, 0xf97316, 16);
+          this.destructibleProps.applyBlastImpulse(
+            bx,
+            bz,
+            12,
+            this._camRight.x,
+            this._camRight.z
+          );
           this.crowdSystem.triggerPanicNear(bx, bz, 30);
           this.crowdSystem.triggerSocialFilmingNear(bx, bz, 34);
           const dZone = resolveDistrictAtPosition(bx, bz);

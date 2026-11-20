@@ -20,6 +20,7 @@ import {
   WARUNG_STALL_LOCATIONS,
   applyCoverDamageMitigation,
   checkPlayerDetourProgress,
+  computeNearMissBonus,
   evaluateCoverAvailability,
   evaluateFloodZoneAt,
   evaluateRoadEventImpactAt,
@@ -40,6 +41,7 @@ import {
   animateCharacterRig,
   buildCharacterRig,
   buildCombatDroneMesh,
+  syncCharacterWeaponVisual,
 } from '../game/world/geometryBuilders';
 import type {
   CombatHitFeedbackEvent,
@@ -103,6 +105,14 @@ export interface PlayerControllerCallbacks {
     kind: 'drift_stunt' | 'chain_explosion',
     summaryNote?: string
   ) => void;
+  onCheckBarrelShot?: (
+    originX: number,
+    originZ: number,
+    dirX: number,
+    dirZ: number,
+    range: number
+  ) => { x: number; y: number; z: number } | null;
+  onExplosionShockwaveProps?: (blastX: number, blastZ: number, radius: number) => void;
 }
 
 export class PlayerController {
@@ -189,8 +199,13 @@ export class PlayerController {
   private lastHornMs = -9999;
   private exhaustPuffAccum = 0;
   private lastAppliedOutfitId = '';
+  private lastWeaponVisualKey = '';
+  private lastNearMissMs = -9999;
+  private comboExpireAccum = 0;
   private beaconOuterRing!: THREE.Mesh;
   private beaconChevron!: THREE.Mesh;
+  private readonly aimLaserLine: THREE.Line;
+  private readonly aimLaserDot: THREE.Mesh;
 
   // Wave 2: Tactical Gunplay, Cover, Trio Squad AI, Stunt Physics, Kill-Cam & Turf War
   private crosshairSpread = 0;
@@ -380,8 +395,31 @@ export class PlayerController {
     this.waypointBeaconGroup.visible = false;
     scene.add(this.waypointBeaconGroup);
 
-    // 2. Pooled Particles, Bullet Tracers & Skidmarks
+    // 2. Pooled Particles, Bullet Tracers, Skidmarks, Shockwaves & Laser Sight
     this.fxPool = new ParticleEffectsPool(scene);
+
+    const laserPts = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 1)];
+    const laserGeo = new THREE.BufferGeometry().setFromPoints(laserPts);
+    const laserMat = new THREE.LineBasicMaterial({
+      color: 0xef4444,
+      transparent: true,
+      opacity: 0.72,
+    });
+    this.aimLaserLine = new THREE.Line(laserGeo, laserMat);
+    this.aimLaserLine.visible = false;
+    this.aimLaserLine.frustumCulled = false;
+    scene.add(this.aimLaserLine);
+
+    this.aimLaserDot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.11, 8, 8),
+      new THREE.MeshBasicMaterial({
+        color: 0xf87171,
+        transparent: true,
+        opacity: 0.9,
+      })
+    );
+    this.aimLaserDot.visible = false;
+    scene.add(this.aimLaserDot);
 
     // 2b. Muzzle Flash PointLight
     this.muzzleFlashLight = new THREE.PointLight(0xfbbf24, 0, 14, 1.8);
@@ -568,6 +606,68 @@ export class PlayerController {
     colorHex: number = 0xfde047
   ): void {
     this.fxPool.spawnTracer(fromX, fromY, fromZ, toX, toY, toZ, colorHex);
+  }
+
+  public spawnShockwave(
+    x: number,
+    y: number,
+    z: number,
+    maxScale: number = 10,
+    colorHex: number = 0xf97316,
+    durationSec: number = 0.45
+  ): void {
+    this.fxPool.spawnShockwave(x, y, z, maxScale, colorHex, durationSec);
+  }
+
+  public triggerFlashLight(
+    x: number,
+    y: number,
+    z: number,
+    colorHex: number = 0xf97316,
+    intensity: number = 12
+  ): void {
+    this.fxPool.triggerFlashLight(x, y, z, colorHex, intensity);
+  }
+
+  public detonateExplosionAt(
+    bx: number,
+    by: number,
+    bz: number,
+    radius: number = 11,
+    colorHex: number = 0xf97316
+  ): void {
+    this.spawnParticles(bx, by + 1.1, bz, 30, colorHex, 14);
+    this.spawnParticles(bx, by + 1.6, bz, 16, 0xfef08a, 10);
+    this.spawnShockwave(bx, by, bz, radius, colorHex, 0.5);
+    this.triggerFlashLight(bx, by + 2.2, bz, colorHex, 15);
+    this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.55);
+    soundEngine.playPropCrash(0);
+    this.callbacks.onWeaponNoise?.(bx, bz, radius * 2.2, true);
+    this.callbacks.onExplosionShockwaveProps?.(bx, bz, radius);
+
+    const activeChoice = this.callbacks.getActiveChoice();
+    for (const en of this.enemies) {
+      if (en.state !== 'alive') continue;
+      const d = Math.hypot(en.x - bx, en.z - bz);
+      if (d <= radius) {
+        const dealt = Math.round(85 * (1 - d / (radius * 1.35)));
+        en.hp -= dealt;
+        en.hitFlashTimer = 0.09;
+        const ang = Math.atan2(en.x - bx, en.z - bz);
+        en.vx += Math.sin(ang) * 14;
+        en.vz += Math.cos(ang) * 14;
+        if (en.hp <= 0) {
+          this.markEnemyKo(en, activeChoice);
+        }
+      }
+    }
+    for (const veh of this.traffic.vehicles) {
+      if (veh.damage.exploded) continue;
+      const d = Math.hypot(veh.x - bx, veh.z - bz);
+      if (d <= radius) {
+        this.traffic.applyVehicleImpact(veh, Math.max(8, (radius - d) * 1.4), 'front');
+      }
+    }
   }
 
   private dropSkidmarkPair(
@@ -1096,6 +1196,21 @@ export class PlayerController {
         wSpec.id === 'pasopati' ? 0x38bdf8 : 0xf97316,
         13
       );
+      this.spawnShockwave(
+        blastX,
+        this.playerPhys.y,
+        blastZ,
+        wSpec.splashRadius * 1.45,
+        wSpec.id === 'pasopati' ? 0x38bdf8 : 0xf97316,
+        0.46
+      );
+      this.triggerFlashLight(
+        blastX,
+        this.playerPhys.y + 2.0,
+        blastZ,
+        wSpec.id === 'pasopati' ? 0x38bdf8 : 0xf97316,
+        13
+      );
       this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.65);
 
       for (const en of this.enemies) {
@@ -1218,6 +1333,26 @@ export class PlayerController {
         }
       }
 
+      const barrelBlast = this.callbacks.onCheckBarrelShot?.(
+        this.playerPhys.x,
+        this.playerPhys.z,
+        fwdX,
+        fwdZ,
+        wSpec.range
+      );
+      if (barrelBlast) {
+        tracerEndX = barrelBlast.x;
+        tracerEndZ = barrelBlast.z;
+        hitAny = true;
+        this.detonateExplosionAt(
+          barrelBlast.x,
+          barrelBlast.y,
+          barrelBlast.z,
+          11,
+          0xf97316
+        );
+      }
+
       this.spawnTracer(
         muzzleX,
         muzzleY,
@@ -1268,6 +1403,18 @@ export class PlayerController {
       isCaptain ? arch.rewardRp * 3 : arch.rewardRp,
       isCaptain ? arch.scoreValue * 3 : arch.scoreValue
     );
+    const comboRes = gameStore.registerCombatCombo(Date.now());
+    if (comboRes.comboCount >= 2) {
+      this.callbacks.onCombatHitFeedback?.({
+        id: Math.floor(performance.now() * 1000) + 777,
+        damage: comboRes.bonusRp,
+        isCrit: true,
+        isKo: true,
+        label: `x${comboRes.comboCount} ${comboRes.tierLabel}`,
+        screenX: 50,
+        screenY: 28,
+      });
+    }
 
     if (activeChoice && activeChoice.objectiveType === 'combat_wave') {
       this.objectiveProgress += 1;
@@ -1301,6 +1448,15 @@ export class PlayerController {
       (
         this.playerRig.group.userData.capMat as THREE.MeshStandardMaterial
       ).color.setHex(outfitSpec.capHex);
+    }
+
+    const isGildedWeapon =
+      pState.weaponAttachments?.[pState.activeWeapon]?.includes('gildedSkin') ??
+      false;
+    const weaponVisKey = `${pState.activeWeapon}|${isGildedWeapon ? '1' : '0'}`;
+    if (this.lastWeaponVisualKey !== weaponVisKey) {
+      this.lastWeaponVisualKey = weaponVisKey;
+      syncCharacterWeaponVisual(this.playerRig, pState.activeWeapon, isGildedWeapon);
     }
 
     (['nabilo', 'raka', 'kirana'] as ProtagonistId[]).forEach((pId) => {
@@ -2046,6 +2202,8 @@ export class PlayerController {
           engineTelemetryRef.stuntAirTimeSec = 0;
           this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.34);
           this.spawnParticles(nextVX, surfaceElev + 0.35, nextVZ, 18, 0xf59e0b, 8);
+          this.spawnShockwave(nextVX, surfaceElev, nextVZ, 7.5, 0xfacc15, 0.42);
+          this.triggerFlashLight(nextVX, surfaceElev + 1.4, nextVZ, 0xfacc15, 10);
           soundEngine.playPropCrash(0);
 
           if (launchedRamp && distM >= 8) {
@@ -2331,6 +2489,9 @@ export class PlayerController {
           const backX = activeVehicle.x - Math.sin(activeVehicle.heading) * 1.3;
           const backZ = activeVehicle.z - Math.cos(activeVehicle.heading) * 1.3;
           this.spawnParticles(backX, activeVehicle.y + 0.25, backZ, 2, 0xcbd5e1, 3.2);
+          if (this.driftChainTimer > 0.7) {
+            this.spawnParticles(backX, activeVehicle.y + 0.2, backZ, 2, 0xf59e0b, 4.5);
+          }
         }
       } else {
         soundEngine.updateDriftAudio(0, false);
@@ -2370,6 +2531,35 @@ export class PlayerController {
       this.playerPhys.y = activeVehicle.y;
       this.playerPhys.z = activeVehicle.z;
       this.playerPhys.facing = activeVehicle.heading;
+
+      // High-speed traffic Near-Miss adrenaline overtake bonus
+      if (!vSpec.isAircraft && Math.abs(activeVehicle.speed) >= 19.5) {
+        let closestDist = 99;
+        for (let ti = 0; ti < this.traffic.vehicles.length; ti++) {
+          const other = this.traffic.vehicles[ti];
+          if (other.id === activeVehicle.id || !other.isTraffic) continue;
+          if (Math.abs(other.y - activeVehicle.y) > 2.2) continue;
+          const d = Math.hypot(other.x - activeVehicle.x, other.z - activeVehicle.z);
+          if (d < closestDist) closestDist = d;
+        }
+        const nearMiss = computeNearMissBonus(
+          Math.abs(activeVehicle.speed),
+          closestDist,
+          Boolean(vSpec.isAircraft),
+          this.lastNearMissMs,
+          nowMs
+        );
+        if (nearMiss.triggered) {
+          this.lastNearMissMs = nowMs;
+          gameStore.registerNearMiss(
+            nearMiss.rewardRp,
+            nearMiss.focusGain,
+            nearMiss.scoreDelta
+          );
+          soundEngine.playTone(720, 0.08, 'triangle', 0.12, 1.35);
+          this.spawnParticles(activeVehicle.x, activeVehicle.y + 0.7, activeVehicle.z, 8, 0x22d3ee, 6);
+        }
+      }
 
       if (Math.abs(activeVehicle.speed) > 8 && activeVehicle.y < 3) {
         for (const en of this.enemies) {
@@ -3000,12 +3190,24 @@ export class PlayerController {
         }
       }
 
-      en.rig.group.position.set(
-        en.x,
-        getGroundElevationAt(en.x, en.z),
-        en.z
-      );
+      const enGroundY = getGroundElevationAt(en.x, en.z);
+      en.rig.group.position.set(en.x, enGroundY, en.z);
       en.rig.group.rotation.y = en.facing;
+
+      if (en.rig.hpBarGroup && en.rig.hpFillMesh) {
+        const damaged = en.hp < en.maxHp && en.hp > 0;
+        en.rig.hpBarGroup.visible = damaged;
+        if (damaged) {
+          const ratio = Math.max(0.05, en.hp / Math.max(1, en.maxHp));
+          en.rig.hpFillMesh.scale.set(ratio, 1, 1);
+          en.rig.hpFillMesh.position.x = -(1 - ratio) * 0.43;
+          en.rig.hpBarGroup.lookAt(
+            camera.position.x,
+            enGroundY + 2.08,
+            camera.position.z
+          );
+        }
+      }
     }
 
     // Police Reinforcements
@@ -3019,8 +3221,63 @@ export class PlayerController {
       this.spawnEnemyGroup(this.playerPhys.x - 16, this.playerPhys.z - 16, 2);
     }
 
-    // Update Zero-GC Compacted Pooled Particles & Bullet Tracers
+    // Update Zero-GC Compacted Pooled Particles, Shockwaves & Bullet Tracers
     this.fxPool.step(dt);
+
+    // Clear expired combat combo & near-miss streak banners cleanly
+    this.comboExpireAccum += dt;
+    if (this.comboExpireAccum >= 0.25) {
+      this.comboExpireAccum = 0;
+      gameStore.clearExpiredCombatCombo(Date.now());
+    }
+
+    // 3D Tactical Aim Laser Sight + Barrel Dot during TPS aiming on foot
+    const equippedWSpec = getEffectiveWeaponSpec(pState.activeWeapon, pState);
+    if (
+      storeState.gameState === 'playing' &&
+      isTpsAim &&
+      !activeVehicle &&
+      !equippedWSpec.isMelee &&
+      !isPhotoMode
+    ) {
+      const aimX = Math.sin(this.camYaw);
+      const aimZ = Math.cos(this.camYaw);
+      const startY = this.playerPhys.y + (storeState.inCover ? 1.02 : 1.32);
+      const startX = this.playerPhys.x + aimX * 0.65;
+      const startZ = this.playerPhys.z + aimZ * 0.65;
+
+      let laserLen = Math.min(24, equippedWSpec.range);
+      for (let i = 0; i < this.enemies.length; i++) {
+        const en = this.enemies[i];
+        if (en.state !== 'alive') continue;
+        const dx = en.x - this.playerPhys.x;
+        const dz = en.z - this.playerPhys.z;
+        const d = Math.hypot(dx, dz);
+        if (d < laserLen && d > 0.8) {
+          const dot = (dx / d) * aimX + (dz / d) * aimZ;
+          if (dot >= 0.92) laserLen = d;
+        }
+      }
+      const endX = startX + aimX * laserLen;
+      const endZ = startZ + aimZ * laserLen;
+      const posAttr = this.aimLaserLine.geometry.attributes
+        .position as THREE.BufferAttribute;
+      posAttr.setXYZ(0, startX, startY, startZ);
+      posAttr.setXYZ(1, endX, startY - 0.08, endZ);
+      posAttr.needsUpdate = true;
+      (this.aimLaserLine.material as THREE.LineBasicMaterial).color.setHex(
+        equippedWSpec.id === 'pasopati' ? 0x22d3ee : 0xef4444
+      );
+      this.aimLaserLine.visible = true;
+      this.aimLaserDot.position.set(endX, startY - 0.08, endZ);
+      (this.aimLaserDot.material as THREE.MeshBasicMaterial).color.setHex(
+        equippedWSpec.id === 'pasopati' ? 0x67e8f9 : 0xf87171
+      );
+      this.aimLaserDot.visible = true;
+    } else {
+      this.aimLaserLine.visible = false;
+      this.aimLaserDot.visible = false;
+    }
 
     // Camera Choreography
     if (this.userOrbitTimer > 0) {
@@ -3441,6 +3698,10 @@ export class PlayerController {
     window.removeEventListener('pointerup', this.onPointerUp);
     window.removeEventListener('contextmenu', this.onContextMenu);
     soundEngine.stopDriftAudio();
+    this.aimLaserLine.geometry.dispose();
+    (this.aimLaserLine.material as THREE.Material).dispose();
+    this.aimLaserDot.geometry.dispose();
+    (this.aimLaserDot.material as THREE.Material).dispose();
     this.fxPool.dispose();
   }
 }

@@ -17,6 +17,7 @@ const CinematicGradeShader = {
     uVignette: { value: 0.24 },
     uDamagePulse: { value: 0 },
     uFokusMix: { value: 0 },
+    uSpeedRatio: { value: 0 },
     uPhotoFilter: { value: 0 },
   },
   vertexShader: /* glsl */ `
@@ -32,6 +33,7 @@ const CinematicGradeShader = {
     uniform float uVignette;
     uniform float uDamagePulse;
     uniform float uFokusMix;
+    uniform float uSpeedRatio;
     uniform float uPhotoFilter;
     varying vec2 vUv;
 
@@ -45,15 +47,25 @@ const CinematicGradeShader = {
       float b = texture2D(tDiffuse, vUv - offset).b;
       vec3 col = vec3(r, g, b);
 
+      // Subtle high-speed / Nitro peripheral radial motion blur streaks
+      float speedBlurMask = smoothstep(0.52, 1.15, uSpeedRatio + uFokusMix * 0.28) * smoothstep(0.24, 0.72, dist);
+      if (speedBlurMask > 0.005) {
+        vec2 radialStep = center * (0.018 * speedBlurMask);
+        vec3 s1 = texture2D(tDiffuse, vUv - radialStep).rgb;
+        vec3 s2 = texture2D(tDiffuse, vUv - radialStep * 2.0).rgb;
+        col = mix(col, (col + s1 + s2) * 0.3333, min(0.58, speedBlurMask * 0.65));
+      }
+
       // Tropical Vice-Jakarta Split-Tone Grade (warm coral-amber highlights + cool deep indigo shadows)
       float lumaBase = dot(col, vec3(0.299, 0.587, 0.114));
       vec3 shadowTint = vec3(col.r * 0.96, col.g * 0.98, col.b * 1.07);
       vec3 highlightTint = vec3(col.r * 1.06, col.g * 1.01, col.b * 0.96);
       col = mix(shadowTint, highlightTint, smoothstep(0.18, 0.78, lumaBase));
 
-      // Subtle warm golden Fokus highlight when ability active
+      // Subtle warm golden Fokus highlight + peripheral kinetic energy rim
       vec3 fokusTint = vec3(col.r * 1.08, col.g * 1.03, col.b * 0.86);
       col = mix(col, fokusTint, uFokusMix * 0.38);
+      col += vec3(0.06, 0.22, 0.35) * uFokusMix * smoothstep(0.38, 0.85, dist) * 0.45;
 
       // Photo Mode Color Grading Filters (1=senja_emas, 2=noir_jakarta, 3=siber_matrix, 4=vintage_98)
       if (uPhotoFilter > 0.5 && uPhotoFilter < 1.5) {
@@ -310,6 +322,7 @@ export class PostProcessingPipeline {
     u.uVignette.value = 0.18 + params.speedRatio * 0.14;
     u.uDamagePulse.value = params.damagePulse;
     u.uFokusMix.value = params.fokusActive ? 1.0 : 0.0;
+    u.uSpeedRatio.value = params.speedRatio;
     u.uPhotoFilter.value = filterCode;
 
     this.composer.render();

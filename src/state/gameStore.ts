@@ -4,6 +4,7 @@ import {
   ActiveStreetRaceSession,
   ActiveTurfWarSession,
   AudioChannelVolumes,
+  COMBAT_COMBO_WINDOW_MS,
   CameraViewMode,
   CashLedgerEntry,
   CombatHitFeedbackEvent,
@@ -75,6 +76,7 @@ import {
   cycleCameraViewMode as cycleCameraModePure,
   formatJakartaClock,
   incrementTrioSynergy,
+  resolveCombatComboState,
   resolveSquadOrderCallout,
   spawnNextStreetRandomEvent,
   stepKiranaDistrictHack,
@@ -415,6 +417,14 @@ export interface GameStoreSnapshot {
   inFloodZone: boolean;
   sharedCoopRaces: CustomRaceTrackSpec[];
   lastCoopEventToast: NetCoopEvent | null;
+  combatCombo: {
+    count: number;
+    label: string;
+    multiplier: number;
+    bonusRp: number;
+    lastKoMs: number;
+  } | null;
+  nearMissBanner: { text: string; rewardRp: number; stamp: number } | null;
 }
 
 export function buildInitialStateForStage(
@@ -601,6 +611,8 @@ let state: GameStoreSnapshot = {
   inFloodZone: false,
   sharedCoopRaces: [],
   lastCoopEventToast: null,
+  combatCombo: null,
+  nearMissBanner: null,
 };
 
 const listeners = new Set<() => void>();
@@ -1950,6 +1962,75 @@ export const gameStore = {
     };
     emitChange();
     return true;
+  },
+
+  registerCombatCombo: (nowMs: number = Date.now()) => {
+    const prev = state.combatCombo;
+    const evalRes = resolveCombatComboState(
+      prev?.count ?? 0,
+      prev?.lastKoMs ?? 0,
+      nowMs
+    );
+    const scoreGain = evalRes.comboCount >= 2 ? evalRes.comboCount * 45 : 0;
+    const nextScore = state.playerState.score + scoreGain;
+    state = {
+      ...state,
+      playerState: {
+        ...state.playerState,
+        rupiah: state.playerState.rupiah + evalRes.bonusRp,
+        hp: Math.min(state.playerState.maxHp, state.playerState.hp + evalRes.healGain),
+        fokusEnergy: Math.min(100, state.playerState.fokusEnergy + evalRes.focusGain),
+        score: nextScore,
+        bestScore: Math.max(state.playerState.bestScore, nextScore),
+      },
+      combatCombo: {
+        count: evalRes.comboCount,
+        label: evalRes.tierLabel,
+        multiplier: evalRes.multiplier,
+        bonusRp: evalRes.bonusRp,
+        lastKoMs: nowMs,
+      },
+    };
+    emitChange();
+    return evalRes;
+  },
+
+  clearExpiredCombatCombo: (nowMs: number = Date.now()) => {
+    if (
+      state.combatCombo &&
+      nowMs - state.combatCombo.lastKoMs > COMBAT_COMBO_WINDOW_MS
+    ) {
+      state = { ...state, combatCombo: null };
+      emitChange();
+    }
+    if (
+      state.nearMissBanner &&
+      nowMs - state.nearMissBanner.stamp > 2400
+    ) {
+      state = { ...state, nearMissBanner: null };
+      emitChange();
+    }
+  },
+
+  registerNearMiss: (rewardRp: number, focusGain: number, scoreDelta: number) => {
+    const nowMs = Date.now();
+    const nextScore = state.playerState.score + scoreDelta;
+    state = {
+      ...state,
+      playerState: {
+        ...state.playerState,
+        rupiah: state.playerState.rupiah + rewardRp,
+        fokusEnergy: Math.min(100, state.playerState.fokusEnergy + focusGain),
+        score: nextScore,
+        bestScore: Math.max(state.playerState.bestScore, nextScore),
+      },
+      nearMissBanner: {
+        text: `SALIP TIPIS! +Rp ${rewardRp.toLocaleString('id-ID')} · +${focusGain} Fokus`,
+        rewardRp,
+        stamp: nowMs,
+      },
+    };
+    emitChange();
   },
 };
 

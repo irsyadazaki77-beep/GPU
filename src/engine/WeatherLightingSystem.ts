@@ -144,8 +144,19 @@ export class WeatherLightingSystem {
 
           vec3 sunD = normalize(uSunDir);
           float sunAmt = max(dot(dir, sunD), 0.0);
-          col += uSunColor * pow(sunAmt, 16.0) * (0.38 * uSunGlowStrength);
-          col += uSunColor * smoothstep(0.9965, 0.9994, sunAmt) * (0.95 * uSunGlowStrength);
+          col += uSunColor * pow(sunAmt, 3.2) * (0.22 * uSunGlowStrength * (1.0 - uWetness * 0.5));
+          col += uSunColor * pow(sunAmt, 16.0) * (0.42 * uSunGlowStrength);
+          col += uSunColor * smoothstep(0.9965, 0.9994, sunAmt) * (1.05 * uSunGlowStrength);
+
+          // Crisp tropical crescent moon & silver lunar halo on clear nights
+          if (uNightFactor > 0.35 && uWetness < 0.65 && h > 0.06) {
+            vec3 moonDir = normalize(vec3(-0.48, 0.42, -0.76));
+            float moonAmt = max(dot(dir, moonDir), 0.0);
+            float moonVis = clamp((uNightFactor - 0.35) * 1.6, 0.0, 1.0) * (1.0 - uWetness);
+            float moonDisc = smoothstep(0.9978, 0.9988, moonAmt);
+            float moonHalo = pow(moonAmt, 42.0) * 0.32;
+            col += vec3(0.84, 0.91, 1.0) * (moonDisc * 0.92 + moonHalo) * moonVis;
+          }
 
           // Procedural tropical sky clouds (drifting FBM layer above horizon)
           if (h > 0.01) {

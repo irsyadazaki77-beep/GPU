@@ -26,12 +26,25 @@ interface TracerSlot {
   colorHex: number;
 }
 
-const PARTICLE_CAP = 112;
-const TRACER_CAP = 16;
+const PARTICLE_CAP = 160;
+const TRACER_CAP = 20;
 const SKIDMARK_CAP = 140;
+const SHOCKWAVE_CAP = 12;
+
+interface ShockwaveSlot {
+  active: boolean;
+  x: number;
+  y: number;
+  z: number;
+  life: number;
+  maxLife: number;
+  maxScale: number;
+  colorHex: number;
+}
 
 /**
- * Zero-GC InstancedMesh ring-buffered pool for particles, bullet tracers, and tire skidmarks.
+ * Zero-GC InstancedMesh ring-buffered pool for particles, bullet tracers, tire skidmarks,
+ * expanding shockwave rings, and dynamic blast flash illumination.
  */
 export class ParticleEffectsPool {
   private readonly particleGeo: THREE.BoxGeometry;
@@ -52,6 +65,16 @@ export class ParticleEffectsPool {
   private readonly skidMat: THREE.MeshBasicMaterial;
   private readonly skidInst: THREE.InstancedMesh;
   private skidCursor = 0;
+
+  private readonly shockwaveGeo: THREE.RingGeometry;
+  private readonly shockwaveMat: THREE.MeshBasicMaterial;
+  private readonly shockwaveInst: THREE.InstancedMesh;
+  private readonly shockwaves: ShockwaveSlot[];
+  private shockwaveCursor = 0;
+  private prevShockwaveCount = -1;
+
+  private readonly flashLight: THREE.PointLight;
+  private flashDecaySpeed = 18;
 
   private readonly _v1 = new THREE.Vector3();
   private readonly _scale = new THREE.Vector3();
@@ -139,6 +162,72 @@ export class ParticleEffectsPool {
     }
     this.skidInst.instanceMatrix.needsUpdate = true;
     scene.add(this.skidInst);
+
+    this.shockwaveGeo = new THREE.RingGeometry(0.68, 1.0, 28);
+    this.shockwaveGeo.rotateX(-Math.PI / 2);
+    this.shockwaveMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.88,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.shockwaveInst = new THREE.InstancedMesh(
+      this.shockwaveGeo,
+      this.shockwaveMat,
+      SHOCKWAVE_CAP
+    );
+    this.shockwaveInst.count = 0;
+    this.shockwaveInst.frustumCulled = false;
+    scene.add(this.shockwaveInst);
+
+    this.shockwaves = Array.from({ length: SHOCKWAVE_CAP }, () => ({
+      active: false,
+      x: 0,
+      y: -100,
+      z: 0,
+      life: 0,
+      maxLife: 0.48,
+      maxScale: 10,
+      colorHex: 0xf97316,
+    }));
+
+    this.flashLight = new THREE.PointLight(0xf97316, 0, 28, 1.6);
+    scene.add(this.flashLight);
+  }
+
+  public spawnShockwave(
+    x: number,
+    y: number,
+    z: number,
+    maxScale: number = 10,
+    colorHex: number = 0xf97316,
+    durationSec: number = 0.45
+  ): void {
+    const slot = this.shockwaves[this.shockwaveCursor];
+    this.shockwaveCursor = (this.shockwaveCursor + 1) % SHOCKWAVE_CAP;
+    slot.active = true;
+    slot.x = x;
+    slot.y = y + 0.14;
+    slot.z = z;
+    slot.life = 0;
+    slot.maxLife = durationSec;
+    slot.maxScale = maxScale;
+    slot.colorHex = colorHex;
+  }
+
+  public triggerFlashLight(
+    x: number,
+    y: number,
+    z: number,
+    colorHex: number = 0xf97316,
+    intensity: number = 12
+  ): void {
+    this.flashLight.position.set(x, y, z);
+    this.flashLight.color.setHex(colorHex);
+    this.flashLight.intensity = intensity;
+    this.flashDecaySpeed = Math.max(12, intensity * 2.1);
   }
 
   public spawnParticles(
@@ -280,6 +369,45 @@ export class ParticleEffectsPool {
       }
     }
     this.prevTracerCount = activeTracerCount;
+
+    let activeShockwaveCount = 0;
+    for (let i = 0; i < SHOCKWAVE_CAP; i++) {
+      const sw = this.shockwaves[i];
+      if (!sw.active) continue;
+      sw.life += dt;
+      if (sw.life >= sw.maxLife) {
+        sw.active = false;
+        continue;
+      }
+      const prog = sw.life / sw.maxLife;
+      const easeOut = 1 - Math.pow(1 - prog, 2.2);
+      const radiusScale = 0.65 + sw.maxScale * easeOut;
+      const fade = Math.max(0, 1 - prog);
+      this._v1.set(sw.x, sw.y, sw.z);
+      this._scale.set(radiusScale, radiusScale, radiusScale);
+      this._mat4.compose(this._v1, this._quat.identity(), this._scale);
+      this.shockwaveInst.setMatrixAt(activeShockwaveCount, this._mat4);
+      this._color.setHex(sw.colorHex).multiplyScalar(fade);
+      this.shockwaveInst.setColorAt(activeShockwaveCount, this._color);
+      activeShockwaveCount++;
+    }
+    this.shockwaveInst.count = activeShockwaveCount;
+    if (activeShockwaveCount > 0 || this.prevShockwaveCount > 0) {
+      this.shockwaveInst.instanceMatrix.needsUpdate = true;
+      if (this.shockwaveInst.instanceColor) {
+        this.shockwaveInst.instanceColor.needsUpdate = true;
+      }
+    }
+    this.prevShockwaveCount = activeShockwaveCount;
+
+    if (this.flashLight.intensity > 0.02) {
+      this.flashLight.intensity = Math.max(
+        0,
+        this.flashLight.intensity - this.flashDecaySpeed * dt
+      );
+    } else if (this.flashLight.intensity > 0) {
+      this.flashLight.intensity = 0;
+    }
   }
 
   public dispose(): void {
@@ -289,5 +417,7 @@ export class ParticleEffectsPool {
     this.tracerMat.dispose();
     this.skidGeo.dispose();
     this.skidMat.dispose();
+    this.shockwaveGeo.dispose();
+    this.shockwaveMat.dispose();
   }
 }

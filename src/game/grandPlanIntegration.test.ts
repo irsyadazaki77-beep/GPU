@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  COMBAT_COMBO_WINDOW_MS,
+  NEAR_MISS_COOLDOWN_MS,
   NUSANTARA_ALL_PACKAGES_BONUS_RP,
   NUSANTARA_PACKAGES,
   NUSANTARA_PACKAGE_REWARD_RP,
   TRAFFIC_ROUTES,
   WORLD_MAX_BOUND,
   collectNusantaraPackage,
+  computeNearMissBonus,
   createCustomRaceTrackSpec,
   createInitialPlayerState,
+  resolveCombatComboState,
 } from './rules';
 import { gameStore } from '../state/gameStore';
 
@@ -125,4 +129,40 @@ test('10 Koper Emas Nusantara collectibles grant per-package rewards and 2M gran
     finalRes.nextState.rupiah,
     startCash + 10 * NUSANTARA_PACKAGE_REWARD_RP + NUSANTARA_ALL_PACKAGES_BONUS_RP
   );
+});
+
+test('Wave 3 combat takedown combo streaks and high-speed near-miss adrenaline bonuses', () => {
+  const t0 = 10_000;
+  const c1 = resolveCombatComboState(0, 0, t0);
+  assert.equal(c1.comboCount, 1);
+  assert.equal(c1.bonusRp, 0);
+
+  const c2 = resolveCombatComboState(c1.comboCount, t0, t0 + 1800);
+  assert.equal(c2.comboCount, 2);
+  assert.equal(c2.tierLabel, 'KOMBO GANDA!');
+  assert.equal(c2.bonusRp, 24000);
+
+  const c5 = resolveCombatComboState(4, t0 + 2500, t0 + 4000);
+  assert.equal(c5.comboCount, 5);
+  assert.equal(c5.tierLabel, 'RAJA JALANAN!');
+  assert.ok(c5.healGain > 0);
+
+  // Window expiry resets streak cleanly
+  const reset = resolveCombatComboState(5, t0, t0 + COMBAT_COMBO_WINDOW_MS + 500);
+  assert.equal(reset.comboCount, 1);
+
+  // Near-miss bonus triggers only at high ground speed within 2.2m..4.4m outside cooldown
+  const nmSlow = computeNearMissBonus(12, 3.0, false, 0, 10_000);
+  assert.equal(nmSlow.triggered, false);
+
+  const nmAir = computeNearMissBonus(30, 3.0, true, 0, 10_000);
+  assert.equal(nmAir.triggered, false);
+
+  const nmFast = computeNearMissBonus(29, 3.1, false, 0, 10_000);
+  assert.equal(nmFast.triggered, true);
+  assert.equal(nmFast.rewardRp, 22000);
+  assert.equal(nmFast.focusGain, 8);
+
+  const nmCooldown = computeNearMissBonus(29, 3.1, false, 10_000, 10_000 + NEAR_MISS_COOLDOWN_MS - 200);
+  assert.equal(nmCooldown.triggered, false);
 });

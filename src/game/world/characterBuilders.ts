@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { EnemyBehaviorPolicy } from '../types';
+import type { EnemyBehaviorPolicy, WeaponId } from '../types';
 import { createContactShadowDisc } from './cityBuilders';
 
 export interface CharacterRigHandle {
@@ -14,6 +14,9 @@ export interface CharacterRigHandle {
   torsoGroup: THREE.Group;
   telegraphRing: THREE.Mesh;
   bodyMesh: THREE.Mesh;
+  hpBarGroup?: THREE.Group;
+  hpFillMesh?: THREE.Mesh;
+  weaponGroup?: THREE.Group;
 }
 
 export interface CharacterAnimationInput {
@@ -520,25 +523,87 @@ export function buildCharacterRig(
     metalness: 0.72,
     envMapIntensity: 0.45,
   });
+  const cyberWeaponMat = new THREE.MeshStandardMaterial({
+    color: 0x0891b2,
+    emissive: 0x22d3ee,
+    emissiveIntensity: 1.25,
+    roughness: 0.2,
+    metalness: 0.8,
+  });
+  const bladeMat = new THREE.MeshStandardMaterial({
+    color: 0xe2e8f0,
+    roughness: 0.22,
+    metalness: 0.9,
+    envMapIntensity: 0.95,
+  });
+
   const weaponGroup = new THREE.Group();
-  weaponGroup.position.set(0, -0.23, 0.16);
-  const gunReceiver = new THREE.Mesh(
-    new THREE.BoxGeometry(0.06, 0.1, 0.34),
-    gunMat
-  );
-  const gunBarrel = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.02, 0.02, 0.22, 8),
-    gunMat
-  );
-  gunBarrel.rotation.x = Math.PI / 2;
-  gunBarrel.position.set(0, 0.022, 0.22);
-  const gunGrip = new THREE.Mesh(
-    new THREE.BoxGeometry(0.05, 0.13, 0.075),
-    darkGearMat
-  );
-  gunGrip.position.set(0, -0.08, -0.07);
-  gunGrip.rotation.x = 0.25;
-  weaponGroup.add(gunReceiver, gunBarrel, gunGrip);
+  weaponGroup.position.set(0, -0.23, 0.14);
+
+  // Pistol / compact firearm mesh
+  const pistolMesh = new THREE.Group();
+  const pRec = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.085, 0.24), gunMat);
+  const pBar = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.16, 8), gunMat);
+  pBar.rotation.x = Math.PI / 2;
+  pBar.position.set(0, 0.02, 0.16);
+  const pGrip = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.12, 0.07), darkGearMat);
+  pGrip.position.set(0, -0.075, -0.05);
+  pGrip.rotation.x = 0.24;
+  pistolMesh.add(pRec, pBar, pGrip);
+
+  // Rifle / Senapan Serbu mesh
+  const rifleMesh = new THREE.Group();
+  const rRec = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.1, 0.46), gunMat);
+  rRec.position.set(0, 0.01, 0.08);
+  const rBar = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.34, 8), gunMat);
+  rBar.rotation.x = Math.PI / 2;
+  rBar.position.set(0, 0.028, 0.38);
+  const rMag = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.18, 0.075), accentMat);
+  rMag.position.set(0, -0.1, 0.12);
+  rMag.rotation.x = -0.18;
+  rifleMesh.add(rRec, rBar, rMag);
+  rifleMesh.visible = false;
+
+  // Golok Betawi blade mesh
+  const golokMesh = new THREE.Group();
+  const gHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.028, 0.16, 8), darkGearMat);
+  gHandle.rotation.x = Math.PI / 2;
+  const gBlade = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.075, 0.54), bladeMat);
+  gBlade.position.set(0, 0.015, 0.3);
+  golokMesh.add(gHandle, gBlade);
+  golokMesh.visible = false;
+
+  // Heavy launcher (Mercon / Gatotkaca) mesh
+  const launcherMesh = new THREE.Group();
+  const lTube = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.78, 12), darkGearMat);
+  lTube.rotation.x = Math.PI / 2;
+  lTube.position.set(0, 0.04, 0.12);
+  const lCone = new THREE.Mesh(new THREE.CylinderGeometry(0.092, 0.075, 0.14, 12), accentMat);
+  lCone.rotation.x = Math.PI / 2;
+  lCone.position.set(0, 0.04, 0.52);
+  launcherMesh.add(lTube, lCone);
+  launcherMesh.visible = false;
+
+  // Pasopati cyber-rifle mesh
+  const cyberMesh = new THREE.Group();
+  const cBody = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.11, 0.56), darkGearMat);
+  cBody.position.set(0, 0.01, 0.12);
+  const cCore = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.045, 0.62), cyberWeaponMat);
+  cCore.position.set(0, 0.055, 0.24);
+  cyberMesh.add(cBody, cCore);
+  cyberMesh.visible = false;
+
+  weaponGroup.add(pistolMesh, rifleMesh, golokMesh, launcherMesh, cyberMesh);
+  group.userData.weaponGroup = weaponGroup;
+  group.userData.gunMat = gunMat;
+  group.userData.weaponVariants = {
+    golok: golokMesh,
+    pistol: pistolMesh,
+    rifle: rifleMesh,
+    launcher: launcherMesh,
+    pasopati: cyberMesh,
+  };
+
   rightForearm.add(weaponGroup);
   rightArm.add(rightForearm);
   torsoGroup.add(rightArm);
@@ -557,6 +622,35 @@ export function buildCharacterRig(
   telegraphRing.position.y = 0.035;
   group.add(telegraphRing);
 
+  let hpBarGroup: THREE.Group | undefined;
+  let hpFillMesh: THREE.Mesh | undefined;
+  if (role === 'rusher' || role === 'ranged_kiter' || role === 'charger_enforcer') {
+    hpBarGroup = new THREE.Group();
+    hpBarGroup.position.set(0, 2.08, 0);
+    hpBarGroup.visible = false;
+    const bg = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.92, 0.12),
+      new THREE.MeshBasicMaterial({
+        color: 0x090d16,
+        transparent: true,
+        opacity: 0.78,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    );
+    hpFillMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.86, 0.075),
+      new THREE.MeshBasicMaterial({
+        color: role === 'charger_enforcer' ? 0xf59e0b : 0xef4444,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    );
+    hpFillMesh.position.z = 0.005;
+    hpBarGroup.add(bg, hpFillMesh);
+    group.add(hpBarGroup);
+  }
+
   group.scale.setScalar(scaleMultiplier);
 
   return {
@@ -571,5 +665,49 @@ export function buildCharacterRig(
     torsoGroup,
     telegraphRing,
     bodyMesh,
+    hpBarGroup,
+    hpFillMesh,
+    weaponGroup,
   };
+}
+
+/**
+ * Switches the visible 3D weapon model in a character's hand and applies optional gilded finish.
+ */
+export function syncCharacterWeaponVisual(
+  rig: CharacterRigHandle,
+  weaponId: WeaponId,
+  isGilded: boolean = false
+): void {
+  const wg = rig.weaponGroup;
+  const variants = rig.group.userData.weaponVariants as
+    | Record<string, THREE.Object3D>
+    | undefined;
+  const gunMat = rig.group.userData.gunMat as THREE.MeshStandardMaterial | undefined;
+  if (!wg || !variants) return;
+
+  if (weaponId === 'fist') {
+    wg.visible = false;
+    return;
+  }
+  wg.visible = true;
+  const activeKey =
+    weaponId === 'golok'
+      ? 'golok'
+      : weaponId === 'rifle'
+      ? 'rifle'
+      : weaponId === 'mercon' || weaponId === 'gatotkaca'
+      ? 'launcher'
+      : weaponId === 'pasopati'
+      ? 'pasopati'
+      : 'pistol';
+
+  for (const [key, obj] of Object.entries(variants)) {
+    obj.visible = key === activeKey;
+  }
+  if (gunMat) {
+    gunMat.color.setHex(isGilded ? 0xfacc15 : 0x0f172a);
+    gunMat.metalness = isGilded ? 0.92 : 0.72;
+    gunMat.roughness = isGilded ? 0.18 : 0.35;
+  }
 }

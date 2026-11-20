@@ -3,7 +3,7 @@ import { getGroundElevationAt } from '../game/rules';
 import { soundEngine } from '../game/sound';
 import { isNearBuilding, isOnRoadway } from '../game/world/spatial';
 
-type PropKind = 'cone' | 'crate' | 'barrier';
+type PropKind = 'cone' | 'crate' | 'barrier' | 'barrel';
 
 interface DestructibleProp {
   kind: PropKind;
@@ -22,6 +22,7 @@ interface DestructibleProp {
   vry: number;
   vrz: number;
   knocked: boolean;
+  detonated: boolean;
   resetTimer: number;
 }
 
@@ -32,15 +33,17 @@ export class DestructiblePropsSystem {
   private readonly coneMesh: THREE.InstancedMesh;
   private readonly crateMesh: THREE.InstancedMesh;
   private readonly barrierMesh: THREE.InstancedMesh;
+  private readonly barrelMesh: THREE.InstancedMesh;
 
   private readonly coneIndices: number[] = [];
   private readonly crateIndices: number[] = [];
   private readonly barrierIndices: number[] = [];
+  private readonly barrelIndices: number[] = [];
 
   private readonly _dummy = new THREE.Object3D();
 
   constructor(scene: THREE.Scene) {
-    // 1. Place scatterable Jakarta street cones, wooden crates & Dishub barriers along curbs
+    // 1. Place scatterable Jakarta street cones, wooden crates, Dishub barriers & explosive fuel barrels
     const candidates: { kind: PropKind; x: number; z: number }[] = [];
 
     for (let z = -70; z <= 70; z += 14) {
@@ -53,20 +56,28 @@ export class DestructiblePropsSystem {
       candidates.push({ kind: 'barrier', x, z: -7.2 });
       candidates.push({ kind: 'crate', x: x + 3, z: 7.2 });
     }
-    // Extra crates near warungs & harbor alleys
+    // Extra crates & explosive red fuel barrels near warungs, Gang Blok M & Tanjung Priok harbor
     const extra: { kind: PropKind; x: number; z: number }[] = [
       { kind: 'crate', x: -13.5, z: 24 },
       { kind: 'crate', x: -14.2, z: 24.9 },
       { kind: 'crate', x: 13.5, z: 21 },
       { kind: 'barrier', x: -7.2, z: 39 },
       { kind: 'barrier', x: 7.2, z: -39 },
+      { kind: 'barrel', x: -16.5, z: 18 },
+      { kind: 'barrel', x: 16.5, z: -18 },
+      { kind: 'barrel', x: -34.5, z: 10 },
+      { kind: 'barrel', x: 43.0, z: -64 },
+      { kind: 'barrel', x: -24.5, z: -66 },
+      { kind: 'barrel', x: 35.0, z: 28 },
+      { kind: 'barrel', x: -8.2, z: -50 },
+      { kind: 'barrel', x: 8.2, z: 50 },
     ];
     candidates.push(...extra);
 
     for (const c of candidates) {
-      if (this.props.length >= 30) break;
+      if (c.kind !== 'barrel' && this.props.length >= 30) continue;
       if (isNearBuilding(c.x, c.z, 1.3)) continue;
-      if (c.kind === 'crate' && isOnRoadway(c.x, c.z)) continue;
+      if ((c.kind === 'crate' || c.kind === 'barrel') && isOnRoadway(c.x, c.z)) continue;
       const gY = getGroundElevationAt(c.x, c.z);
       const idx = this.props.length;
       this.props.push({
@@ -86,11 +97,13 @@ export class DestructiblePropsSystem {
         vry: 0,
         vrz: 0,
         knocked: false,
+        detonated: false,
         resetTimer: 0,
       });
       if (c.kind === 'cone') this.coneIndices.push(idx);
       else if (c.kind === 'crate') this.crateIndices.push(idx);
-      else this.barrierIndices.push(idx);
+      else if (c.kind === 'barrier') this.barrierIndices.push(idx);
+      else this.barrelIndices.push(idx);
     }
 
     // 2. Instanced Geometries & Materials
@@ -140,6 +153,23 @@ export class DestructiblePropsSystem {
     this.barrierMesh.castShadow = true;
     this.group.add(this.barrierMesh);
 
+    const barrelGeo = new THREE.CylinderGeometry(0.42, 0.44, 1.08, 12);
+    barrelGeo.translate(0, 0.54, 0);
+    const barrelMat = new THREE.MeshStandardMaterial({
+      color: 0xef4444,
+      emissive: 0x991b1b,
+      emissiveIntensity: 0.38,
+      roughness: 0.36,
+      metalness: 0.48,
+    });
+    this.barrelMesh = new THREE.InstancedMesh(
+      barrelGeo,
+      barrelMat,
+      Math.max(1, this.barrelIndices.length)
+    );
+    this.barrelMesh.castShadow = true;
+    this.group.add(this.barrelMesh);
+
     this.syncMatrices();
     scene.add(this.group);
   }
@@ -173,6 +203,33 @@ export class DestructiblePropsSystem {
     }
   }
 
+  public checkBarrelLineHit(
+    originX: number,
+    originZ: number,
+    dirX: number,
+    dirZ: number,
+    maxRange: number
+  ): { x: number; y: number; z: number } | null {
+    for (const pIdx of this.barrelIndices) {
+      const prop = this.props[pIdx];
+      if (prop.detonated) continue;
+      const dx = prop.x - originX;
+      const dz = prop.z - originZ;
+      const dist = Math.hypot(dx, dz);
+      if (dist > maxRange || dist < 0.8) continue;
+      const dot = (dx / dist) * dirX + (dz / dist) * dirZ;
+      if (dot >= 0.9 || dist < 2.2) {
+        prop.detonated = true;
+        prop.knocked = true;
+        prop.resetTimer = 25;
+        this.applyBlastImpulse(prop.x, prop.z, 10, -dirZ, dirX);
+        this.syncMatrices();
+        return { x: prop.x, y: prop.y, z: prop.z };
+      }
+    }
+    return null;
+  }
+
   public step(
     dt: number,
     playerX: number,
@@ -182,30 +239,39 @@ export class DestructiblePropsSystem {
     isDriving: boolean,
     camRightX: number,
     camRightZ: number
-  ): void {
+  ): { triggeredBlasts: { x: number; y: number; z: number }[] } {
     let dirty = false;
+    const triggeredBlasts: { x: number; y: number; z: number }[] = [];
 
     for (const prop of this.props) {
       // Check vehicle collision impact
-      if (isDriving && Math.abs(vehicleSpeed) > 2.2) {
+      if (!prop.detonated && isDriving && Math.abs(vehicleSpeed) > 2.2) {
         const dx = prop.x - playerX;
         const dz = prop.z - playerZ;
         const dist = Math.hypot(dx, dz);
-        if (dist < vehicleRadius + 0.65 && prop.y < 2.2) {
-          const pushScale = Math.min(22, Math.abs(vehicleSpeed) * 0.85 + 5);
-          const nx = dx / (dist || 1);
-          const nz = dz / (dist || 1);
-          prop.vx = nx * pushScale + (Math.random() - 0.5) * 3;
-          prop.vz = nz * pushScale + (Math.random() - 0.5) * 3;
-          prop.vy = 4.2 + Math.min(5, Math.abs(vehicleSpeed) * 0.25);
-          prop.vrx = (Math.random() - 0.5) * 12;
-          prop.vry = (Math.random() - 0.5) * 10;
-          prop.vrz = (Math.random() - 0.5) * 12;
-          prop.knocked = true;
-          prop.resetTimer = 15;
-          dirty = true;
-          const pan = THREE.MathUtils.clamp((dx * camRightX + dz * camRightZ) * 0.15, -1, 1);
-          soundEngine.playPropCrash(pan);
+        if (dist < vehicleRadius + 0.72 && prop.y < 2.2) {
+          if (prop.kind === 'barrel') {
+            prop.detonated = true;
+            prop.knocked = true;
+            prop.resetTimer = 25;
+            triggeredBlasts.push({ x: prop.x, y: prop.y, z: prop.z });
+            dirty = true;
+          } else {
+            const pushScale = Math.min(22, Math.abs(vehicleSpeed) * 0.85 + 5);
+            const nx = dx / (dist || 1);
+            const nz = dz / (dist || 1);
+            prop.vx = nx * pushScale + (Math.random() - 0.5) * 3;
+            prop.vz = nz * pushScale + (Math.random() - 0.5) * 3;
+            prop.vy = 4.2 + Math.min(5, Math.abs(vehicleSpeed) * 0.25);
+            prop.vrx = (Math.random() - 0.5) * 12;
+            prop.vry = (Math.random() - 0.5) * 10;
+            prop.vrz = (Math.random() - 0.5) * 12;
+            prop.knocked = true;
+            prop.resetTimer = 15;
+            dirty = true;
+            const pan = THREE.MathUtils.clamp((dx * camRightX + dz * camRightZ) * 0.15, -1, 1);
+            soundEngine.playPropCrash(pan);
+          }
         }
       }
 
@@ -213,10 +279,11 @@ export class DestructiblePropsSystem {
         prop.resetTimer -= dt;
         const floorY = getGroundElevationAt(prop.x, prop.z);
         if (
-          prop.y > floorY + 0.01 ||
-          Math.abs(prop.vx) > 0.15 ||
-          Math.abs(prop.vz) > 0.15 ||
-          Math.abs(prop.vy) > 0.15
+          !prop.detonated &&
+          (prop.y > floorY + 0.01 ||
+            Math.abs(prop.vx) > 0.15 ||
+            Math.abs(prop.vz) > 0.15 ||
+            Math.abs(prop.vy) > 0.15)
         ) {
           prop.x += prop.vx * dt;
           prop.z += prop.vz * dt;
@@ -252,6 +319,7 @@ export class DestructiblePropsSystem {
           prop.rx = 0;
           prop.rz = 0;
           prop.knocked = false;
+          prop.detonated = false;
           dirty = true;
         }
       }
@@ -260,6 +328,7 @@ export class DestructiblePropsSystem {
     if (dirty) {
       this.syncMatrices();
     }
+    return { triggeredBlasts };
   }
 
   private syncMatrices(): void {
@@ -268,6 +337,7 @@ export class DestructiblePropsSystem {
       const p = this.props[pIdx];
       dummy.position.set(p.x, p.y, p.z);
       dummy.rotation.set(p.rx, p.ry, p.rz);
+      dummy.scale.setScalar(1);
       dummy.updateMatrix();
       this.coneMesh.setMatrixAt(i, dummy.matrix);
     });
@@ -277,6 +347,7 @@ export class DestructiblePropsSystem {
       const p = this.props[pIdx];
       dummy.position.set(p.x, p.y, p.z);
       dummy.rotation.set(p.rx, p.ry, p.rz);
+      dummy.scale.setScalar(1);
       dummy.updateMatrix();
       this.crateMesh.setMatrixAt(i, dummy.matrix);
     });
@@ -286,10 +357,21 @@ export class DestructiblePropsSystem {
       const p = this.props[pIdx];
       dummy.position.set(p.x, p.y, p.z);
       dummy.rotation.set(p.rx, p.ry, p.rz);
+      dummy.scale.setScalar(1);
       dummy.updateMatrix();
       this.barrierMesh.setMatrixAt(i, dummy.matrix);
     });
     this.barrierMesh.instanceMatrix.needsUpdate = true;
+
+    this.barrelIndices.forEach((pIdx, i) => {
+      const p = this.props[pIdx];
+      dummy.position.set(p.x, p.detonated ? -40 : p.y, p.z);
+      dummy.rotation.set(p.rx, p.ry, p.rz);
+      dummy.scale.setScalar(p.detonated ? 0.001 : 1);
+      dummy.updateMatrix();
+      this.barrelMesh.setMatrixAt(i, dummy.matrix);
+    });
+    this.barrelMesh.instanceMatrix.needsUpdate = true;
   }
 
   public dispose(): void {
@@ -299,5 +381,7 @@ export class DestructiblePropsSystem {
     (this.crateMesh.material as THREE.Material).dispose();
     this.barrierMesh.geometry.dispose();
     (this.barrierMesh.material as THREE.Material).dispose();
+    this.barrelMesh.geometry.dispose();
+    (this.barrelMesh.material as THREE.Material).dispose();
   }
 }
