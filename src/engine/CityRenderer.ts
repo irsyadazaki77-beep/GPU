@@ -405,18 +405,26 @@ if (uWetness > 0.04) {
         )
         .replace(
           '#include <dithering_fragment>',
-          `if (uWetness > 0.06 && sanPuddleMask > 0.01) {
+          `if (uWetness > 0.05 && sanPuddleMask > 0.01) {
   vec3 viewDirW = normalize(cameraPosition - vRoadWorldPos);
-  float fresnel = pow(1.0 - max(dot(viewDirW, vec3(0.0, 1.0, 0.0)), 0.0), 2.8);
-  vec3 sunsetSkyRef = mix(vec3(0.42, 0.22, 0.34), vec3(0.08, 0.14, 0.32), uNightFactor);
-  float neonBand = roadNoise(vRoadWorldPos.xz * 0.085);
-  vec3 coralAmber = mix(vec3(1.0, 0.38, 0.5), vec3(0.98, 0.64, 0.16), smoothstep(0.2, 0.8, neonBand));
-  vec3 viceCyan = vec3(0.14, 0.84, 0.96);
-  vec3 neonTint = mix(coralAmber, viceCyan, smoothstep(0.45, 0.78, roadNoise(vRoadWorldPos.xz * 0.06 + vec2(3.1, 1.7))));
-  float rainRippleAmp = smoothstep(0.6, 0.95, uWetness);
-  float rippleCell = sin(length(fract(vRoadWorldPos.xz * 0.72) - 0.5) * 28.0 - uTime * 9.5);
-  float rippleSpark = smoothstep(0.92, 1.0, rippleCell) * sanPuddleMask * 0.10 * rainRippleAmp;
-  gl_FragColor.rgb += (sunsetSkyRef * 0.24 + neonTint * (0.08 + uNightFactor * 0.14)) * (sanPuddleMask * (0.28 + fresnel * 0.52)) + vec3(rippleSpark);
+  vec3 reflDir = reflect(-viewDirW, vec3(0.0, 1.0, 0.0));
+  float fresnel = pow(1.0 - max(dot(viewDirW, vec3(0.0, 1.0, 0.0)), 0.0), 3.1);
+  vec3 daySkyRef = mix(vec3(0.28, 0.52, 0.84), vec3(0.96, 0.52, 0.24), clamp(0.45 + reflDir.z * 0.35, 0.0, 1.0));
+  vec3 nightSkyRef = mix(vec3(0.05, 0.09, 0.22), vec3(0.10, 0.26, 0.48), clamp(reflDir.y * 1.4, 0.0, 1.0));
+  vec3 skyMirror = mix(daySkyRef, nightSkyRef, uNightFactor);
+  // Crisp vertical skyscraper window & neon billboard reflection streaks stretched along puddle view
+  float towerStreak = pow(roadNoise(vec2(vRoadWorldPos.x * 0.45 + reflDir.x * 2.2, vRoadWorldPos.z * 0.14 + reflDir.z * 1.6)), 2.4);
+  vec3 warmWindow = vec3(1.0, 0.68, 0.24);
+  vec3 neonCyan = vec3(0.14, 0.88, 1.0);
+  vec3 cityNeonRef = mix(warmWindow, neonCyan, smoothstep(0.35, 0.72, roadNoise(vRoadWorldPos.xz * 0.09 + vec2(4.2, 1.9))));
+  float rainRippleAmp = smoothstep(0.55, 0.95, uWetness);
+  float rDist1 = length(fract(vRoadWorldPos.xz * 0.78) - 0.5);
+  float rDist2 = length(fract(vRoadWorldPos.xz * 1.15 + 0.37) - 0.5);
+  float ring1 = smoothstep(0.06, 0.0, abs(rDist1 - fract(uTime * 1.35 + roadHash(floor(vRoadWorldPos.xz * 0.78))) * 0.45));
+  float ring2 = smoothstep(0.05, 0.0, abs(rDist2 - fract(uTime * 1.65 + roadHash(floor(vRoadWorldPos.xz * 1.15))) * 0.42));
+  float rippleSpark = (ring1 + ring2 * 0.7) * sanPuddleMask * 0.14 * rainRippleAmp;
+  vec3 reflectionCol = skyMirror * 0.38 + cityNeonRef * towerStreak * (0.22 + uNightFactor * 0.48);
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, reflectionCol, clamp(sanPuddleMask * (0.18 + fresnel * 0.68), 0.0, 0.78)) + vec3(rippleSpark);
 }
 #include <dithering_fragment>`
         );

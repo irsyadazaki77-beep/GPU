@@ -21,11 +21,11 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
 
   const bodyMat = new THREE.MeshPhysicalMaterial({
     color: spec.colorHex,
-    roughness: 0.24,
-    metalness: 0.48,
-    clearcoat: 0.84,
-    clearcoatRoughness: 0.14,
-    envMapIntensity: 1.08,
+    roughness: 0.2,
+    metalness: 0.56,
+    clearcoat: 0.96,
+    clearcoatRoughness: 0.08,
+    envMapIntensity: 1.42,
   });
   const trimMat = new THREE.MeshStandardMaterial({
     color: spec.accentHex,
@@ -62,11 +62,11 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
 
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: 0x070d19,
-    roughness: 0.12,
-    metalness: 0.38,
-    clearcoat: 0.92,
-    clearcoatRoughness: 0.08,
-    envMapIntensity: 1.2,
+    roughness: 0.08,
+    metalness: 0.42,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.05,
+    envMapIntensity: 1.5,
   });
   const tireMat = new THREE.MeshStandardMaterial({
     color: 0x14161b,

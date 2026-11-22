@@ -45,24 +45,24 @@ export function computeTimeOfDayToneState(
   const n = clamp01(nightFactor);
   const w = clamp01(wetnessFactor);
 
-  // Daylight 1.08 -> Golden Hour ~1.05 -> Night 0.98, dampened slightly in heavy rain
-  const exposure = lerp(1.08, 0.98, n) - w * 0.04;
+  // Daylight 1.12 -> Golden Hour ~1.08 -> Night 1.02 for AgX Filmic curve
+  const exposure = lerp(1.12, 1.02, n) - w * 0.04;
 
-  // Strong enough IBL so car clearcoat & skyscraper glass visibly reflect sky/horizon
-  const envIntensity = Math.max(0.32, lerp(0.76, 0.36, n) - w * 0.06);
+  // High-contrast IBL reflection strength so clearcoat supercars & glass curtain-walls mirror sky/city glow
+  const envIntensity = Math.max(0.46, lerp(0.94, 0.56, n) - w * 0.04);
 
-  // Restrained filmic bloom: clean crisp daytime, subtle realistic night lights without neon glare
-  const bloomThreshold = lerp(0.95, 0.88, n);
-  const bloomStrength = lerp(0.10, 0.24, n) + w * 0.02;
-  const bloomRadius = lerp(0.28, 0.38, n);
+  // Filmic bloom: sun-kissed highlights in day/senja, rich neon/headlight halation at night
+  const bloomThreshold = lerp(0.92, 0.82, n);
+  const bloomStrength = lerp(0.14, 0.30, n) + w * 0.04;
+  const bloomRadius = lerp(0.32, 0.44, n);
 
   // Office & ruko windows turn on smoothly starting at late afternoon / golden hour
-  const windowRamp = clamp01((n - 0.18) / 0.62);
-  const windowEmissiveIntensity = lerp(0.05, 1.38, windowRamp);
+  const windowRamp = clamp01((n - 0.16) / 0.60);
+  const windowEmissiveIntensity = lerp(0.06, 1.55, windowRamp);
 
   // Pooled dynamic PointLights on nearest PJU poles ramp smoothly at dusk/night
-  const streetRamp = clamp01((n - 0.22) / 0.55);
-  const streetlightIntensity = lerp(0, 3.6, streetRamp);
+  const streetRamp = clamp01((n - 0.20) / 0.54);
+  const streetlightIntensity = lerp(0, 4.2, streetRamp);
 
   return {
     exposure,
@@ -113,7 +113,8 @@ export function isOnPavedCorridor(x: number, z: number): boolean {
   const onCoastalWings =
     Math.abs(z + 66) <= 6.2 && Math.abs(x) >= 120 && Math.abs(x) <= 216;
   const onMonasPlaza = x * x + z * z <= 19.2 * 19.2;
-  const onElevatedToll = z >= -30.5 && z <= -21.5 && Math.abs(x) <= 68;
+  const onBundaranHi = Math.hypot(x, z - 32) <= 12.5;
+  const onElevatedToll = z >= 75.5 && z <= 84.5 && Math.abs(x) <= 68;
   return (
     onMainNS ||
     onMainEW ||
@@ -125,6 +126,7 @@ export function isOnPavedCorridor(x: number, z: number): boolean {
     onJorrSouth ||
     onCoastalWings ||
     onMonasPlaza ||
+    onBundaranHi ||
     onElevatedToll
   );
 }

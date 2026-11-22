@@ -204,6 +204,7 @@ export class WorldEngine {
   private readonly envCache = new Map<WeatherMode, THREE.Texture>();
   private activeEnvWeather: WeatherMode | null = null;
   private pmremGenerator: THREE.PMREMGenerator;
+  private readonly _sunScreenUv = new THREE.Vector2(0.5, 0.72);
 
   constructor(container: HTMLElement, initialProps: WorldEngineProps) {
     this.container = container;
@@ -228,8 +229,8 @@ export class WorldEngine {
       powerPreference: 'high-performance',
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMapping = THREE.AgXToneMapping;
+    this.renderer.toneMappingExposure = 1.08;
     this.renderer.setPixelRatio(
       this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2)
     );
@@ -806,12 +807,12 @@ export class WorldEngine {
 
     const palette: Record<
       WeatherMode,
-      { top: number; horizon: number; ground: number; accent: number }
+      { top: number; horizon: number; ground: number; accent: number; neonBounce: number }
     > = {
-      senja: { top: 0x1e293b, horizon: 0xf97316, ground: 0x1e1b2e, accent: 0xfde047 },
-      malam: { top: 0x050814, horizon: 0x0284c7, ground: 0x090d16, accent: 0x38bdf8 },
-      siang: { top: 0x0284c7, horizon: 0xbae6fd, ground: 0x334155, accent: 0xfef9c3 },
-      hujan: { top: 0x0f172a, horizon: 0x475569, ground: 0x0f172a, accent: 0x7dd3fc },
+      senja: { top: 0x16223b, horizon: 0xf97316, ground: 0x1b1528, accent: 0xfde047, neonBounce: 0xf43f5e },
+      malam: { top: 0x040712, horizon: 0x0284c7, ground: 0x070b14, accent: 0x38bdf8, neonBounce: 0xa855f7 },
+      siang: { top: 0x0369a1, horizon: 0xbae6fd, ground: 0x263244, accent: 0xfef9c3, neonBounce: 0xe0f2fe },
+      hujan: { top: 0x0f172a, horizon: 0x475569, ground: 0x0f172a, accent: 0x7dd3fc, neonBounce: 0x38bdf8 },
     };
     const p = palette[mode] || palette.senja;
 
@@ -822,21 +823,36 @@ export class WorldEngine {
         uTop: { value: new THREE.Color(p.top) },
         uHor: { value: new THREE.Color(p.horizon) },
         uBot: { value: new THREE.Color(p.ground) },
+        uNeon: { value: new THREE.Color(p.neonBounce) },
       },
       vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-      fragmentShader: `uniform vec3 uTop; uniform vec3 uHor; uniform vec3 uBot; varying vec3 vP; void main(){ float h = normalize(vP).y; vec3 c = mix(uBot, uHor, smoothstep(-0.2, 0.05, h)); c = mix(c, uTop, smoothstep(0.05, 0.55, h)); gl_FragColor = vec4(c, 1.0); }`,
+      fragmentShader: `
+        uniform vec3 uTop; uniform vec3 uHor; uniform vec3 uBot; uniform vec3 uNeon;
+        varying vec3 vP;
+        void main(){
+          vec3 d = normalize(vP);
+          float h = d.y;
+          vec3 c = mix(uBot, uHor, smoothstep(-0.22, 0.04, h));
+          c = mix(c, uTop, smoothstep(0.04, 0.52, h));
+          float cloudBand = sin(d.x * 5.0 + d.z * 3.5) * cos(d.z * 6.0 - d.x * 2.5);
+          c += mix(uHor, vec3(1.0), 0.35) * smoothstep(0.08, 0.38, h) * smoothstep(0.25, 0.85, cloudBand) * 0.24;
+          float cityRim = exp(-abs(h - 0.02) * 14.0) * (0.5 + 0.5 * sin(d.x * 16.0));
+          c += uNeon * cityRim * 0.35;
+          gl_FragColor = vec4(c, 1.0);
+        }
+      `,
     });
-    const sphereGeo = new THREE.SphereGeometry(12, 16, 12);
+    const sphereGeo = new THREE.SphereGeometry(14, 24, 16);
     const skyMesh = new THREE.Mesh(sphereGeo, skyMat);
     envScene.add(skyMesh);
 
-    const sunOrbGeo = new THREE.SphereGeometry(1.4, 8, 8);
+    const sunOrbGeo = new THREE.SphereGeometry(1.75, 10, 10);
     const sunOrbMat = new THREE.MeshBasicMaterial({ color: p.accent });
     const sunOrb = new THREE.Mesh(sunOrbGeo, sunOrbMat);
     sunOrb.position.set(6, mode === 'senja' ? 2.4 : 7.5, 5);
     envScene.add(sunOrb);
 
-    const rt = this.pmremGenerator.fromScene(envScene, 0.04);
+    const rt = this.pmremGenerator.fromScene(envScene, 0.035);
     sphereGeo.dispose();
     skyMat.dispose();
     sunOrbGeo.dispose();
@@ -1682,6 +1698,10 @@ export class WorldEngine {
     }
 
     const storeSnap = gameStore.getState();
+    const sunShaftStrength = this.weatherSystem.getSunScreenProjection(
+      this.camera,
+      this._sunScreenUv
+    );
     this.postProcessing.render(
       {
         dt,
@@ -1696,6 +1716,8 @@ export class WorldEngine {
           : 'standar',
         droneReconActive: this.playerController.isDroneReconActive(),
         lightningFlash: this.lightningFlash,
+        sunScreenPos: this._sunScreenUv,
+        sunShaftStrength,
       },
       this.props.onGraphicsTierResolved
     );

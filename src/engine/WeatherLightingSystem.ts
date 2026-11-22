@@ -33,9 +33,10 @@ export class WeatherLightingSystem {
   public readonly transitionState: WeatherTransitionState;
 
   private readonly sunOffset = new THREE.Vector3(46, 68, 38);
-  private readonly shadowHalfExtent = 64;
+  private readonly shadowHalfExtent = 54;
   private readonly shadowMapSize: number;
   private readonly rainCount: number;
+  private readonly _projSunVec = new THREE.Vector3();
 
   private rainGeo: THREE.BoxGeometry;
   private rainMat: THREE.MeshBasicMaterial;
@@ -158,16 +159,26 @@ export class WeatherLightingSystem {
             col += vec3(0.84, 0.91, 1.0) * (moonDisc * 0.92 + moonHalo) * moonVis;
           }
 
-          // Procedural tropical sky clouds (drifting FBM layer above horizon)
-          if (h > 0.01) {
-            vec2 cloudUv = dir.xz / (h + 0.24) * 1.45 + vec2(uTime * 0.012, uTime * 0.006);
-            float cDensity = fbm(cloudUv);
-            float coverage = mix(0.46, 0.28, uWetness);
-            float cloudMask = smoothstep(coverage, coverage + 0.34, cDensity) * smoothstep(0.01, 0.22, h);
-            vec3 cloudBase = mix(uHorizonColor * 0.72, uTopColor * 0.52, 0.45);
-            vec3 cloudSunRim = uSunColor * pow(sunAmt, 6.0) * 0.65 * uSunGlowStrength;
-            vec3 cloudCol = cloudBase + cloudSunRim + vec3(0.42, 0.56, 0.85) * uLightning * 0.85;
-            col = mix(col, cloudCol, cloudMask * mix(0.55, 0.82, uWetness));
+          // Atmospheric coastal & Jakarta urban horizon scattering glow
+          float horizonBand = exp(-abs(h - 0.015) * 11.5);
+          vec3 urbanGlow = mix(uHorizonColor * 0.45, vec3(0.08, 0.45, 0.72), uNightFactor * 0.7);
+          col += urbanGlow * horizonBand * (0.28 + 0.18 * (1.0 - uWetness));
+
+          // 2-Layer Volumetric-Style Tropical Clouds (Lower Cumulus with Mie Silver-Lining + Upper Wispy Cirrus)
+          if (h > 0.005) {
+            vec2 cloudUv1 = dir.xz / (h + 0.22) * 1.45 + vec2(uTime * 0.012, uTime * 0.006);
+            vec2 cloudUv2 = dir.xz / (h + 0.35) * 2.85 + vec2(-uTime * 0.007, uTime * 0.011);
+            float c1 = fbm(cloudUv1);
+            float c2 = fbm(cloudUv2);
+            float coverage = mix(0.45, 0.26, uWetness);
+            float cumulusMask = smoothstep(coverage, coverage + 0.32, c1) * smoothstep(0.005, 0.18, h);
+            float cirrusMask = smoothstep(0.52, 0.82, c2) * smoothstep(0.03, 0.28, h) * 0.45;
+            float mieForward = pow(sunAmt, 7.5) * uSunGlowStrength;
+            vec3 cloudDarkBase = mix(uHorizonColor * 0.48, uTopColor * 0.36, 0.62);
+            vec3 cloudLitRim = mix(uSunColor * (0.62 + mieForward * 1.45), vec3(0.55, 0.65, 0.8), uWetness * 0.65);
+            float edgeDensity = smoothstep(coverage + 0.36, coverage + 0.04, c1);
+            vec3 cloudCol = mix(cloudDarkBase, cloudLitRim, clamp(edgeDensity * 0.72 + mieForward * 0.55, 0.0, 1.0)) + vec3(0.46, 0.60, 0.88) * uLightning * 0.9;
+            col = mix(col, cloudCol, clamp(cumulusMask * mix(0.62, 0.88, uWetness) + cirrusMask * 0.35, 0.0, 0.92));
           }
 
           // Subtle circular pinpoint night starfield
@@ -212,8 +223,8 @@ export class WeatherLightingSystem {
     this.sunLight.shadow.camera.bottom = -d;
     this.sunLight.shadow.camera.near = 6;
     this.sunLight.shadow.camera.far = 195;
-    this.sunLight.shadow.bias = -0.0003;
-    this.sunLight.shadow.normalBias = 0.02;
+    this.sunLight.shadow.bias = -0.00025;
+    this.sunLight.shadow.normalBias = 0.018;
     scene.add(this.sunLight);
     scene.add(this.sunLight.target);
 
@@ -460,6 +471,26 @@ export class WeatherLightingSystem {
       wetnessFactor: wet,
       lightningTriggered,
     };
+  }
+
+  public getSunScreenProjection(
+    camera: THREE.Camera,
+    outUv: THREE.Vector2
+  ): number {
+    this._projSunVec
+      .copy(this.skyUniforms.uSunDir.value)
+      .multiplyScalar(320)
+      .add(camera.position);
+    this._projSunVec.project(camera);
+    if (this._projSunVec.z > 1.0) {
+      return 0;
+    }
+    const u = this._projSunVec.x * 0.5 + 0.5;
+    const v = this._projSunVec.y * 0.5 + 0.5;
+    outUv.set(u, v);
+    const camFwd = this._projSunVec.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    const facing = Math.max(0, camFwd.dot(this.skyUniforms.uSunDir.value));
+    return facing * this.skyUniforms.uSunGlowStrength.value * (1 - this.transitionState.wetnessFactor * 0.72);
   }
 
   public dispose(): void {

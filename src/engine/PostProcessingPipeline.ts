@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import type { GraphicsQualityTier, PhotoFilterId } from '../game/types';
@@ -22,6 +23,9 @@ const CinematicGradeShader = {
     uTime: { value: 0 },
     uDroneReconMix: { value: 0 },
     uLightningFlash: { value: 0 },
+    uSunScreenPos: { value: new THREE.Vector2(0.5, 0.72) },
+    uSunShaftStrength: { value: 0 },
+    uWetness: { value: 0 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -41,34 +45,77 @@ const CinematicGradeShader = {
     uniform float uTime;
     uniform float uDroneReconMix;
     uniform float uLightningFlash;
+    uniform vec2 uSunScreenPos;
+    uniform float uSunShaftStrength;
+    uniform float uWetness;
     varying vec2 vUv;
 
+    float screenHash(vec2 p) {
+      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    }
+
     void main() {
-      vec2 center = vUv - vec2(0.5);
+      vec2 uv = vUv;
+      // Subtle monsoon rain droplet refraction near viewport outer borders
+      if (uWetness > 0.56) {
+        float edgeMask = smoothstep(0.38, 0.92, length(uv - vec2(0.5)));
+        float rainAmt = smoothstep(0.56, 1.0, uWetness) * edgeMask;
+        vec2 dropGrid = vec2(26.0, 14.0);
+        vec2 cellUv = uv * dropGrid + vec2(0.0, uTime * 1.45);
+        vec2 cellId = floor(cellUv);
+        vec2 cellLocal = fract(cellUv) - 0.5;
+        float seed = screenHash(cellId);
+        if (seed > 0.78) {
+          float dropDist = length(cellLocal * vec2(1.0, 0.72));
+          float drop = smoothstep(0.32, 0.06, dropDist) * rainAmt;
+          uv += cellLocal * drop * 0.018;
+        }
+      }
+
+      vec2 center = uv - vec2(0.5);
       float dist = length(center);
       vec2 offset = center * uChromatic * (0.4 + dist * 1.4);
 
-      float r = texture2D(tDiffuse, vUv + offset).r;
-      float g = texture2D(tDiffuse, vUv).g;
-      float b = texture2D(tDiffuse, vUv - offset).b;
+      float r = texture2D(tDiffuse, uv + offset).r;
+      float g = texture2D(tDiffuse, uv).g;
+      float b = texture2D(tDiffuse, uv - offset).b;
       vec3 col = vec3(r, g, b);
 
       // Subtle 4-tap local micro-sharpen to keep road markings, storefront signs & car lines crisp over FXAA
       float texel = 0.00085;
       vec3 blurNeighbors = (
-        texture2D(tDiffuse, vUv + vec2(texel, 0.0)).rgb +
-        texture2D(tDiffuse, vUv - vec2(texel, 0.0)).rgb +
-        texture2D(tDiffuse, vUv + vec2(0.0, texel)).rgb +
-        texture2D(tDiffuse, vUv - vec2(0.0, texel)).rgb
+        texture2D(tDiffuse, uv + vec2(texel, 0.0)).rgb +
+        texture2D(tDiffuse, uv - vec2(texel, 0.0)).rgb +
+        texture2D(tDiffuse, uv + vec2(0.0, texel)).rgb +
+        texture2D(tDiffuse, uv - vec2(0.0, texel)).rgb
       ) * 0.25;
-      col = clamp(col + (col - blurNeighbors) * 0.26, vec3(0.0), vec3(1.5));
+      col = clamp(col + (col - blurNeighbors) * 0.28, vec3(0.0), vec3(1.65));
+
+      // Crepuscular Volumetric Sun Shafts & Anamorphic Horizon Bloom when facing sunlight
+      if (uSunShaftStrength > 0.02) {
+        vec2 sunVec = uv - uSunScreenPos;
+        float sunDist = length(sunVec * vec2(1.4, 1.0));
+        float anamorphic = exp(-abs(sunVec.y) * 26.0) * exp(-abs(sunVec.x) * 3.8);
+        vec3 shaftAccum = vec3(0.0);
+        vec2 stepRay = -sunVec * 0.045;
+        vec2 rayUv = uv;
+        for (int s = 0; s < 5; s++) {
+          rayUv += stepRay;
+          vec3 samp = texture2D(tDiffuse, clamp(rayUv, vec2(0.002), vec2(0.998))).rgb;
+          float bright = smoothstep(0.62, 1.05, dot(samp, vec3(0.299, 0.587, 0.114)));
+          shaftAccum += samp * bright;
+        }
+        shaftAccum *= 0.2;
+        float sunMask = smoothstep(0.92, 0.05, sunDist) * uSunShaftStrength;
+        col += (shaftAccum * vec3(1.08, 0.92, 0.72) * 0.42 + vec3(1.0, 0.78, 0.45) * anamorphic * 0.16) * sunMask;
+      }
 
       // Subtle high-speed / Nitro peripheral radial motion blur streaks
       float speedBlurMask = smoothstep(0.52, 1.15, uSpeedRatio + uFokusMix * 0.28) * smoothstep(0.24, 0.72, dist);
       if (speedBlurMask > 0.005) {
         vec2 radialStep = center * (0.018 * speedBlurMask);
-        vec3 s1 = texture2D(tDiffuse, vUv - radialStep).rgb;
-        vec3 s2 = texture2D(tDiffuse, vUv - radialStep * 2.0).rgb;
+        vec3 s1 = texture2D(tDiffuse, uv - radialStep).rgb;
+        vec3 s2 = texture2D(tDiffuse, uv - radialStep * 2.0).rgb;
         col = mix(col, (col + s1 + s2) * 0.3333, min(0.58, speedBlurMask * 0.65));
       }
 
@@ -142,6 +189,8 @@ export interface PostProcessingFrameParams {
   photoFilter?: PhotoFilterId;
   droneReconActive?: boolean;
   lightningFlash?: number;
+  sunScreenPos?: THREE.Vector2;
+  sunShaftStrength?: number;
 }
 
 export class PostProcessingPipeline {
@@ -152,6 +201,7 @@ export class PostProcessingPipeline {
 
   private readonly composer: EffectComposer;
   private readonly renderPass: RenderPass;
+  private readonly gtaoPass: GTAOPass | null = null;
   private readonly bloomPass: UnrealBloomPass;
   private readonly gradePass: ShaderPass;
   private readonly fxaaPass: ShaderPass;
@@ -191,6 +241,29 @@ export class PostProcessingPipeline {
     this.composer = new EffectComposer(renderer);
     this.renderPass = new RenderPass(scene, camera);
     this.composer.addPass(this.renderPass);
+
+    if (!isSoftwareGl) {
+      try {
+        const gtao = new GTAOPass(
+          scene,
+          camera,
+          Math.max(1, Math.floor(this.width * 0.75)),
+          Math.max(1, Math.floor(this.height * 0.75))
+        );
+        gtao.updateGtaoMaterial({
+          radius: 1.85,
+          distanceExponent: 1.5,
+          thickness: 2.2,
+          samples: 8,
+        });
+        gtao.output = GTAOPass.OUTPUT.Denoise;
+        gtao.blendIntensity = 0.62;
+        this.gtaoPass = gtao;
+        this.composer.addPass(gtao);
+      } catch {
+        this.gtaoPass = null;
+      }
+    }
 
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(Math.max(1, Math.floor(this.width / 2)), Math.max(1, Math.floor(this.height / 2))),
@@ -235,14 +308,17 @@ export class PostProcessingPipeline {
     let targetRatio = 1;
     if (tier === 'performance') {
       targetRatio = Math.min(dpr, 1.0);
+      if (this.gtaoPass) this.gtaoPass.enabled = false;
       this.bloomPass.enabled = false;
       this.fxaaPass.enabled = false;
     } else if (tier === 'balanced') {
       targetRatio = Math.min(dpr, 1.35);
+      if (this.gtaoPass) this.gtaoPass.enabled = false;
       this.bloomPass.enabled = true;
       this.fxaaPass.enabled = true;
     } else {
       targetRatio = Math.min(dpr, 1.85);
+      if (this.gtaoPass) this.gtaoPass.enabled = true;
       this.bloomPass.enabled = true;
       this.fxaaPass.enabled = true;
     }
@@ -270,6 +346,12 @@ export class PostProcessingPipeline {
     this.renderer.setSize(this.width, this.height);
     if (!this.isSoftwareGl) {
       this.composer.setSize(this.width, this.height);
+      if (this.gtaoPass) {
+        this.gtaoPass.setSize(
+          Math.max(1, Math.floor(this.width * 0.75)),
+          Math.max(1, Math.floor(this.height * 0.75))
+        );
+      }
       this.bloomPass.resolution.set(
         Math.max(1, Math.floor(this.width / 2)),
         Math.max(1, Math.floor(this.height / 2))
@@ -364,11 +446,17 @@ export class PostProcessingPipeline {
     u.uTime.value = this.elapsedTime;
     u.uDroneReconMix.value = params.droneReconActive ? 1.0 : 0.0;
     u.uLightningFlash.value = params.lightningFlash ?? 0;
+    if (params.sunScreenPos) {
+      u.uSunScreenPos.value.copy(params.sunScreenPos);
+    }
+    u.uSunShaftStrength.value = params.sunShaftStrength ?? 0;
+    u.uWetness.value = params.wetnessFactor ?? 0;
 
     this.composer.render();
   }
 
   public dispose(): void {
+    this.gtaoPass?.dispose();
     this.bloomPass.dispose();
     this.gradePass.dispose();
     this.fxaaPass.dispose();
