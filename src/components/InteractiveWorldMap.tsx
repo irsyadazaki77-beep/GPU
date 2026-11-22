@@ -371,12 +371,19 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
       ctx.arc(originX, originY + 32 * scale, 8.5 * scale, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Elevated Toll Road (Tol Layang Simpang Semanggi z = +80)
+      // Elevated Toll Road (Tol Layang Simpang Semanggi z = +80) & MRT Elevated Track (x = -13.6)
       ctx.strokeStyle = 'rgba(245, 158, 11, 0.65)';
       ctx.lineWidth = Math.max(2.5, 3.2 * zoom);
       ctx.beginPath();
       ctx.moveTo(originX - 68 * scale, originY + 80 * scale);
       ctx.lineTo(originX + 68 * scale, originY + 80 * scale);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.52)';
+      ctx.lineWidth = Math.max(1.5, 2.0 * zoom);
+      ctx.beginPath();
+      ctx.moveTo(originX - 13.6 * scale, originY - 20 * scale);
+      ctx.lineTo(originX - 13.6 * scale, originY + 122 * scale);
       ctx.stroke();
 
       // Monas Central Plaza

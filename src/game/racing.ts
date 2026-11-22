@@ -429,10 +429,10 @@ export function generateRoadsideSpawnLayout(
   const halteCandidates: Omit<TransJakartaHalteSpawn, 'y'>[] = [
     { id: 'halte_bundaran_hi', stationName: 'HALTE BUNDARAN HI', corridorCode: 'K1', routeSummary: 'BLOK M  <->  KOTA', x: -9.65, z: 43.2, rotY: 0 },
     { id: 'halte_dukuh_atas', stationName: 'HALTE DUKUH ATAS', corridorCode: 'K1', routeSummary: 'MONAS  <->  SENAYAN', x: 9.65, z: 117.2, rotY: Math.PI },
-    { id: 'halte_blok_m', stationName: 'HALTE BLOK M', corridorCode: 'K1', routeSummary: 'BLOK M  <->  HARMONI', x: -9.65, z: 91.5, rotY: 0 },
+    { id: 'halte_blok_m', stationName: 'HALTE BLOK M', corridorCode: 'K1', routeSummary: 'BLOK M  <->  HARMONI', x: 9.65, z: 92.0, rotY: Math.PI },
     { id: 'halte_karet_sudirman', stationName: 'HALTE KARET SUDIRMAN', corridorCode: 'K1', routeSummary: 'SUDIRMAN  <->  MELAWAI', x: 9.65, z: 68.8, rotY: Math.PI },
     { id: 'halte_tanah_abang', stationName: 'HALTE TANAH ABANG', corridorCode: 'K8', routeSummary: 'HARMONI  <->  LEBAK BULUS', x: -73.6, z: 9.65, rotY: Math.PI / 2 },
-    { id: 'halte_kota_tua', stationName: 'HALTE KOTA TUA', corridorCode: 'K12', routeSummary: 'KOTA  <->  TANJUNG PRIOK', x: -9.65, z: -90, rotY: 0 },
+    { id: 'halte_kota_tua', stationName: 'HALTE KOTA TUA', corridorCode: 'K12', routeSummary: 'KOTA  <->  TANJUNG PRIOK', x: -9.65, z: -49.0, rotY: 0 },
     { id: 'halte_glodok_harco', stationName: 'HALTE GLODOK HARCO', corridorCode: 'K1', routeSummary: 'KOTA TUA  <->  BLOK M', x: 50, z: 9.65, rotY: Math.PI / 2 },
   ];
 
@@ -450,7 +450,7 @@ export function generateRoadsideSpawnLayout(
     { id: 'toll_sudirman_northbound', variant: 'cantilever', theme: 'green_arterial', topText: 'TOL DALAM KOTA ↑', bottomText: 'SEMANGGI · CAWANG · PRIOK', badgeText: 'TOL', x: -7.75, z: 45.5, rotY: 0 },
     { id: 'toll_sudirman_southbound', variant: 'cantilever', theme: 'green_arterial', topText: 'BLOK M · SENAYAN GBK ↑', bottomText: 'JALUR PROTOKOL SELATAN', badgeText: 'JKT', x: 7.75, z: 66.5, rotY: Math.PI },
     { id: 'toll_thamrin_southbound', variant: 'cantilever', theme: 'green_arterial', topText: 'TOL SEMANGGI · MONAS ↑', bottomText: 'CAWANG · HALIM · BLOK M', badgeText: 'TOL', x: 7.75, z: -44.5, rotY: Math.PI },
-    { id: 'toll_thamrin_northbound', variant: 'cantilever', theme: 'blue_toll', topText: 'SCBD ←   PRIOK →', bottomText: 'TOL BANDARA SOETTA ↑', badgeText: 'TOL', x: -7.75, z: -80.5, rotY: 0 },
+    { id: 'toll_thamrin_northbound', variant: 'cantilever', theme: 'blue_toll', topText: 'SCBD ←   PRIOK →', bottomText: 'TOL BANDARA SOETTA ↑', badgeText: 'TOL', x: -7.75, z: -48.5, rotY: 0 },
     { id: 'toll_ramp_semanggi_west', variant: 'twin_post', theme: 'blue_toll', topText: 'GERBANG TOL SEMANGGI', bottomText: 'e-TOLL · TOL LAYANG →', badgeText: 'TOL', x: -64.5, z: 74.2, rotY: -Math.PI / 2 },
     { id: 'toll_ramp_kemayoran_east', variant: 'twin_post', theme: 'blue_toll', topText: 'TOL LAYANG SEMANGGI', bottomText: '← SCBD · SENAYAN · PIK 2', badgeText: 'TOL', x: 64.5, z: 85.8, rotY: Math.PI / 2 },
     { id: 'toll_ew_west_approach', variant: 'cantilever', theme: 'green_arterial', topText: 'MONAS · SUDIRMAN ↑', bottomText: 'AKSES TOL DALAM KOTA 200m', badgeText: 'TOL', x: -48.5, z: 7.75, rotY: -Math.PI / 2 },
@@ -526,10 +526,10 @@ export function generateRoadsideSpawnLayout(
   }
 
   const tollShoulderCandidates: { x: number; z: number; rotY: number; kind: TrafficSignKind }[] = [
-    { x: -58, z: 74.5, rotY: -Math.PI / 2, kind: 'batas_kecepatan_60' },
-    { x: -45, z: 74.5, rotY: -Math.PI / 2, kind: 'arah_wajib_lurus' },
-    { x: 58, z: 85.5, rotY: Math.PI / 2, kind: 'batas_kecepatan_60' },
-    { x: 45, z: 85.5, rotY: Math.PI / 2, kind: 'arah_wajib_lurus' },
+    { x: -58, z: 74.1, rotY: -Math.PI / 2, kind: 'batas_kecepatan_60' },
+    { x: -45, z: 74.1, rotY: -Math.PI / 2, kind: 'arah_wajib_lurus' },
+    { x: 58, z: 85.9, rotY: Math.PI / 2, kind: 'batas_kecepatan_60' },
+    { x: 45, z: 85.9, rotY: Math.PI / 2, kind: 'arah_wajib_lurus' },
   ];
   for (const ts of tollShoulderCandidates) {
     if (isRoadsideSpotClear(ts.x, ts.z, 0.55, 0.55, occupied)) {

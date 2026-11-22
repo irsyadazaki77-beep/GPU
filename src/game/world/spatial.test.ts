@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TRAFFIC_ROUTES, stepTrafficVehicleAI } from '../racing';
+import {
+  TRAFFIC_ROUTES,
+  generateRoadsideSpawnLayout,
+  stepTrafficVehicleAI,
+} from '../racing';
+import { ENTERABLE_INTERIORS } from '../heists';
+import { STORY_MISSIONS } from '../missionsData';
+import { STUNT_RAMPS_CATALOG } from '../wave2Systems';
+import { MRT_TRACK_X } from '../grandPlan5Systems';
 import { CITY_BUILDINGS, WORLD_MAX_BOUND } from './bounds';
 import {
   SpatialHashGrid,
@@ -104,10 +112,10 @@ test('resolveCameraWallPullIn pulls camera boom in front of obstructing building
   assert.equal(clearCam.x, 0);
   assert.equal(clearCam.z, 35.4);
 
-  // Obstructed boom reaching behind Wisma Nabilo (-18, 56, width 13, depth 13)
-  const blockedCam = resolveCameraWallPullIn(-10, 56, -24, 4.5, 56, grid);
+  // Obstructed boom reaching behind Wisma Nabilo (-20.5, 56, width 10, depth 13)
+  const blockedCam = resolveCameraWallPullIn(-10, 56, -26, 4.5, 56, grid);
   assert.equal(blockedCam.pulledIn, true);
-  assert.equal(blockedCam.x > -14, true);
+  assert.equal(blockedCam.x > -15.6, true);
   assert.equal(blockedCam.y >= 4.5, true);
 });
 
@@ -143,4 +151,66 @@ test('stepTrafficVehicleAI uses provided buildingGrid to keep ground AI vehicles
   );
 
   assert.equal(next.x <= bldg.x - bldg.width * 0.5, true);
+});
+
+test('city layout keeps buildings clear of roads & MRT viaduct, and keeps portals/ramps/haltes/signs unobstructed', () => {
+  for (const b of CITY_BUILDINGS) {
+    if (b.id !== 'monas_monument') {
+      for (const sx of [-1, 0, 1]) {
+        for (const sz of [-1, 0, 1]) {
+          const px = b.x + sx * (b.width * 0.48);
+          const pz = b.z + sz * (b.depth * 0.48);
+          assert.equal(
+            isOnRoadway(px, pz),
+            false,
+            `Building ${b.id} overlaps roadway at (${px}, ${pz})`
+          );
+        }
+      }
+      if (b.z + b.depth * 0.5 >= -20 && b.z - b.depth * 0.5 <= 125) {
+        assert.equal(
+          Math.abs(b.x - MRT_TRACK_X) >= b.width * 0.5 + 1.4,
+          true,
+          `Building ${b.id} intersects MRT viaduct at x=${MRT_TRACK_X}`
+        );
+      }
+    }
+  }
+
+  for (const p of ENTERABLE_INTERIORS) {
+    assert.equal(isOnRoadway(p.portalX, p.portalZ), false, `Portal ${p.id} is on roadway`);
+    for (const b of CITY_BUILDINGS) {
+      const inside =
+        Math.abs(p.portalX - b.x) < b.width * 0.5 + 0.5 &&
+        Math.abs(p.portalZ - b.z) < b.depth * 0.5 + 0.5;
+      assert.equal(inside, false, `Portal ${p.id} is inside building ${b.id}`);
+    }
+  }
+
+  for (const r of STUNT_RAMPS_CATALOG) {
+    for (const b of CITY_BUILDINGS) {
+      const hits =
+        Math.abs(r.x - b.x) < b.width * 0.5 + 2.0 &&
+        Math.abs(r.z - b.z) < b.depth * 0.5 + 2.0;
+      assert.equal(hits, false, `Ramp ${r.id} hits building ${b.id}`);
+    }
+  }
+
+  for (const m of STORY_MISSIONS) {
+    assert.ok(m.markerZ > -72, `Mission ${m.id} marker is in water`);
+    for (const b of CITY_BUILDINGS) {
+      const inside =
+        Math.abs(m.markerX - b.x) < b.width * 0.5 &&
+        Math.abs(m.markerZ - b.z) < b.depth * 0.5;
+      assert.equal(inside, false, `Mission ${m.id} marker is inside ${b.id}`);
+    }
+  }
+
+  const layout = generateRoadsideSpawnLayout();
+  for (const h of layout.transJakartaHaltes) {
+    assert.ok(h.z > -72, `Halte ${h.id} is in Jakarta Bay water`);
+  }
+  for (const s of layout.trafficSigns) {
+    assert.equal(isOnRoadway(s.x, s.z), false, `Traffic sign ${s.id} is on roadway`);
+  }
 });

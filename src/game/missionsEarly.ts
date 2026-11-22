@@ -9,7 +9,7 @@ export const STORY_MISSIONS_EARLY: StoryMission[] = [
     giverName: 'Bang Jaka "Kopi Hitam"',
     giverRole: 'Informan Senior Medan Merdeka',
     locationName: 'Plaza Selatan Monas',
-    markerX: -12,
+    markerX: -11.5,
     markerZ: 16,
     briefing:
       'Selamat datang di San Nabilo, Jakarta. Sebuah koper berisi data transaksi gelap proyek reklamasi baru saja jatuh di tangan kurir yang salah. Tiga pihak menawarimu jalan masuk ke lingkaran kekuasaan kota ini. Siapa yang kau bela?',

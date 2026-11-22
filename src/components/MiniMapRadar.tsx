@@ -154,12 +154,19 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
       );
       ctx.fill();
 
-      // 3. Tol Layang elevated highway
+      // 3. Tol Layang elevated highway (Simpang Susun Semanggi z = +80) & MRT Viaduct (x = -13.6)
       ctx.strokeStyle = '#d97706';
       ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.moveTo(cx + (-92 - px) * zoom, cy + (24 - pz) * zoom);
-      ctx.lineTo(cx + (92 - px) * zoom, cy + (24 - pz) * zoom);
+      ctx.moveTo(cx + (-68 - px) * zoom, cy + (80 - pz) * zoom);
+      ctx.lineTo(cx + (68 - px) * zoom, cy + (80 - pz) * zoom);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx + (-13.6 - px) * zoom, cy + (-20 - pz) * zoom);
+      ctx.lineTo(cx + (-13.6 - px) * zoom, cy + (122 - pz) * zoom);
       ctx.stroke();
 
       // 4. Faction Territory Rings across districts
@@ -174,7 +181,7 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
             : 'rgba(34, 197, 94, 0.22)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(dx, dz, 18 * zoom, 0, Math.PI * 2);
+        ctx.arc(dx, dz, dist.radius * 0.72 * zoom, 0, Math.PI * 2);
         ctx.stroke();
       }
 
