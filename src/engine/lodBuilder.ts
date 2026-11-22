@@ -40,25 +40,29 @@ export function buildThreeTierBuildingLOD(
   medGroup.add(bodyMesh);
 
   const crownGeo = new THREE.BoxGeometry(
-    spec.width * 0.82,
-    Math.min(2.2, spec.height * 0.12),
-    spec.depth * 0.82
+    spec.width * 0.74,
+    spec.style === 'skyscraper' ? spec.height * 0.28 : Math.min(2.6, spec.height * 0.18),
+    spec.depth * 0.74
   );
-  crownGeo.translate(0, spec.height + 0.5, 0);
+  crownGeo.translate(
+    0,
+    spec.style === 'skyscraper' ? spec.height * 0.86 : spec.height + 0.5,
+    0
+  );
   const crownMat = new THREE.MeshStandardMaterial({
     color: spec.accentColor,
-    roughness: 0.52,
-    metalness: 0.32,
+    roughness: 0.48,
+    metalness: 0.36,
   });
   medGroup.add(new THREE.Mesh(crownGeo, crownMat));
-  lod.addLevel(medGroup, 130);
+  lod.addLevel(medGroup, 145);
 
-  // Low-Detail Silhouette Tier (distance >= 210m): Single hull mesh
+  // Low-Detail Silhouette Tier (distance >= 225m): Single hull mesh
   const lowMat = new THREE.MeshBasicMaterial({
     color: spec.primaryColor,
   });
   const lowMesh = new THREE.Mesh(bodyGeo, lowMat);
-  lod.addLevel(lowMesh, 210);
+  lod.addLevel(lowMesh, 225);
 
   lod.frustumCulled = true;
   return lod;

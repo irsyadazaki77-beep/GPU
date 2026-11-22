@@ -2,13 +2,14 @@ import * as THREE from 'three';
 import {
   BuildingFootprint,
   CITY_BUILDINGS,
+  ENTERABLE_INTERIORS,
   JAKARTA_FLOOD_ZONES,
   NUSANTARA_PACKAGES,
   STUNT_RAMPS_CATALOG,
   SpatialHashGrid,
   TrafficSignalPhase,
+  WARUNG_STALL_LOCATIONS,
   createBuildingSpatialGrid,
-  isNearBuilding,
   isOnRoadway,
 } from '../game/rules';
 import {
@@ -131,7 +132,16 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.88, 0.96, 1.0), clamp(foamLine *
   jettyDeck.position.set(-28, 0.35, -75);
   group.add(jettyDeck);
 
-  // 2. Tanjung Priok Port Shipping Container Stacks & Gantry Crane Yard
+  // 2. Tanjung Priok Waterfront Pier & Cargo Container Stacks
+  const dockMat = new THREE.MeshStandardMaterial({
+    color: 0x334155,
+    roughness: 0.85,
+    metalness: 0.14,
+  });
+  const dockSlab = new THREE.Mesh(new THREE.BoxGeometry(16, 0.7, 14), dockMat);
+  dockSlab.position.set(78, 0.35, -78);
+  group.add(dockSlab);
+
   const containerColors = [0x0284c7, 0xea580c, 0x16a34a, 0xdc2626];
   const containerGeo = new THREE.BoxGeometry(2.6, 2.5, 6.2);
   for (let row = 0; row < 3; row++) {
@@ -142,12 +152,12 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.88, 0.96, 1.0), clamp(foamLine *
         metalness: 0.32,
       });
       const box = new THREE.Mesh(containerGeo, cMat);
-      box.position.set(46 + row * 3.2, 1.25 + tier * 2.55, -68);
+      box.position.set(74 + row * 3.2, 1.95 + tier * 2.55, -78);
       group.add(box);
     }
   }
 
-  // 3. Semanggi Elevated Tollway Cloverleaf Neon Arch Portals
+  // 3. Semanggi Elevated Tollway Cloverleaf Neon Arch Portals (z = +80)
   const archMat = new THREE.MeshStandardMaterial({
     color: 0x0f172a,
     emissive: 0x38bdf8,
@@ -160,7 +170,7 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.88, 0.96, 1.0), clamp(foamLine *
       new THREE.BoxGeometry(0.65, 0.55, 9.4),
       archMat
     );
-    archBeam.position.set(ax, 10.6, -26);
+    archBeam.position.set(ax, 10.6, 80);
     group.add(archBeam);
   }
 
@@ -633,7 +643,14 @@ if (uWetness > 0.04) {
     );
     this.rootGroup.add(this.roadsideSystem.group);
 
-    this.rootGroup.add(this.buildOuterMegapolitanBlocks(maxAnisotropy));
+    const blockResult = this.buildOuterMegapolitanBlocks(maxAnisotropy);
+    this.rootGroup.add(blockResult.group);
+    if (blockResult.colliders.length > 0) {
+      this.buildingGrid = createBuildingSpatialGrid(
+        [...CITY_BUILDINGS, ...blockResult.colliders],
+        18
+      );
+    }
 
     scene.add(this.rootGroup);
   }
@@ -1123,48 +1140,79 @@ if (uWetness > 0.04) {
     this.streetscape.setTrafficSignalPhase(phase);
   }
 
-  private buildOuterMegapolitanBlocks(maxAnisotropy: number): THREE.Group {
+  private buildOuterMegapolitanBlocks(maxAnisotropy: number): {
+    group: THREE.Group;
+    colliders: BuildingFootprint[];
+  } {
     const group = new THREE.Group();
     group.name = 'OrganizedJakartaCityBlocks';
+    const colliders: BuildingFootprint[] = [];
 
-    // Curated urban block centers neatly framed between real road arteries:
-    // Roads N-S: -208, -128, -84, -32, 0, 32, 84, 128, 208
-    // Roads E-W: -66, -32, 0, 32, 80, 128, 208
+    // High-density curated urban block bands neatly framed between real road arteries:
+    // N-S roads: -208, -128, -84, -32, 0, 32, 84, 128, 208
+    // E-W roads: -66, -32, 0, 32, 80, 128, 208
     const xBlockBands: [number, number][] = [
-      [-186, 16],
-      [-150, 16],
-      [-106, 15],
-      [-64, 14],
+      [-190, 14],
+      [-168, 15],
+      [-146, 14],
+      [-114, 11],
+      [-98, 11],
+      [-68, 13],
       [-48, 13],
       [-18, 12],
       [18, 12],
       [48, 13],
-      [64, 14],
-      [106, 15],
-      [150, 16],
-      [186, 16],
+      [68, 13],
+      [98, 11],
+      [114, 11],
+      [146, 14],
+      [168, 15],
+      [190, 14],
     ];
     const zBlockBands: [number, number][] = [
-      [-49, 13],
+      [-49, 14],
       [-17, 12],
       [17, 12],
-      [56, 15],
-      [104, 14],
-      [148, 15],
-      [182, 15],
+      [47, 12],
+      [64, 12],
+      [95, 12],
+      [112, 12],
+      [146, 14],
+      [168, 14],
+      [190, 14],
     ];
 
     const plinthPlacements: { x: number; z: number; w: number; d: number }[] = [];
-    const blockPlacements: {
+    const parkTurfPlacements: { x: number; z: number; w: number; d: number }[] = [];
+    const cbdPlacements: {
       x: number;
       z: number;
       w: number;
-      h: number;
       d: number;
-      podiumW: number;
-      podiumD: number;
+      h: number;
       podiumH: number;
+      upperRatio: number;
       color: number;
+      accent: number;
+    }[] = [];
+    const rukoPlacements: {
+      x: number;
+      z: number;
+      w: number;
+      d: number;
+      h: number;
+      color: number;
+      roofColor: number;
+      hasToren: boolean;
+    }[] = [];
+    const indPlacements: {
+      x: number;
+      z: number;
+      w: number;
+      d: number;
+      h: number;
+      color: number;
+      hasSilo: boolean;
     }[] = [];
     const treePlacements: {
       x: number;
@@ -1175,16 +1223,18 @@ if (uWetness > 0.04) {
     }[] = [];
 
     const reservedLandmarks: { x: number; z: number; r: number }[] = [
-      { x: 0, z: 0, r: 28 }, // Monas Medan Merdeka Park
-      { x: 0, z: 32, r: 16 }, // Bundaran HI
-      { x: 20, z: -17, r: 17 }, // Masjid Istiqlal courtyard
-      { x: -58, z: 56, r: 22 }, // GBK Senayan Stadium Park
-      { x: 106, z: -49, r: 16 }, // Priok Container Yard
+      { x: 0, z: 0, r: 28 },
+      { x: 0, z: 32, r: 17 },
+      { x: 20, z: -17, r: 17 },
+      { x: -58, z: 56, r: 22 },
+      { x: 106, z: -49, r: 17 },
     ];
 
-    const cbdPalette = [0x94a3b8, 0xcbd5e1, 0x64748b, 0xbfdbfe];
-    const heritagePalette = [0xe7e5e4, 0xd6d3d1, 0xcbd5e1, 0xd9c7b8];
-    const industrialPalette = [0x94a3b8, 0x64748b, 0x9ca3af];
+    const cbdPalette = [0x94a3b8, 0xcbd5e1, 0x64748b, 0xbfdbfe, 0x7dd3fc];
+    const cbdAccentPalette = [0x38bdf8, 0xf59e0b, 0x2dd4bf, 0xa855f7];
+    const rukoPalette = [0xf5ebe0, 0xe7e5e4, 0xfde68a, 0xd6d3d1, 0xcbd5e1];
+    const rukoRoofPalette = [0x9a3412, 0x7c2d12, 0x334155, 0x7f1d1d];
+    const industrialPalette = [0x94a3b8, 0x64748b, 0x475569];
     const treePalette = [0x15803d, 0x166534, 0x1e5631, 0x1b4332];
 
     const hashUnit = (gx: number, gz: number): number => {
@@ -1192,103 +1242,188 @@ if (uWetness > 0.04) {
       return s - Math.floor(s);
     };
 
+    const hitsHeroOrActivity = (bx: number, bz: number, hw: number, hd: number): boolean => {
+      for (const lm of reservedLandmarks) {
+        if (Math.hypot(bx - lm.x, bz - lm.z) < lm.r + Math.max(hw, hd) * 0.5) {
+          return true;
+        }
+      }
+      for (const b of CITY_BUILDINGS) {
+        if (
+          Math.abs(bx - b.x) < b.width * 0.5 + hw + 1.8 &&
+          Math.abs(bz - b.z) < b.depth * 0.5 + hd + 1.8
+        ) {
+          return true;
+        }
+      }
+      for (const p of ENTERABLE_INTERIORS) {
+        if (Math.abs(bx - p.portalX) < hw + 4.5 && Math.abs(bz - p.portalZ) < hd + 4.5) {
+          return true;
+        }
+      }
+      for (const r of STUNT_RAMPS_CATALOG) {
+        if (Math.abs(bx - r.x) < hw + 5.5 && Math.abs(bz - r.z) < hd + 6.5) {
+          return true;
+        }
+      }
+      for (const pkg of NUSANTARA_PACKAGES) {
+        if (Math.abs(bx - pkg.x) < hw + 3.2 && Math.abs(bz - pkg.z) < hd + 3.2) {
+          return true;
+        }
+      }
+      for (const [wx, wz] of WARUNG_STALL_LOCATIONS) {
+        if (Math.abs(bx - wx) < hw + 4.0 && Math.abs(bz - wz) < hd + 4.0) {
+          return true;
+        }
+      }
+      return false;
+    };
+
     for (const [bx, slotW] of xBlockBands) {
       for (const [bz, slotD] of zBlockBands) {
         if (isOnRoadway(bx, bz)) continue;
-        // Every organized urban block receives a clean concrete sidewalk plinth pad
-        plinthPlacements.push({
-          x: bx,
-          z: bz,
-          w: slotW + 2.6,
-          d: slotD + 2.6,
-        });
+        const plinthW = slotW + 2.0;
+        const plinthD = slotD + 2.0;
+        plinthPlacements.push({ x: bx, z: bz, w: plinthW, d: plinthD });
 
-        let inLandmark = false;
-        for (const lm of reservedLandmarks) {
-          if (Math.hypot(bx - lm.x, bz - lm.z) < lm.r) {
-            inLandmark = true;
-            break;
-          }
-        }
-        if (inLandmark || isNearBuilding(bx, bz, 12.5)) {
+        if (hitsHeroOrActivity(bx, bz, slotW * 0.5, slotD * 0.5)) {
           continue;
         }
 
         const rnd = hashUnit(bx, bz);
-        // Reserve ~22% of clean blocks as manicured pocket parks with symmetrical trees
-        if (rnd < 0.22) {
+        const rnd2 = hashUnit(bz * 1.7, bx * 0.9);
+        // Reserve ~14% of clean blocks as manicured pocket parks with green turf & 4 symmetrical trees
+        if (rnd < 0.14) {
+          parkTurfPlacements.push({ x: bx, z: bz, w: slotW - 1.2, d: slotD - 1.2 });
           for (const [ox, oz] of [
-            [-3.5, -3.5],
-            [3.5, -3.5],
-            [-3.5, 3.5],
-            [3.5, 3.5],
+            [-slotW * 0.28, -slotD * 0.28],
+            [slotW * 0.28, -slotD * 0.28],
+            [-slotW * 0.28, slotD * 0.28],
+            [slotW * 0.28, slotD * 0.28],
           ]) {
             treePlacements.push({
               x: bx + ox,
               z: bz + oz,
-              trunkH: 2.0 + hashUnit(bx + ox, bz + oz) * 0.9,
-              crownR: 2.2 + hashUnit(bz + oz, bx + ox) * 0.6,
-              color: treePalette[Math.floor(rnd * 23) % treePalette.length],
+              trunkH: 2.2 + hashUnit(bx + ox, bz + oz) * 1.1,
+              crownR: 2.3 + hashUnit(bz + oz, bx + ox) * 0.65,
+              color: treePalette[Math.floor((rnd + rnd2) * 17) % treePalette.length],
             });
           }
           continue;
         }
 
         const isSudirmanScbd =
-          Math.abs(bx) <= 72 && bz >= 12 && bz <= 112;
-        const isNorthHeritage = bz <= -36 && Math.abs(bx) <= 72;
-        const isIndustrial = bz <= -36 && Math.abs(bx) > 72;
+          (Math.abs(bx) <= 78 && bz >= 12 && bz <= 116) ||
+          (bx <= -140 && bz >= 140);
+        const isIndustrial =
+          (bz <= -36 && Math.abs(bx) >= 92) ||
+          (bx >= 140 && bz >= 140);
 
-        const w = Math.max(8, Math.round(slotW * (0.68 + rnd * 0.16)));
-        const d = Math.max(8, Math.round(slotD * (0.68 + hashUnit(bz, bx) * 0.16)));
-        const podiumH = isSudirmanScbd ? 4.8 : 3.4;
-        const h = isSudirmanScbd
-          ? 24 + Math.floor(rnd * 20)
-          : isNorthHeritage
-          ? 11 + Math.floor(rnd * 6)
-          : isIndustrial
-          ? 12 + Math.floor(rnd * 8)
-          : 15 + Math.floor(rnd * 14);
-
-        const palette = isSudirmanScbd
-          ? cbdPalette
-          : isIndustrial
-          ? industrialPalette
-          : heritagePalette;
-
-        blockPlacements.push({
-          x: bx,
-          z: bz,
-          w,
-          h,
-          d,
-          podiumW: w + 1.8,
-          podiumD: d + 1.8,
-          podiumH,
-          color: palette[Math.floor(rnd * 19) % palette.length],
-        });
+        if (isSudirmanScbd) {
+          const w = Math.max(8, Math.round(slotW * (0.76 + rnd * 0.14)));
+          const d = Math.max(8, Math.round(slotD * (0.76 + rnd2 * 0.14)));
+          const podiumH = 4.6 + Math.floor(rnd2 * 2);
+          const h = 24 + Math.floor(rnd * 24);
+          cbdPlacements.push({
+            x: bx,
+            z: bz,
+            w,
+            d,
+            h,
+            podiumH,
+            upperRatio: 0.42 + rnd2 * 0.18,
+            color: cbdPalette[Math.floor(rnd * 19) % cbdPalette.length],
+            accent: cbdAccentPalette[Math.floor(rnd2 * 13) % cbdAccentPalette.length],
+          });
+          colliders.push({
+            id: `blk_cbd_${bx}_${bz}`,
+            name: 'Menara Komersial Jakarta',
+            x: bx,
+            z: bz,
+            width: w + 1.2,
+            depth: d + 1.2,
+            height: podiumH + h,
+            style: 'skyscraper',
+            primaryColor: 0x1e293b,
+            accentColor: 0x38bdf8,
+          });
+        } else if (isIndustrial) {
+          const w = Math.max(8, Math.round(slotW * 0.84));
+          const d = Math.max(8, Math.round(slotD * 0.82));
+          const h = 8 + Math.floor(rnd * 6);
+          indPlacements.push({
+            x: bx,
+            z: bz,
+            w,
+            d,
+            h,
+            color: industrialPalette[Math.floor(rnd * 11) % industrialPalette.length],
+            hasSilo: rnd2 > 0.42,
+          });
+          colliders.push({
+            id: `blk_ind_${bx}_${bz}`,
+            name: 'Gudang & Logistik',
+            x: bx,
+            z: bz,
+            width: w,
+            depth: d,
+            height: h,
+            style: 'port_crane',
+            primaryColor: 0x475569,
+            accentColor: 0xf97316,
+          });
+        } else {
+          // Jakarta Ruko & Residential Shophouses: split each lot into 2 adjoining stepped shophouse units!
+          const bayW = Math.max(4.4, (slotW - 1.2) * 0.48);
+          const bayD = Math.max(7.2, slotD * (0.78 + rnd2 * 0.1));
+          const xOffset = (slotW - 1.2) * 0.26;
+          for (let side = 0; side < 2; side++) {
+            const subX = bx + (side === 0 ? -xOffset : xOffset);
+            const subSeed = side === 0 ? rnd : rnd2;
+            const h = 7.5 + Math.floor(subSeed * 6.5) + (side === 1 ? 1.5 : 0);
+            rukoPlacements.push({
+              x: subX,
+              z: bz,
+              w: bayW,
+              d: bayD,
+              h,
+              color: rukoPalette[Math.floor((subSeed + side * 0.37) * 19) % rukoPalette.length],
+              roofColor:
+                rukoRoofPalette[Math.floor((rnd + rnd2 + side * 0.5) * 17) % rukoRoofPalette.length],
+              hasToren: subSeed > 0.38,
+            });
+          }
+          colliders.push({
+            id: `blk_ruko_${bx}_${bz}`,
+            name: 'Kawasan Ruko & Hunian',
+            x: bx,
+            z: bz,
+            width: slotW - 1.0,
+            depth: bayD,
+            height: 12,
+            style: 'ruko',
+            primaryColor: 0xd6d3d1,
+            accentColor: 0xf59e0b,
+          });
+        }
       }
     }
 
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
+    const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 
     if (plinthPlacements.length > 0) {
-      const plinthGeo = new THREE.BoxGeometry(1, 0.16, 1);
       const plinthMat = new THREE.MeshStandardMaterial({
-        color: 0x334155,
+        color: 0x2b3445,
         roughness: 0.92,
         metalness: 0.04,
         envMapIntensity: 0.1,
       });
-      const plinthInst = new THREE.InstancedMesh(
-        plinthGeo,
-        plinthMat,
-        plinthPlacements.length
-      );
+      const plinthInst = new THREE.InstancedMesh(boxGeo, plinthMat, plinthPlacements.length);
       plinthPlacements.forEach((p, i) => {
         dummy.position.set(p.x, 0.08, p.z);
-        dummy.scale.set(p.w, 1, p.d);
+        dummy.scale.set(p.w, 0.16, p.d);
         dummy.rotation.set(0, 0, 0);
         dummy.updateMatrix();
         plinthInst.setMatrixAt(i, dummy.matrix);
@@ -1298,78 +1433,279 @@ if (uWetness > 0.04) {
       group.add(plinthInst);
     }
 
-    if (blockPlacements.length > 0) {
-      const outerFacade = proceduralTextures.getBuildingFacadeTextures(
+    if (parkTurfPlacements.length > 0) {
+      const turfMat = new THREE.MeshStandardMaterial({
+        color: 0x14532d,
+        roughness: 0.95,
+        metalness: 0.01,
+      });
+      const turfInst = new THREE.InstancedMesh(boxGeo, turfMat, parkTurfPlacements.length);
+      parkTurfPlacements.forEach((p, i) => {
+        dummy.position.set(p.x, 0.18, p.z);
+        dummy.scale.set(p.w, 0.08, p.d);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        turfInst.setMatrixAt(i, dummy.matrix);
+      });
+      turfInst.instanceMatrix.needsUpdate = true;
+      turfInst.receiveShadow = true;
+      group.add(turfInst);
+    }
+
+    // 1. CBD Glass Skyscrapers (Podium + Atrium Glass + Stepped Lower/Upper Tower + Glowing Crown + Spire)
+    if (cbdPlacements.length > 0) {
+      const skyFacade = proceduralTextures.getBuildingFacadeTextures(
         0x334155,
         0x38bdf8,
         'skyscraper',
         maxAnisotropy
       );
-      const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-      const boxMat = new THREE.MeshStandardMaterial({
+      const skyMat = new THREE.MeshStandardMaterial({
         color: 0xffffff,
-        map: outerFacade.map,
-        roughnessMap: outerFacade.roughnessMap,
-        emissiveMap: outerFacade.emissiveMap,
+        map: skyFacade.map,
+        roughnessMap: skyFacade.roughnessMap,
+        emissiveMap: skyFacade.emissiveMap,
         emissive: new THREE.Color(0xffffff),
-        emissiveIntensity: 0.12,
-        roughness: 0.68,
-        metalness: 0.24,
+        emissiveIntensity: 0.24,
+        roughness: 0.56,
+        metalness: 0.34,
       });
-      this.buildingEmissiveMats.push(boxMat);
-      const blockInst = new THREE.InstancedMesh(
-        boxGeo,
-        boxMat,
-        blockPlacements.length
-      );
+      this.buildingEmissiveMats.push(skyMat);
 
       const podiumMat = new THREE.MeshStandardMaterial({
         color: 0x1e293b,
         roughness: 0.78,
-        metalness: 0.18,
+        metalness: 0.22,
       });
-      const podiumInst = new THREE.InstancedMesh(
-        boxGeo,
+      const lobbyBandMat = new THREE.MeshStandardMaterial({
+        color: 0xf59e0b,
+        emissive: 0xf59e0b,
+        emissiveIntensity: 0.32,
+        roughness: 0.25,
+        metalness: 0.3,
+      });
+      const crownTrimMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: 0x38bdf8,
+        emissiveIntensity: 0.38,
+        roughness: 0.32,
+        metalness: 0.45,
+      });
+      this.buildingEmissiveMats.push(lobbyBandMat, crownTrimMat);
+
+      const cbdPodiumInst = new THREE.InstancedMesh(boxGeo, podiumMat, cbdPlacements.length);
+      const cbdLobbyInst = new THREE.InstancedMesh(boxGeo, lobbyBandMat, cbdPlacements.length);
+      const cbdLowerInst = new THREE.InstancedMesh(boxGeo, skyMat, cbdPlacements.length);
+      const cbdUpperInst = new THREE.InstancedMesh(boxGeo, skyMat, cbdPlacements.length);
+      const cbdCrownInst = new THREE.InstancedMesh(boxGeo, crownTrimMat, cbdPlacements.length);
+      const cbdSpireInst = new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(0.08, 0.2, 1, 6),
         podiumMat,
-        blockPlacements.length
+        cbdPlacements.length
       );
 
-      const roofGeo = new THREE.BoxGeometry(1, 1, 1);
-      const roofMat = new THREE.MeshStandardMaterial({
-        color: 0x0f172a,
-        roughness: 0.84,
-        metalness: 0.2,
-      });
-      const roofInst = new THREE.InstancedMesh(
-        roofGeo,
-        roofMat,
-        blockPlacements.length
-      );
+      cbdPlacements.forEach((b, i) => {
+        const lowerH = b.h * (1 - b.upperRatio * 0.65);
+        const upperH = Math.max(4, b.h - lowerH);
+        const roofY = b.podiumH + b.h;
 
-      blockPlacements.forEach((b, i) => {
-        dummy.position.set(b.x, b.podiumH * 0.5 + 0.12, b.z);
-        dummy.scale.set(b.podiumW, b.podiumH, b.podiumD);
         dummy.rotation.set(0, 0, 0);
+        dummy.position.set(b.x, b.podiumH * 0.5 + 0.14, b.z);
+        dummy.scale.set(b.w + 1.4, b.podiumH, b.d + 1.4);
         dummy.updateMatrix();
-        podiumInst.setMatrixAt(i, dummy.matrix);
+        cbdPodiumInst.setMatrixAt(i, dummy.matrix);
 
-        dummy.position.set(b.x, b.podiumH + b.h * 0.5, b.z);
-        dummy.scale.set(b.w, b.h, b.d);
+        dummy.position.set(b.x, b.podiumH * 0.52 + 0.14, b.z);
+        dummy.scale.set(b.w + 1.5, b.podiumH * 0.48, b.d + 1.5);
         dummy.updateMatrix();
-        blockInst.setMatrixAt(i, dummy.matrix);
+        cbdLobbyInst.setMatrixAt(i, dummy.matrix);
+
+        dummy.position.set(b.x, b.podiumH + lowerH * 0.5, b.z);
+        dummy.scale.set(b.w, lowerH, b.d);
+        dummy.updateMatrix();
+        cbdLowerInst.setMatrixAt(i, dummy.matrix);
         color.setHex(b.color);
-        blockInst.setColorAt(i, color);
+        cbdLowerInst.setColorAt(i, color);
 
-        dummy.position.set(b.x, b.podiumH + b.h + 0.65, b.z);
-        dummy.scale.set(b.w * 0.65, 1.3, b.d * 0.65);
+        dummy.position.set(b.x, b.podiumH + lowerH + upperH * 0.5, b.z);
+        dummy.scale.set(b.w * 0.76, upperH, b.d * 0.76);
         dummy.updateMatrix();
-        roofInst.setMatrixAt(i, dummy.matrix);
+        cbdUpperInst.setMatrixAt(i, dummy.matrix);
+        cbdUpperInst.setColorAt(i, color);
+
+        dummy.position.set(b.x, roofY + 0.35, b.z);
+        dummy.scale.set(b.w * 0.78, 0.55, b.d * 0.78);
+        dummy.updateMatrix();
+        cbdCrownInst.setMatrixAt(i, dummy.matrix);
+        color.setHex(b.accent);
+        cbdCrownInst.setColorAt(i, color);
+
+        dummy.position.set(b.x, roofY + 2.8, b.z);
+        dummy.scale.set(1, 4.6, 1);
+        dummy.updateMatrix();
+        cbdSpireInst.setMatrixAt(i, dummy.matrix);
       });
-      podiumInst.instanceMatrix.needsUpdate = true;
-      blockInst.instanceMatrix.needsUpdate = true;
-      if (blockInst.instanceColor) blockInst.instanceColor.needsUpdate = true;
-      roofInst.instanceMatrix.needsUpdate = true;
-      group.add(podiumInst, blockInst, roofInst);
+
+      [cbdPodiumInst, cbdLobbyInst, cbdLowerInst, cbdUpperInst, cbdCrownInst, cbdSpireInst].forEach((inst) => {
+        inst.instanceMatrix.needsUpdate = true;
+        if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      });
+      group.add(cbdPodiumInst, cbdLobbyInst, cbdLowerInst, cbdUpperInst, cbdCrownInst, cbdSpireInst);
+    }
+
+    // 2. Jakarta Multi-Bay Ruko & Heritage Shophouses (Step Massing + Shopfront Awning + Pitched Clay Roof + Toren Water Tanks)
+    if (rukoPlacements.length > 0) {
+      const rukoFacade = proceduralTextures.getBuildingFacadeTextures(
+        0xd6d3d1,
+        0xf59e0b,
+        'ruko',
+        maxAnisotropy
+      );
+      const rukoMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        map: rukoFacade.map,
+        roughnessMap: rukoFacade.roughnessMap,
+        emissiveMap: rukoFacade.emissiveMap,
+        emissive: new THREE.Color(0xffffff),
+        emissiveIntensity: 0.2,
+        roughness: 0.78,
+        metalness: 0.08,
+      });
+      this.buildingEmissiveMats.push(rukoMat);
+
+      const roofConeGeo = new THREE.ConeGeometry(0.72, 1, 4);
+      roofConeGeo.rotateY(Math.PI / 4);
+      const roofMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.84,
+        metalness: 0.06,
+      });
+      const awningMat = new THREE.MeshStandardMaterial({
+        color: 0xd97706,
+        roughness: 0.65,
+        metalness: 0.1,
+      });
+      const torenMat = new THREE.MeshStandardMaterial({
+        color: 0xea580c,
+        roughness: 0.44,
+        metalness: 0.08,
+      });
+
+      const rukoBodyInst = new THREE.InstancedMesh(boxGeo, rukoMat, rukoPlacements.length);
+      const rukoAwningInst = new THREE.InstancedMesh(boxGeo, awningMat, rukoPlacements.length);
+      const rukoRoofInst = new THREE.InstancedMesh(roofConeGeo, roofMat, rukoPlacements.length);
+
+      const torenList = rukoPlacements.filter((r) => r.hasToren);
+      const torenInst =
+        torenList.length > 0
+          ? new THREE.InstancedMesh(
+              new THREE.CylinderGeometry(0.45, 0.48, 1.05, 8),
+              torenMat,
+              torenList.length
+            )
+          : null;
+
+      let tIdx = 0;
+      rukoPlacements.forEach((r, i) => {
+        dummy.rotation.set(0, 0, 0);
+        dummy.position.set(r.x, r.h * 0.5 + 0.14, r.z);
+        dummy.scale.set(r.w, r.h, r.d);
+        dummy.updateMatrix();
+        rukoBodyInst.setMatrixAt(i, dummy.matrix);
+        color.setHex(r.color);
+        rukoBodyInst.setColorAt(i, color);
+
+        dummy.position.set(r.x, 2.85, r.z);
+        dummy.scale.set(r.w + 0.35, 0.26, r.d + 1.1);
+        dummy.updateMatrix();
+        rukoAwningInst.setMatrixAt(i, dummy.matrix);
+
+        dummy.position.set(r.x, r.h + 1.05, r.z);
+        dummy.scale.set(r.w * 1.04, 1.85, r.d * 1.04);
+        dummy.updateMatrix();
+        rukoRoofInst.setMatrixAt(i, dummy.matrix);
+        color.setHex(r.roofColor);
+        rukoRoofInst.setColorAt(i, color);
+
+        if (r.hasToren && torenInst) {
+          dummy.position.set(r.x + r.w * 0.22, r.h + 0.65, r.z - r.d * 0.28);
+          dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix();
+          torenInst.setMatrixAt(tIdx++, dummy.matrix);
+        }
+      });
+
+      [rukoBodyInst, rukoAwningInst, rukoRoofInst].forEach((inst) => {
+        inst.instanceMatrix.needsUpdate = true;
+        if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      });
+      group.add(rukoBodyInst, rukoAwningInst, rukoRoofInst);
+      if (torenInst) {
+        torenInst.instanceMatrix.needsUpdate = true;
+        group.add(torenInst);
+      }
+    }
+
+    // 3. Industrial / Port Hangars & Cylindrical Logistics Silos
+    if (indPlacements.length > 0) {
+      const indFacade = proceduralTextures.getBuildingFacadeTextures(
+        0x475569,
+        0xf97316,
+        'port_crane',
+        maxAnisotropy
+      );
+      const indMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        map: indFacade.map,
+        roughnessMap: indFacade.roughnessMap,
+        emissiveMap: indFacade.emissiveMap,
+        emissive: new THREE.Color(0xffffff),
+        emissiveIntensity: 0.16,
+        roughness: 0.72,
+        metalness: 0.28,
+      });
+      this.buildingEmissiveMats.push(indMat);
+      const siloMat = new THREE.MeshStandardMaterial({
+        color: 0xcbd5e1,
+        roughness: 0.45,
+        metalness: 0.42,
+      });
+
+      const indBodyInst = new THREE.InstancedMesh(boxGeo, indMat, indPlacements.length);
+      const siloList = indPlacements.filter((p) => p.hasSilo);
+      const siloInst =
+        siloList.length > 0
+          ? new THREE.InstancedMesh(
+              new THREE.CylinderGeometry(1.4, 1.4, 1, 12),
+              siloMat,
+              siloList.length
+            )
+          : null;
+
+      let sIdx = 0;
+      indPlacements.forEach((p, i) => {
+        dummy.rotation.set(0, 0, 0);
+        dummy.position.set(p.x, p.h * 0.5 + 0.14, p.z);
+        dummy.scale.set(p.w, p.h, p.d);
+        dummy.updateMatrix();
+        indBodyInst.setMatrixAt(i, dummy.matrix);
+        color.setHex(p.color);
+        indBodyInst.setColorAt(i, color);
+
+        if (p.hasSilo && siloInst) {
+          dummy.position.set(p.x + p.w * 0.34, p.h * 0.65, p.z - p.d * 0.24);
+          dummy.scale.set(1, p.h * 1.15, 1);
+          dummy.updateMatrix();
+          siloInst.setMatrixAt(sIdx++, dummy.matrix);
+        }
+      });
+      indBodyInst.instanceMatrix.needsUpdate = true;
+      if (indBodyInst.instanceColor) indBodyInst.instanceColor.needsUpdate = true;
+      group.add(indBodyInst);
+      if (siloInst) {
+        siloInst.instanceMatrix.needsUpdate = true;
+        group.add(siloInst);
+      }
     }
 
     if (treePlacements.length > 0) {
@@ -1398,13 +1734,13 @@ if (uWetness > 0.04) {
       );
 
       treePlacements.forEach((t, i) => {
-        dummy.position.set(t.x, t.trunkH * 0.5, t.z);
+        dummy.position.set(t.x, t.trunkH * 0.5 + 0.16, t.z);
         dummy.scale.set(1, t.trunkH, 1);
         dummy.rotation.set(0, 0, 0);
         dummy.updateMatrix();
         trunkInst.setMatrixAt(i, dummy.matrix);
 
-        dummy.position.set(t.x, t.trunkH + t.crownR * 0.45, t.z);
+        dummy.position.set(t.x, t.trunkH + t.crownR * 0.45 + 0.16, t.z);
         dummy.scale.set(t.crownR, t.crownR * 0.76, t.crownR);
         dummy.rotation.set(0, (i * 0.7) % (Math.PI * 2), 0);
         dummy.updateMatrix();
@@ -1418,7 +1754,7 @@ if (uWetness > 0.04) {
       group.add(trunkInst, canopyInst);
     }
 
-    return group;
+    return { group, colliders };
   }
 
   public updateChunksAroundPlayer(playerX: number, playerZ: number): void {

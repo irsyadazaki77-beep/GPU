@@ -296,74 +296,61 @@ export function buildJakartaBuilding(
       maxAnisotropy
     );
 
-  const podiumMat = new THREE.MeshStandardMaterial({
-    color: 0x1e2636,
-    roughness: 0.74,
-    metalness: 0.16,
-    envMapIntensity: 0.5,
+  // Deterministic per-building architectural variant selector
+  let idHash = 0;
+  for (let i = 0; i < b.id.length; i++) {
+    idHash = (idHash * 31 + b.id.charCodeAt(i)) >>> 0;
+  }
+
+  const graniteMat = new THREE.MeshStandardMaterial({
+    color: b.style === 'colonial' ? 0xd6d3d1 : 0x1e2636,
+    roughness: 0.78,
+    metalness: 0.14,
+    envMapIntensity: 0.45,
   });
   const lobbyGlassMat = new THREE.MeshStandardMaterial({
     color: 0x0f172a,
-    emissive: 0xf59e0b,
-    emissiveIntensity: 0.28,
-    roughness: 0.2,
-    metalness: 0.42,
-    envMapIntensity: 1.05,
+    emissive: b.style === 'skyscraper' ? 0xf59e0b : b.accentColor,
+    emissiveIntensity: 0.34,
+    roughness: 0.16,
+    metalness: 0.48,
+    envMapIntensity: 1.08,
   });
   const mullionMat = new THREE.MeshStandardMaterial({
-    color: 0x111827,
-    roughness: 0.56,
-    metalness: 0.48,
-    envMapIntensity: 0.65,
+    color: 0x0f172a,
+    roughness: 0.48,
+    metalness: 0.56,
+    envMapIntensity: 0.72,
+  });
+  const creamStoneMat = new THREE.MeshStandardMaterial({
+    color: 0xf1ece1,
+    roughness: 0.76,
+    metalness: 0.04,
+    envMapIntensity: 0.3,
+  });
+  const terracottaTileMat = new THREE.MeshStandardMaterial({
+    color: 0x9a3412,
+    roughness: 0.82,
+    metalness: 0.05,
+    envMapIntensity: 0.22,
+  });
+  const foliageMat = new THREE.MeshStandardMaterial({
+    color: 0x15803d,
+    roughness: 0.88,
+    metalness: 0.02,
+    envMapIntensity: 0.1,
   });
 
-  const podiumH = b.style === 'skyscraper' ? 3.8 : 2.8;
-  const podium = new THREE.Mesh(
-    new THREE.BoxGeometry(b.width, podiumH, b.depth),
-    podiumMat
-  );
-  podium.position.y = podiumH * 0.5;
-  podium.castShadow = true;
-  podium.receiveShadow = true;
-  group.add(podium);
-
-  const shopBand = new THREE.Mesh(
-    new THREE.BoxGeometry(b.width * 0.92, podiumH * 0.56, b.depth * 0.96),
-    lobbyGlassMat
-  );
-  shopBand.position.y = podiumH * 0.44;
-  group.add(shopBand);
-
-  for (const px of [-b.width * 0.46, 0, b.width * 0.46]) {
-    for (const pz of [-b.depth * 0.48, b.depth * 0.48]) {
-      const col = new THREE.Mesh(
-        new THREE.BoxGeometry(0.48, podiumH, 0.48),
-        mullionMat
-      );
-      col.position.set(px, podiumH * 0.5, pz);
-      group.add(col);
-    }
-  }
-
-  const canopy = new THREE.Mesh(
-    new THREE.BoxGeometry(b.width * 0.54, 0.26, b.depth * 1.08),
-    mullionMat
-  );
-  canopy.position.y = podiumH * 0.86;
-  canopy.castShadow = true;
-  group.add(canopy);
-
-  const totalBodyH = Math.max(4, b.height - podiumH);
   const bodyMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     map: facadeTex,
     roughnessMap,
     emissive: new THREE.Color(0xffffff),
     emissiveMap,
-    emissiveIntensity: 0.65,
-    roughness: b.style === 'skyscraper' ? 0.88 : 0.94,
-    metalness: b.style === 'skyscraper' ? 0.52 : 0.14,
-    envMapIntensity: b.style === 'skyscraper' ? 1.24 : 0.55,
+    emissiveIntensity: 0.68,
+    roughness: b.style === 'skyscraper' ? 0.84 : 0.9,
+    metalness: b.style === 'skyscraper' ? 0.54 : 0.14,
+    envMapIntensity: b.style === 'skyscraper' ? 1.24 : 0.52,
   });
 
   if (b.style === 'skyscraper') {
@@ -407,20 +394,95 @@ gl_FragColor.rgb *= (0.94 + roomDepthShade * 0.12);
   const accentMat = new THREE.MeshStandardMaterial({
     color: b.accentColor,
     emissive: b.accentColor,
-    emissiveIntensity: 0.42,
-    roughness: 0.42,
-    metalness: 0.42,
+    emissiveIntensity: 0.48,
+    roughness: 0.36,
+    metalness: 0.46,
     envMapIntensity: 0.85,
   });
 
   group.userData.nightEmissiveMats = [bodyMat, lobbyGlassMat, accentMat];
 
+  // Landscaped concrete granite base plinth for all hero buildings
+  const basePlinth = new THREE.Mesh(
+    new THREE.BoxGeometry(b.width + 1.2, 0.24, b.depth + 1.2),
+    graniteMat
+  );
+  basePlinth.position.y = 0.12;
+  basePlinth.receiveShadow = true;
+  group.add(basePlinth);
+
   if (b.style === 'skyscraper') {
-    const lowerH = totalBodyH * 0.68;
-    const upperH = totalBodyH - lowerH;
+    const podiumH = 4.6;
+    // Double-height commercial podium + recessed illuminated lobby atrium + colonnade columns
+    const podiumCore = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.98, podiumH, b.depth * 0.98),
+      graniteMat
+    );
+    podiumCore.position.y = podiumH * 0.5 + 0.18;
+    podiumCore.castShadow = true;
+    podiumCore.receiveShadow = true;
+    group.add(podiumCore);
+
+    const atriumGlass = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.93, podiumH * 0.72, b.depth * 0.995),
+      lobbyGlassMat
+    );
+    atriumGlass.position.y = podiumH * 0.48 + 0.18;
+    group.add(atriumGlass);
+
+    const atriumGlassSide = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.995, podiumH * 0.72, b.depth * 0.91),
+      lobbyGlassMat
+    );
+    atriumGlassSide.position.y = podiumH * 0.48 + 0.18;
+    group.add(atriumGlassSide);
+
+    // Architectural podium colonnade piers & entry portico porte-cochere
+    for (const px of [-b.width * 0.45, -b.width * 0.22, 0, b.width * 0.22, b.width * 0.45]) {
+      for (const pz of [-b.depth * 0.49, b.depth * 0.49]) {
+        const col = new THREE.Mesh(
+          new THREE.BoxGeometry(0.46, podiumH + 0.15, 0.56),
+          mullionMat
+        );
+        col.position.set(px, podiumH * 0.5 + 0.18, pz);
+        group.add(col);
+      }
+    }
+
+    const porticoRoof = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.58, 0.34, b.depth * 1.16),
+      mullionMat
+    );
+    porticoRoof.position.y = podiumH * 0.88 + 0.18;
+    porticoRoof.castShadow = true;
+    group.add(porticoRoof);
+
+    const porticoTrim = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.585, 0.12, b.depth * 1.165),
+      accentMat
+    );
+    porticoTrim.position.y = podiumH * 0.88 + 0.36;
+    group.add(porticoTrim);
+
+    // Front granite planter boxes flanking entrance
+    for (const sideX of [-b.width * 0.34, b.width * 0.34]) {
+      for (const sideZ of [b.depth * 0.56, -b.depth * 0.56]) {
+        const planter = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.48, 0.95), graniteMat);
+        planter.position.set(sideX, 0.42, sideZ);
+        const shrub = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.52, 0.7), foliageMat);
+        shrub.position.set(sideX, 0.82, sideZ);
+        group.add(planter, shrub);
+      }
+    }
+
+    // 3-Tier Setback Tower Architecture: Lower Shaft -> Sky-Lobby Terrace -> Upper Tapered Tower
+    const totalShaftH = Math.max(8, b.height - podiumH);
+    const lowerH = totalShaftH * 0.52;
+    const skyLobbyH = 2.0;
+    const upperH = Math.max(4, totalShaftH - lowerH - skyLobbyH);
 
     const lowerShaft = new THREE.Mesh(
-      new THREE.BoxGeometry(b.width * 0.9, lowerH, b.depth * 0.9),
+      new THREE.BoxGeometry(b.width * 0.88, lowerH, b.depth * 0.88),
       bodyMat
     );
     lowerShaft.position.y = podiumH + lowerH * 0.5;
@@ -428,112 +490,498 @@ gl_FragColor.rgb *= (0.94 + roomDepthShade * 0.12);
     lowerShaft.receiveShadow = true;
     group.add(lowerShaft);
 
+    // Horizontal precast curtain-wall spandrel belts every ~6.5m on lower shaft
+    const beltGeo = new THREE.BoxGeometry(b.width * 0.91, 0.28, b.depth * 0.91);
+    const beltCount = Math.max(1, Math.floor(lowerH / 6.5));
+    for (let bi = 1; bi <= beltCount; bi++) {
+      const beltY = podiumH + (bi / (beltCount + 1)) * lowerH;
+      const belt = new THREE.Mesh(beltGeo, mullionMat);
+      belt.position.y = beltY;
+      group.add(belt);
+    }
+
+    // Vertical corner structural ribs & central glazing fins
+    for (const fx of [-b.width * 0.445, -b.width * 0.16, b.width * 0.16, b.width * 0.445]) {
+      for (const fz of [-b.depth * 0.445, b.depth * 0.445]) {
+        const rib = new THREE.Mesh(
+          new THREE.BoxGeometry(0.36, lowerH + 0.4, 0.36),
+          mullionMat
+        );
+        rib.position.set(fx, podiumH + lowerH * 0.5, fz);
+        group.add(rib);
+      }
+    }
+
+    // Recessed glowing Sky-Lobby Floor Band + Rooftop Terrace Planters
+    const skyLobbyY = podiumH + lowerH;
+    const skyLobby = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.78, skyLobbyH, b.depth * 0.78),
+      lobbyGlassMat
+    );
+    skyLobby.position.y = skyLobbyY + skyLobbyH * 0.5;
+    group.add(skyLobby);
+
+    const skyTerraceSlab = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.92, 0.36, b.depth * 0.92),
+      graniteMat
+    );
+    skyTerraceSlab.position.y = skyLobbyY + 0.18;
+    group.add(skyTerraceSlab);
+
+    const skyRimLight = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.93, 0.14, b.depth * 0.93),
+      accentMat
+    );
+    skyRimLight.position.y = skyLobbyY + 0.38;
+    group.add(skyRimLight);
+
+    // Upper Tapered Tower Shaft
+    const upperStartY = skyLobbyY + skyLobbyH;
     const upperShaft = new THREE.Mesh(
       new THREE.BoxGeometry(b.width * 0.72, upperH, b.depth * 0.72),
       bodyMat
     );
-    upperShaft.position.y = podiumH + lowerH + upperH * 0.5;
+    upperShaft.position.y = upperStartY + upperH * 0.5;
     upperShaft.castShadow = true;
     upperShaft.receiveShadow = true;
     group.add(upperShaft);
 
-    for (const fx of [-b.width * 0.28, b.width * 0.28]) {
-      const fin = new THREE.Mesh(
-        new THREE.BoxGeometry(0.42, lowerH + 0.6, b.depth * 0.93),
-        mullionMat
-      );
-      fin.position.set(fx, podiumH + lowerH * 0.5, 0);
-      group.add(fin);
+    const upperBeltGeo = new THREE.BoxGeometry(b.width * 0.745, 0.26, b.depth * 0.745);
+    const uBeltCount = Math.max(1, Math.floor(upperH / 6.0));
+    for (let bi = 1; bi <= uBeltCount; bi++) {
+      const belt = new THREE.Mesh(upperBeltGeo, mullionMat);
+      belt.position.y = upperStartY + (bi / (uBeltCount + 1)) * upperH;
+      group.add(belt);
     }
 
-    const crownBand = new THREE.Mesh(
-      new THREE.BoxGeometry(b.width * 0.75, 0.65, b.depth * 0.75),
+    // Illuminated Crown Band & Mechanical Louver Penthouse
+    const roofY = upperStartY + upperH;
+    const crownCollar = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.76, 0.72, b.depth * 0.76),
+      mullionMat
+    );
+    crownCollar.position.y = roofY + 0.36;
+    group.add(crownCollar);
+
+    const crownNeon = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.77, 0.22, b.depth * 0.77),
       accentMat
     );
-    crownBand.position.y = b.height + 0.32;
-    group.add(crownBand);
+    crownNeon.position.y = roofY + 0.56;
+    group.add(crownNeon);
 
-    const roofPenthouse = new THREE.Mesh(
-      new THREE.BoxGeometry(b.width * 0.38, 2.8, b.depth * 0.38),
+    const penthouse = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.44, 2.4, b.depth * 0.44),
       mullionMat
     );
-    roofPenthouse.position.y = b.height + 1.8;
-    group.add(roofPenthouse);
+    penthouse.position.y = roofY + 1.9;
+    group.add(penthouse);
 
-    const spire = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.22, 6.2, 8),
-      accentMat
-    );
-    spire.position.y = b.height + 6.2;
-    group.add(spire);
-  } else {
-    const bodyMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(b.width * 0.92, totalBodyH, b.depth * 0.92),
-      bodyMat
-    );
-    bodyMesh.position.y = podiumH + totalBodyH * 0.5;
-    bodyMesh.castShadow = true;
-    bodyMesh.receiveShadow = true;
-    group.add(bodyMesh);
+    // Signature Architectural Skyline Crown Variety
+    const crownVariant = b.id.includes('wisma')
+      ? 0
+      : b.id.includes('scbd') || b.id.includes('bca')
+      ? 1
+      : idHash % 3;
 
-    const parapet = new THREE.Mesh(
-      new THREE.BoxGeometry(b.width * 0.95, 0.45, b.depth * 0.95),
-      mullionMat
-    );
-    parapet.position.y = b.height + 0.22;
-    group.add(parapet);
-
-    const hvac = new THREE.Mesh(
-      new THREE.BoxGeometry(b.width * 0.26, 1.1, b.depth * 0.24),
-      mullionMat
-    );
-    hvac.position.set(b.width * 0.16, b.height + 0.65, -b.depth * 0.14);
-    group.add(hvac);
-
-    if (b.style === 'colonial') {
-      const cornice = new THREE.Mesh(
-        new THREE.BoxGeometry(b.width * 0.98, 0.65, b.depth * 0.98),
-        podiumMat
+    if (crownVariant === 0) {
+      // Wisma 46 Iconic Twin-Fin "Fountain Pen Nib" Arch Crown
+      const archRoof = new THREE.Mesh(
+        new THREE.ConeGeometry(Math.min(b.width, b.depth) * 0.42, 7.2, 4),
+        bodyMat
       );
-      cornice.position.y = b.height + 0.32;
-      group.add(cornice);
+      archRoof.rotation.y = Math.PI / 4;
+      archRoof.scale.set(1.0, 1.0, 0.48);
+      archRoof.position.y = roofY + 4.4;
+      group.add(archRoof);
 
-      const roof = new THREE.Mesh(
-        new THREE.ConeGeometry(b.width * 0.58, 3.8, 4),
-        new THREE.MeshStandardMaterial({
-          color: 0x7c2d12,
-          roughness: 0.78,
-          envMapIntensity: 0.25,
-        })
-      );
-      roof.rotation.y = Math.PI / 4;
-      roof.position.y = b.height + 2.4;
-      roof.castShadow = true;
-      group.add(roof);
-    } else if (b.style === 'port_crane') {
-      const craneBeam = new THREE.Mesh(
-        new THREE.BoxGeometry(b.width * 1.15, 1.2, 2.2),
+      const mast = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.22, 6.8, 8),
         accentMat
       );
-      craneBeam.position.set(0, b.height + 3.5, 0);
-      group.add(craneBeam);
+      mast.position.y = roofY + 8.8;
+      group.add(mast);
+    } else if (crownVariant === 1) {
+      // SCBD Executive Helipad Deck ("H" Pad + Illuminated Ring) & Twin Communications Spires
+      const helipadDeck = new THREE.Mesh(
+        new THREE.CylinderGeometry(b.width * 0.32, b.width * 0.28, 0.45, 20),
+        graniteMat
+      );
+      helipadDeck.position.y = roofY + 3.25;
+      group.add(helipadDeck);
 
-      for (const lx of [-b.width * 0.4, b.width * 0.4]) {
-        const leg = new THREE.Mesh(
-          new THREE.BoxGeometry(1.1, 4.5, 1.1),
-          mullionMat
+      const heliRing = new THREE.Mesh(
+        new THREE.TorusGeometry(b.width * 0.25, 0.1, 8, 24),
+        accentMat
+      );
+      heliRing.rotation.x = Math.PI / 2;
+      heliRing.position.y = roofY + 3.5;
+      group.add(heliRing);
+
+      const hBarMat = creamStoneMat;
+      const hLeft = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 2.1), hBarMat);
+      hLeft.position.set(-0.75, roofY + 3.52, 0);
+      const hRight = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 2.1), hBarMat);
+      hRight.position.set(0.75, roofY + 3.52, 0);
+      const hCross = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.08, 0.32), hBarMat);
+      hCross.position.set(0, roofY + 3.52, 0);
+      group.add(hLeft, hRight, hCross);
+
+      for (const sx of [-b.width * 0.24, b.width * 0.24]) {
+        const twinSpire = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.06, 0.16, 5.8, 8),
+          accentMat
         );
-        leg.position.set(lx, b.height + 1.5, 0);
-        group.add(leg);
+        twinSpire.position.set(sx, roofY + 5.0, -b.depth * 0.2);
+        group.add(twinSpire);
       }
     } else {
-      const awning = new THREE.Mesh(
-        new THREE.BoxGeometry(b.width * 0.98, 0.48, b.depth * 0.98),
+      // Modernist Glass Lantern Atrium Top + Finial Mast
+      const lantern = new THREE.Mesh(
+        new THREE.BoxGeometry(b.width * 0.56, 3.2, b.depth * 0.56),
+        lobbyGlassMat
+      );
+      lantern.position.y = roofY + 2.2;
+      group.add(lantern);
+
+      const spire = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.2, 6.2, 8),
         accentMat
       );
-      awning.position.y = podiumH + 0.24;
-      group.add(awning);
+      spire.position.y = roofY + 6.6;
+      group.add(spire);
     }
+  } else if (b.style === 'colonial') {
+    // Dutch-Indies & Nusantara Heritage Pavilion: Stepped Plinth, Columned Portico, Twin Wings, Hipped Terracotta Roof + Bell Cupola
+    const podiumH = 1.6;
+    const stonePlinth = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.98, podiumH, b.depth * 0.98),
+      creamStoneMat
+    );
+    stonePlinth.position.y = podiumH * 0.5 + 0.16;
+    stonePlinth.castShadow = true;
+    stonePlinth.receiveShadow = true;
+    group.add(stonePlinth);
+
+    // Ceremonial front entrance stairs
+    for (let st = 0; st < 3; st++) {
+      const step = new THREE.Mesh(
+        new THREE.BoxGeometry(b.width * 0.44 - st * 0.6, 0.36, 0.95),
+        creamStoneMat
+      );
+      step.position.set(0, 0.34 + st * 0.36, b.depth * 0.56 - st * 0.35);
+      group.add(step);
+    }
+
+    const hallH = Math.max(5.5, b.height - podiumH - 3.6);
+    const centerHall = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.92, hallH, b.depth * 0.84),
+      bodyMat
+    );
+    centerHall.position.y = podiumH + hallH * 0.5;
+    centerHall.castShadow = true;
+    centerHall.receiveShadow = true;
+    group.add(centerHall);
+
+    // Symmetrical left & right projecting heritage wings
+    for (const wx of [-b.width * 0.34, b.width * 0.34]) {
+      const wing = new THREE.Mesh(
+        new THREE.BoxGeometry(b.width * 0.26, hallH + 0.4, b.depth * 0.96),
+        bodyMat
+      );
+      wing.position.set(wx, podiumH + hallH * 0.5, 0);
+      wing.castShadow = true;
+      group.add(wing);
+    }
+
+    // Classical front colonnade columns supporting grand pediment gable
+    const colGeo = new THREE.CylinderGeometry(0.24, 0.3, hallH * 0.92, 10);
+    for (const cx of [-b.width * 0.26, -b.width * 0.13, 0, b.width * 0.13, b.width * 0.26]) {
+      for (const cz of [b.depth * 0.48, -b.depth * 0.48]) {
+        const col = new THREE.Mesh(colGeo, creamStoneMat);
+        col.position.set(cx, podiumH + hallH * 0.46, cz);
+        col.castShadow = true;
+        group.add(col);
+      }
+    }
+
+    const roofBaseY = podiumH + hallH;
+    const cornice = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 1.02, 0.58, b.depth * 1.02),
+      creamStoneMat
+    );
+    cornice.position.y = roofBaseY + 0.28;
+    group.add(cornice);
+
+    // Hipped clay terracotta main roof
+    const mainRoof = new THREE.Mesh(
+      new THREE.ConeGeometry(Math.max(b.width, b.depth) * 0.68, 4.2, 4),
+      terracottaTileMat
+    );
+    mainRoof.rotation.y = Math.PI / 4;
+    mainRoof.scale.set(b.width / Math.max(b.width, b.depth), 1.0, b.depth / Math.max(b.width, b.depth));
+    mainRoof.position.y = roofBaseY + 2.55;
+    mainRoof.castShadow = true;
+    group.add(mainRoof);
+
+    // Front triangular pediment gable & Kota Tua central clock cupola tower
+    const gable = new THREE.Mesh(
+      new THREE.ConeGeometry(b.width * 0.24, 2.4, 3),
+      creamStoneMat
+    );
+    gable.rotation.x = Math.PI / 2;
+    gable.rotation.z = Math.PI;
+    gable.scale.set(1.2, 0.35, 1.0);
+    gable.position.set(0, roofBaseY + 1.15, b.depth * 0.47);
+    group.add(gable);
+
+    const cupolaBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.45, 1.65, 2.8, 8),
+      creamStoneMat
+    );
+    cupolaBase.position.y = roofBaseY + 4.4;
+    group.add(cupolaBase);
+
+    const cupolaLantern = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.15, 1.15, 1.1, 8),
+      lobbyGlassMat
+    );
+    cupolaLantern.position.y = roofBaseY + 5.2;
+    group.add(cupolaLantern);
+
+    const cupolaRoof = new THREE.Mesh(
+      new THREE.ConeGeometry(1.75, 2.6, 8),
+      terracottaTileMat
+    );
+    cupolaRoof.position.y = roofBaseY + 7.0;
+    group.add(cupolaRoof);
+  } else if (b.style === 'ruko') {
+    // Authentic 3-Bay Multi-Unit Jakarta Ruko Row: Kaki-Lima Arcade, Neon Signboards, Awnings, Balconies & Toren Tanks
+    const bays = 3;
+    const bayW = (b.width - 0.5) / bays;
+    const groundH = 3.2;
+    const tankOrangeMat = new THREE.MeshStandardMaterial({
+      color: 0xea580c,
+      roughness: 0.42,
+      metalness: 0.08,
+    });
+    const signPalette = [0xf59e0b, 0xef4444, 0x38bdf8, 0x22c55e];
+
+    // Shaded sidewalk kaki-lima arcade overhang & slender street columns
+    const arcadeSlab = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width + 0.4, 0.32, b.depth + 2.1),
+      graniteMat
+    );
+    arcadeSlab.position.y = groundH;
+    arcadeSlab.castShadow = true;
+    group.add(arcadeSlab);
+
+    const colGeo = new THREE.BoxGeometry(0.32, groundH, 0.32);
+    for (let bi = 0; bi <= bays; bi++) {
+      const cx = -b.width * 0.5 + bi * bayW + (bi === bays ? 0.35 : 0.15);
+      for (const cz of [b.depth * 0.5 + 0.72, -b.depth * 0.5 - 0.72]) {
+        const pillar = new THREE.Mesh(colGeo, creamStoneMat);
+        pillar.position.set(cx, groundH * 0.5, cz);
+        group.add(pillar);
+      }
+    }
+
+    for (let bi = 0; bi < bays; bi++) {
+      const unitX = -b.width * 0.5 + (bi + 0.5) * (b.width / bays);
+      const unitH = b.height * (0.86 + ((bi + idHash) % 3) * 0.12);
+      const upperH = Math.max(3.5, unitH - groundH);
+
+      // Ground floor illuminated shop bay
+      const shopBay = new THREE.Mesh(
+        new THREE.BoxGeometry(bayW * 0.94, groundH - 0.1, b.depth * 0.88),
+        lobbyGlassMat
+      );
+      shopBay.position.set(unitX, (groundH - 0.1) * 0.5 + 0.12, 0);
+      group.add(shopBay);
+
+      // Sloped striped canopy awning above shopfront
+      for (const sideSign of [1, -1]) {
+        const awning = new THREE.Mesh(
+          new THREE.BoxGeometry(bayW * 0.9, 0.24, 1.35),
+          bi % 2 === 0 ? accentMat : terracottaTileMat
+        );
+        awning.position.set(unitX, groundH - 0.22, sideSign * (b.depth * 0.5 + 0.48));
+        awning.rotation.x = sideSign * 0.28;
+        group.add(awning);
+
+        // Glowing shopfront vertical neon signboard
+        const signMat = new THREE.MeshStandardMaterial({
+          color: signPalette[(bi + idHash) % signPalette.length],
+          emissive: signPalette[(bi + idHash) % signPalette.length],
+          emissiveIntensity: 0.72,
+          roughness: 0.32,
+        });
+        const shopSign = new THREE.Mesh(new THREE.BoxGeometry(bayW * 0.76, 0.62, 0.22), signMat);
+        shopSign.position.set(unitX, groundH + 0.52, sideSign * (b.depth * 0.5 + 0.18));
+        group.add(shopSign);
+      }
+
+      // Upper shophouse body + concrete balcony sunshade fins ("topi beton")
+      const unitBody = new THREE.Mesh(
+        new THREE.BoxGeometry(bayW * 0.94, upperH, b.depth * 0.88),
+        bodyMat
+      );
+      unitBody.position.set(unitX, groundH + upperH * 0.5, 0);
+      unitBody.castShadow = true;
+      unitBody.receiveShadow = true;
+      group.add(unitBody);
+
+      const sunshade = new THREE.Mesh(
+        new THREE.BoxGeometry(bayW * 0.96, 0.24, b.depth * 0.98),
+        creamStoneMat
+      );
+      sunshade.position.set(unitX, groundH + upperH * 0.52, 0);
+      group.add(sunshade);
+
+      // Sloped ruko roof + iconic orange Indonesian cylindrical Toren water tank on rooftop
+      const rukoRoof = new THREE.Mesh(
+        new THREE.ConeGeometry(Math.max(bayW, b.depth) * 0.62, 1.9, 4),
+        terracottaTileMat
+      );
+      rukoRoof.rotation.y = Math.PI / 4;
+      rukoRoof.scale.set(bayW / Math.max(bayW, b.depth), 1, b.depth / Math.max(bayW, b.depth));
+      rukoRoof.position.set(unitX, groundH + upperH + 0.95, 0);
+      rukoRoof.castShadow = true;
+      group.add(rukoRoof);
+
+      if ((bi + idHash) % 2 === 0) {
+        const tankStand = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.55, 1.1), mullionMat);
+        tankStand.position.set(unitX + bayW * 0.18, groundH + upperH + 0.28, -b.depth * 0.24);
+        const toren = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.55, 0.58, 1.25, 10),
+          tankOrangeMat
+        );
+        toren.position.set(unitX + bayW * 0.18, groundH + upperH + 1.15, -b.depth * 0.24);
+        group.add(tankStand, toren);
+      }
+    }
+  } else if (b.style === 'pasar') {
+    // Grand Jakarta Wholesale Hub / Mall (Blok A / Blok M Square / Summarecon): Twin Corner Rotundas, Central Skylight Atrium & LED Marquee
+    const podiumH = 4.2;
+    const mallBase = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width, podiumH, b.depth),
+      graniteMat
+    );
+    mallBase.position.y = podiumH * 0.5 + 0.18;
+    mallBase.castShadow = true;
+    mallBase.receiveShadow = true;
+    group.add(mallBase);
+
+    const upperH = Math.max(6, b.height - podiumH);
+    const mallUpper = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.9, upperH, b.depth * 0.88),
+      bodyMat
+    );
+    mallUpper.position.y = podiumH + upperH * 0.5;
+    mallUpper.castShadow = true;
+    mallUpper.receiveShadow = true;
+    group.add(mallUpper);
+
+    // Twin glazed corner rotunda towers
+    const rotR = Math.min(b.width, b.depth) * 0.22;
+    for (const rx of [-b.width * 0.42, b.width * 0.42]) {
+      const rot = new THREE.Mesh(
+        new THREE.CylinderGeometry(rotR, rotR, b.height + 1.4, 14),
+        lobbyGlassMat
+      );
+      rot.position.set(rx, (b.height + 1.4) * 0.5, b.depth * 0.36);
+      group.add(rot);
+
+      const rotCap = new THREE.Mesh(
+        new THREE.CylinderGeometry(rotR + 0.35, rotR + 0.35, 0.45, 14),
+        accentMat
+      );
+      rotCap.position.set(rx, b.height + 1.6, b.depth * 0.36);
+      group.add(rotCap);
+    }
+
+    // Glowing front mall drop-off marquee & rooftop curved sky-atrium barrel vault
+    const marquee = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.62, 1.35, b.depth * 1.04),
+      accentMat
+    );
+    marquee.position.y = podiumH + 0.55;
+    group.add(marquee);
+
+    const skylightVault = new THREE.Mesh(
+      new THREE.CylinderGeometry(b.depth * 0.28, b.depth * 0.28, b.width * 0.72, 14, 1, false, 0, Math.PI),
+      lobbyGlassMat
+    );
+    skylightVault.rotation.z = Math.PI / 2;
+    skylightVault.position.y = b.height + 0.1;
+    group.add(skylightVault);
+  } else {
+    // 'port_crane': High-Speed Whoosh Terminal / Port Logistics Hangar with Arched Roof Vault, Loading Bays & Yard Gantry
+    const hallH = Math.max(7, b.height * 0.68);
+    const hallBody = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.94, hallH, b.depth * 0.88),
+      bodyMat
+    );
+    hallBody.position.y = hallH * 0.5 + 0.18;
+    hallBody.castShadow = true;
+    hallBody.receiveShadow = true;
+    group.add(hallBody);
+
+    // Wide arched steel terminal vault roof
+    const vaultR = b.depth * 0.48;
+    const barrelRoof = new THREE.Mesh(
+      new THREE.CylinderGeometry(vaultR, vaultR, b.width * 0.98, 16, 1, false, 0, Math.PI),
+      graniteMat
+    );
+    barrelRoof.rotation.z = Math.PI / 2;
+    barrelRoof.scale.set(0.45, 1, 1);
+    barrelRoof.position.y = hallH + 0.18;
+    barrelRoof.castShadow = true;
+    group.add(barrelRoof);
+
+    // Steel structural arch ribs across barrel vault
+    for (const rx of [-b.width * 0.38, -b.width * 0.13, b.width * 0.13, b.width * 0.38]) {
+      const archRib = new THREE.Mesh(
+        new THREE.CylinderGeometry(vaultR + 0.25, vaultR + 0.25, 0.42, 16, 1, false, 0, Math.PI),
+        accentMat
+      );
+      archRib.rotation.z = Math.PI / 2;
+      archRib.scale.set(0.46, 1, 1);
+      archRib.position.set(rx, hallH + 0.2, 0);
+      group.add(archRib);
+    }
+
+    // Illuminated glazing clerestory & loading bay roll-up doors
+    const clerestory = new THREE.Mesh(
+      new THREE.BoxGeometry(b.width * 0.84, 1.4, b.depth * 0.92),
+      lobbyGlassMat
+    );
+    clerestory.position.y = hallH - 1.1;
+    group.add(clerestory);
+
+    for (const dx of [-b.width * 0.3, 0, b.width * 0.3]) {
+      const bayDoor = new THREE.Mesh(
+        new THREE.BoxGeometry(b.width * 0.2, 3.2, b.depth * 0.91),
+        mullionMat
+      );
+      bayDoor.position.set(dx, 1.8, 0);
+      group.add(bayDoor);
+    }
+
+    // Exterior yard gantry crane frame flanking one side (standing on ground, NOT floating on roof)
+    const gantryX = b.width * 0.5 + 1.3;
+    const gantryH = hallH + 4.8;
+    for (const gz of [-b.depth * 0.36, b.depth * 0.36]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.65, gantryH, 0.65), accentMat);
+      leg.position.set(gantryX, gantryH * 0.5, gz);
+      group.add(leg);
+    }
+    const gantryCross = new THREE.Mesh(
+      new THREE.BoxGeometry(1.1, 0.85, b.depth * 0.86),
+      accentMat
+    );
+    gantryCross.position.set(gantryX, gantryH + 0.2, 0);
+    group.add(gantryCross);
   }
 
   return group;
@@ -678,6 +1126,15 @@ export function buildJakartaIconicLandmarks(): THREE.Group {
   crescentSpire.position.y = 9.65;
   istiqlalGroup.add(crescentSpire);
 
+  // Modernist perimeter louver colonnade gallery around Istiqlal courtyard
+  for (let li = -4; li <= 4; li += 2) {
+    const colF = new THREE.Mesh(new THREE.BoxGeometry(0.42, 4.6, 0.58), domeMat);
+    colF.position.set(li * 1.35, 2.3, 6.2);
+    const colB = new THREE.Mesh(new THREE.BoxGeometry(0.42, 4.6, 0.58), domeMat);
+    colB.position.set(li * 1.35, 2.3, -6.2);
+    istiqlalGroup.add(colF, colB);
+  }
+
   const minaret = new THREE.Mesh(
     new THREE.CylinderGeometry(0.45, 0.68, 17.5, 10),
     domeMat
@@ -735,6 +1192,34 @@ export function buildJakartaIconicLandmarks(): THREE.Group {
   roofRing.position.y = 5.6;
   gbkGroup.add(roofRing);
 
+  // Iconic "Temu Gelang" radial structural facade ribs + 4 stadium floodlight towers
+  for (let ri = 0; ri < 16; ri++) {
+    const a = (ri / 16) * Math.PI * 2;
+    const ribCol = new THREE.Mesh(new THREE.BoxGeometry(0.45, 5.8, 0.9), domeMat);
+    ribCol.position.set(Math.cos(a) * 11.4, 2.9, Math.sin(a) * 11.4);
+    ribCol.rotation.y = -a;
+    gbkGroup.add(ribCol);
+  }
+  const mastMat = new THREE.MeshStandardMaterial({
+    color: 0xe2e8f0,
+    emissive: 0xfef9c3,
+    emissiveIntensity: 0.65,
+    roughness: 0.35,
+  });
+  for (const [mx, mz] of [
+    [-11.8, -11.8],
+    [11.8, -11.8],
+    [-11.8, 11.8],
+    [11.8, 11.8],
+  ]) {
+    const mastPole = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.34, 11.5, 8), darkSlateMat);
+    mastPole.position.set(mx, 5.75, mz);
+    const mastHead = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.95, 0.55), mastMat);
+    mastHead.position.set(mx, 11.4, mz);
+    mastHead.lookAt(0, 2, 0);
+    gbkGroup.add(mastPole, mastHead);
+  }
+
   const gbkAccentRing = new THREE.Mesh(
     new THREE.TorusGeometry(11.35, 0.18, 8, 28),
     new THREE.MeshStandardMaterial({
@@ -749,7 +1234,7 @@ export function buildJakartaIconicLandmarks(): THREE.Group {
   gbkGroup.add(gbkAccentRing);
   landmarksGroup.add(gbkGroup);
 
-  // 4. Pelabuhan Tanjung Priok Container Stacks (beside Priok Terminal at +106, 0, -49)
+  // 4. Pelabuhan Tanjung Priok Container Stacks & Harbor Quay Gantry Crane (+106, 0, -49)
   const priokGroup = new THREE.Group();
   priokGroup.position.set(106, 0, -49);
 
@@ -760,6 +1245,24 @@ export function buildJakartaIconicLandmarks(): THREE.Group {
   yardSlab.position.y = 0.09;
   yardSlab.receiveShadow = true;
   priokGroup.add(yardSlab);
+
+  const craneOrangeMat = new THREE.MeshStandardMaterial({
+    color: 0xea580c,
+    roughness: 0.48,
+    metalness: 0.42,
+  });
+  for (const gx of [-5.8, 5.8]) {
+    for (const gz of [-5.2, 5.2]) {
+      const craneLeg = new THREE.Mesh(new THREE.BoxGeometry(0.65, 11.5, 0.65), craneOrangeMat);
+      craneLeg.position.set(gx, 5.75, gz);
+      priokGroup.add(craneLeg);
+    }
+  }
+  const craneGantryGirder = new THREE.Mesh(new THREE.BoxGeometry(13.8, 1.0, 1.4), craneOrangeMat);
+  craneGantryGirder.position.set(0, 11.6, 0);
+  const craneBoom = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.9, 15.6), craneOrangeMat);
+  craneBoom.position.set(0, 12.1, -1.8);
+  priokGroup.add(craneGantryGirder, craneBoom);
 
   const containerColors = [0xdc2626, 0x0284c7, 0xd97706, 0x15803d];
   const containerGeo = new THREE.BoxGeometry(2.6, 2.4, 5.8);
