@@ -22,6 +22,7 @@ import {
   formatJakartaClock,
   formatRupiah,
   getEffectiveWeaponSpec,
+  shouldSuppressWorldClutter,
 } from '../game/rules';
 import {
   engineTelemetryRef,
@@ -371,6 +372,30 @@ export const GameHud: React.FC<GameHudProps> = ({
   const maxDash = arcCircumference * sweepFraction;
   const currentDash = maxDash * rpmRatio;
 
+  const suppressClutter = shouldSuppressWorldClutter(
+    Boolean(
+      activeQuestState ||
+        activeMission ||
+        activeRace ||
+        activeTurfWar ||
+        activeVigilante ||
+        (activeRivalBoss && !activeRivalBoss.defeated)
+    )
+  );
+  const centerBannerKind = stampBanner
+    ? 'stamp'
+    : lastStuntBanner
+    ? 'stunt'
+    : killCamBanner
+    ? 'killcam'
+    : radioToast
+    ? 'radio'
+    : multiplayerLobby &&
+      (multiplayerLobby.raceStatus === 'countdown' ||
+        multiplayerLobby.placements.length > 0)
+    ? 'mp_lobby'
+    : null;
+
   // Determine single highest-priority contextual prompt for bottom-center
   const primaryPrompt = parachuteState.canDeploy
     ? {
@@ -530,8 +555,8 @@ export const GameHud: React.FC<GameHudProps> = ({
         />
       )}
 
-      {/* ROCKSTAR WIDESCREEN MISSION PASSED / HEIST COMPLETE STAMP */}
-      {stampBanner && (
+      {/* ROCKSTAR WIDESCREEN MISSION PASSED / HEIST COMPLETE STAMP (Prioritized single center slot) */}
+      {centerBannerKind === 'stamp' && stampBanner && (
         <div className="fixed inset-x-0 top-20 z-30 flex justify-center pointer-events-none px-4 animate-stamp-in">
           <div
             className="w-full max-w-xl py-3 px-6 text-center"
@@ -648,8 +673,8 @@ export const GameHud: React.FC<GameHudProps> = ({
       )}
 
       {/* BULLET-TIME KILL-CAM CINEMATIC SLASH */}
-      {killCamBanner && (
-        <div className="fixed inset-x-0 top-28 z-30 flex justify-center pointer-events-none px-4 animate-stamp-in">
+      {centerBannerKind === 'killcam' && killCamBanner && (
+        <div className="fixed inset-x-0 top-20 z-30 flex justify-center pointer-events-none px-4 animate-stamp-in">
           <div className="px-7 py-2 bg-[#070b12]/90 border-y-2 border-[#f59e0b] text-center shadow-2xl">
             <div className="font-display text-2xl md:text-3xl font-extrabold italic uppercase tracking-wider text-[#f59e0b] hud-stroke">
               {killCamBanner.label}
@@ -659,9 +684,7 @@ export const GameHud: React.FC<GameHudProps> = ({
       )}
 
       {/* ACTIVE MULTIPLAYER RACE COUNTDOWN / SHARED LOOT POT STRIP */}
-      {multiplayerLobby &&
-        (multiplayerLobby.raceStatus === 'countdown' ||
-          multiplayerLobby.placements.length > 0) && (
+      {centerBannerKind === 'mp_lobby' && multiplayerLobby && (
           <div
             data-testid="multiplayer-lobby-banner"
             className="fixed top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-aaa-up"
@@ -719,10 +742,10 @@ export const GameHud: React.FC<GameHudProps> = ({
       )}
 
       {/* STUNT JUMP RESULT BANNER */}
-      {lastStuntBanner && (
+      {centerBannerKind === 'stunt' && lastStuntBanner && (
         <div
           data-testid="stunt-jump-banner"
-          className="fixed inset-x-0 top-36 z-30 flex justify-center pointer-events-none px-4 animate-stamp-in"
+          className="fixed inset-x-0 top-20 z-30 flex justify-center pointer-events-none px-4 animate-stamp-in"
         >
           <div className="px-6 py-3 rounded-xl bg-[#090d16]/95 border border-[#f59e0b]/60 text-center shadow-2xl">
             <div className="font-mono-num text-[10px] font-bold uppercase tracking-[0.22em] text-[#38bdf8]">
@@ -830,8 +853,8 @@ export const GameHud: React.FC<GameHudProps> = ({
       )}
 
       {/* RADIO FM TUNER BANNER */}
-      {radioToast && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-aaa-up">
+      {centerBannerKind === 'radio' && radioToast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-aaa-up">
           <div className="aaa-glass-subtle px-4 py-2 rounded-xl border border-[#f59e0b]/40 flex items-center gap-3 shadow-xl">
             <span className="w-2 h-2 rounded-full bg-[#f59e0b] animate-pulse" />
             <div>
@@ -1051,13 +1074,13 @@ export const GameHud: React.FC<GameHudProps> = ({
             </div>
           )}
 
-          {(acousticZone === 'underpass_toll' || acousticZone === 'interior_room') && (
+          {!suppressClutter && (acousticZone === 'underpass_toll' || acousticZone === 'interior_room') && (
             <div className="text-[10px] font-mono-num text-[#38bdf8]/90 px-1 hud-stroke-sm">
               Akustik: {acousticZone === 'underpass_toll' ? 'Gema Kolong Tol' : 'Ruang Tertutup'}
             </div>
           )}
 
-          {drivingVehicle && liveRadioBroadcast && playerState.radioStation !== 'off' && (
+          {!suppressClutter && drivingVehicle && liveRadioBroadcast && playerState.radioStation !== 'off' && (
             <div
               data-testid="live-radio-ticker"
               className={`aaa-glass-subtle rounded-lg px-3 py-1.5 w-72 border-l-2 shadow-lg animate-aaa-up ${

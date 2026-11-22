@@ -34,9 +34,11 @@ import {
   recruitCrewMember,
   resolveJakartaAmbientProfile,
   sellStockShares,
+  stepWantedSystemCooldown,
   triggerStockMarketImpact,
   upgradeDroneTech,
   upgradeVehicleGarage,
+  WANTED_TIER_SPECS,
 } from './game/rules';
 import {
   JakartaWorldCanvas,
@@ -971,21 +973,45 @@ export default function App() {
   );
 
   const handleWantedEvadeUpdate = useCallback(
-    (isEvading: boolean, dt: number) => {
+    (isEvading: boolean, dt: number, underOverpassCover: boolean = false) => {
+      const storeSnap = gameStore.getState();
+      const kiranaBlackout = Boolean(storeSnap.kiranaHackState?.active);
       gameStore.updatePlayerState((prev) => {
-        if (prev.wantedLevel <= 0 || !isEvading) {
-          return prev.wantedEvadeTimer !== 0
-            ? { ...prev, wantedEvadeTimer: 0 }
-            : prev;
-        }
-        const currentTimer =
-          prev.wantedEvadeTimer > 0 ? prev.wantedEvadeTimer : 10;
-        const nextTimer = currentTimer - dt;
-        if (nextTimer <= 0) {
+        if (prev.wantedLevel <= 0) return prev;
+        const spec =
+          WANTED_TIER_SPECS[
+            Math.max(1, Math.min(5, prev.wantedLevel)) as 1 | 2 | 3 | 4 | 5
+          ];
+        const prevRem =
+          prev.wantedEvadeTimer > 0
+            ? prev.wantedEvadeTimer
+            : spec.baseCooldownSeconds;
+        const elapsedOutOfSight = Math.max(0, spec.baseCooldownSeconds - prevRem);
+        const res = stepWantedSystemCooldown(
+          prev.wantedLevel,
+          elapsedOutOfSight,
+          !isEvading,
+          underOverpassCover,
+          kiranaBlackout,
+          dt
+        );
+        if (res.cleared) {
           soundEngine.playPickup();
-          return { ...prev, wantedLevel: 0, wantedEvadeTimer: 0 };
         }
-        return { ...prev, wantedEvadeTimer: nextTimer };
+        const roundedRem = Math.ceil(res.remainingSeconds * 2) / 2;
+        if (
+          res.wantedLevel === prev.wantedLevel &&
+          res.flashingCooldown === prev.wantedEvading &&
+          Math.abs(roundedRem - prev.wantedEvadeTimer) < 0.45
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          wantedLevel: res.wantedLevel,
+          wantedEvading: res.flashingCooldown,
+          wantedEvadeTimer: res.flashingCooldown ? roundedRem : 0,
+        };
       });
     },
     []

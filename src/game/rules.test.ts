@@ -292,7 +292,7 @@ test('stepTrafficVehicleAI handles Halte bus stops, Angkot ngetem nudging, and O
   const busRoute = TRAFFIC_ROUTES.busway_corridor_north;
   let bus: TrafficAISteppable = {
     x: -1.85,
-    z: -64.5,
+    z: -49.5,
     heading: Math.PI,
     speed: 8.5,
     waypointIndex: 1,

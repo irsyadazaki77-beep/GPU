@@ -138,7 +138,11 @@ export interface WorldEngineProps {
   onCompleteActiveObjective: () => void;
   onToggleTpsAim: () => void;
   onEnterOrExitInterior: (target?: EnterableInteriorSpec | null) => void;
-  onWantedEvadeUpdate: (isEvading: boolean, dt: number) => void;
+  onWantedEvadeUpdate: (
+    isEvading: boolean,
+    dt: number,
+    underOverpassCover?: boolean
+  ) => void;
   onGraphicsTierResolved?: (tier: ResolvedQualityTier) => void;
   onCombatHitFeedback?: (evt: CombatHitFeedbackEvent) => void;
   onPlayerHitAngle?: (angleRad: number) => void;
@@ -1515,7 +1519,15 @@ export class WorldEngine {
 
         const district = resolveDistrictAtPosition(phys.x, phys.z);
         if (pState.wantedLevel > 0) {
-          this.props.onWantedEvadeUpdate(!stepRes.spottedByPolice, syncDt);
+          const underOverpassCover =
+            Math.abs(phys.z - 80) < 5.5 &&
+            Math.abs(phys.x) <= 44 &&
+            phys.y < 4.0;
+          this.props.onWantedEvadeUpdate(
+            !stepRes.spottedByPolice,
+            syncDt,
+            underOverpassCover
+          );
         }
 
         // Detect high-heat police escape for NabiloGram viral highlight

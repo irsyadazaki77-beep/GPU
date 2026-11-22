@@ -5,6 +5,7 @@ import {
   calculateTurfWarsIncome,
   formatJakartaClock,
   resolveWeatherFromWorldClock,
+  shouldSuppressWorldClutter,
   stepFokusAbility,
   stepStockMarketTick,
   stepWarungStaminaBuff,
@@ -19,7 +20,13 @@ export function useGameRuntimeLoops(persistCurrentSave: () => void): void {
   const origin = useGameStore((s) => s.origin);
   const selectedStage = useGameStore((s) => s.selectedStage);
   const weatherMode = useGameStore((s) => s.weatherMode);
-  const playerState = useGameStore((s) => s.playerState);
+  const playerHp = useGameStore((s) => s.playerState.hp);
+  const currentInterior = useGameStore((s) => s.playerState.currentInterior);
+  const radioStation = useGameStore((s) => s.playerState.radioStation);
+  const completedMissionsCount = useGameStore(
+    (s) => s.playerState.completedMissions.length
+  );
+  const rupiah = useGameStore((s) => s.playerState.rupiah);
   const district = useGameStore((s) => s.district);
   const muted = useGameStore((s) => s.muted);
   const ambientCycleStep = useGameStore((s) => s.ambientCycleStep);
@@ -48,7 +55,7 @@ export function useGameRuntimeLoops(persistCurrentSave: () => void): void {
   useEffect(() => {
     const isOutdoorPlaying =
       gameState === 'playing' &&
-      playerState.currentInterior === 'exterior' &&
+      currentInterior === 'exterior' &&
       !muted;
     soundEngine.updateAmbientSoundscape(
       district.id,
@@ -62,7 +69,7 @@ export function useGameRuntimeLoops(persistCurrentSave: () => void): void {
     district.id,
     weatherMode,
     muted,
-    playerState.currentInterior,
+    currentInterior,
     ambientCycleStep,
   ]);
 
@@ -91,17 +98,24 @@ export function useGameRuntimeLoops(persistCurrentSave: () => void): void {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      gameStore.setState({ ghostHp: playerState.hp });
+      gameStore.setState({ ghostHp: playerHp });
     }, 320);
     return () => clearTimeout(timer);
-  }, [playerState.hp]);
+  }, [playerHp]);
 
   useEffect(() => {
     if (gameState !== 'playing') return;
     const interval = window.setInterval(() => {
-      gameStore.updatePlayerState((prev) =>
-        stepWarungStaminaBuff(stepFokusAbility(prev, 0.25), 0.25)
-      );
+      gameStore.updatePlayerState((prev) => {
+        if (
+          !prev.fokusActive &&
+          prev.fokusEnergy >= 100 &&
+          (prev.staminaBuffTimer || 0) <= 0
+        ) {
+          return prev;
+        }
+        return stepWarungStaminaBuff(stepFokusAbility(prev, 0.25), 0.25);
+      });
     }, 250);
     return () => clearInterval(interval);
   }, [gameState]);
@@ -109,6 +123,15 @@ export function useGameRuntimeLoops(persistCurrentSave: () => void): void {
   useEffect(() => {
     if (gameState !== 'playing') return;
     const interval = window.setInterval(() => {
+      const curState = gameStore.getState();
+      const suppressClutter = shouldSuppressWorldClutter(
+        Boolean(
+          curState.activeMission ||
+            curState.activeRace ||
+            curState.activeTurfWar ||
+            curState.activeVigilante
+        )
+      );
       gameStore.setState((prev) => {
         const nextMinutes = prev.autoTimeCycle
           ? (prev.worldTimeMinutes + 2) % 1440
@@ -134,26 +157,20 @@ export function useGameRuntimeLoops(persistCurrentSave: () => void): void {
           }
         }
 
-        const eventStep = stepWorldClockEventTicker(
-          prev.worldClockEventState,
-          nextMinutes,
-          1
-        );
+        const eventStep = suppressClutter
+          ? {
+              nextState: prev.worldClockEventState,
+              triggeredEvent: null,
+              expiredEvent: null,
+            }
+          : stepWorldClockEventTicker(
+              prev.worldClockEventState,
+              nextMinutes,
+              1
+            );
         if (eventStep.triggeredEvent) {
           const ev = eventStep.triggeredEvent;
           nextOutcome = `Info Lalu Lintas (${formatJakartaClock(nextMinutes)}): ${ev.spec.title} — ${ev.spec.detourLabel}`;
-          if (!nextWaypoint && !prev.activeMission && !nextContract) {
-            const firstPt = ev.spec.detourWaypoints[0] || [
-              ev.spec.detourTargetX,
-              ev.spec.detourTargetZ,
-            ];
-            nextWaypoint = {
-              x: firstPt[0],
-              z: firstPt[1],
-              label: `Rute Alternatif (1/${ev.spec.detourWaypoints.length}): ${ev.spec.detourLabel}`,
-              category: 'detour',
-            };
-          }
         } else if (eventStep.expiredEvent) {
           if (nextWaypoint?.category === 'detour') {
             nextWaypoint = null;
@@ -169,7 +186,9 @@ export function useGameRuntimeLoops(persistCurrentSave: () => void): void {
           worldClockEventState: eventStep.nextState,
         };
       });
-      gameStore.tickStreetRandomEvent(1);
+      if (!suppressClutter) {
+        gameStore.tickStreetRandomEvent(1);
+      }
     }, 1000);
     return () => clearInterval(interval);
   }, [gameState]);
@@ -209,24 +228,27 @@ export function useGameRuntimeLoops(persistCurrentSave: () => void): void {
   }, [gameState]);
 
   useEffect(() => {
-    if (gameState !== 'playing' || playerState.radioStation === 'off') return;
+    if (gameState !== 'playing' || radioStation === 'off') return;
     let step = 0;
-    const station = playerState.radioStation;
+    const station = radioStation;
     const interval = window.setInterval(() => {
       soundEngine.playRadioBeat(station, step++);
     }, 420);
     return () => clearInterval(interval);
-  }, [gameState, playerState.radioStation]);
+  }, [gameState, radioStation]);
 
   useEffect(() => {
-    if (gameState !== 'playing' || playerState.hp <= 0) return;
+    if (gameState !== 'playing' || playerHp <= 0) return;
     const timer = window.setTimeout(() => {
       persistCurrentSave();
     }, 650);
     return () => clearTimeout(timer);
   }, [
     gameState,
-    playerState,
+    playerHp,
+    currentInterior,
+    completedMissionsCount,
+    rupiah,
     origin,
     selectedStage,
     weatherMode,

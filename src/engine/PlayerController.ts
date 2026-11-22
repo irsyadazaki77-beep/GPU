@@ -603,13 +603,31 @@ export class PlayerController {
 
   private onPointerDown = (e: PointerEvent) => {
     if (e.target !== this.domElement) return;
+    const s = gameStore.getState();
+    if (
+      s.gameState !== 'playing' ||
+      s.phoneOpen ||
+      s.dialogueMission ||
+      s.wheelMode ||
+      s.heistBoardOpen ||
+      s.customsGarageOpen ||
+      s.warungModalOpen ||
+      s.activeHeistBreach ||
+      s.photoModeOpen
+    ) {
+      return;
+    }
     this.lastPointerX = e.clientX;
     this.lastPointerY = e.clientY;
     if (e.button === 0) {
       this.leftMouseHeld = true;
       this.isOrbitDragging = true;
       this.dragDistance = 0;
-      if (this.callbacks.getTpsAiming() || this.rightMouseHeld) {
+      if (
+        this.callbacks.getTpsAiming() ||
+        this.rightMouseHeld ||
+        s.cameraViewMode === 'first_person'
+      ) {
         this.mouseJustClicked = true;
       }
     } else if (e.button === 2) {
@@ -1212,6 +1230,9 @@ export class PlayerController {
       if (stage0) {
         choice.targetX = stage0.targetX;
         choice.targetZ = stage0.targetZ;
+        if (stage0.type === 'combat') {
+          this.spawnEnemyGroup(stage0.targetX, stage0.targetZ, stage0.targetCount);
+        }
       }
     } else {
       if (choice.objectiveType === 'combat_wave') {
@@ -1486,7 +1507,33 @@ export class PlayerController {
       this.playerRig.rightArm.rotation.x = -Math.PI * 0.75;
     }
 
-    const aimYaw = isDriveBy ? this.camYaw : this.playerPhys.facing;
+    let aimYaw = this.camYaw;
+    if (!isDriveBy) {
+      const camFwdX = Math.sin(this.camYaw);
+      const camFwdZ = Math.cos(this.camYaw);
+      let bestTargetDot = 0.90;
+      let assistEnemy: EnemyEntity | null = null;
+      for (const en of this.enemies) {
+        if (en.state !== 'alive') continue;
+        const edx = en.x - this.playerPhys.x;
+        const edz = en.z - this.playerPhys.z;
+        const edist = Math.hypot(edx, edz);
+        if (edist < 0.4 || edist > wSpec.range) continue;
+        const edot = (edx / edist) * camFwdX + (edz / edist) * camFwdZ;
+        if (edot > bestTargetDot) {
+          bestTargetDot = edot;
+          assistEnemy = en;
+        }
+      }
+      if (assistEnemy) {
+        aimYaw = Math.atan2(
+          assistEnemy.x - this.playerPhys.x,
+          assistEnemy.z - this.playerPhys.z
+        );
+      }
+      this.playerPhys.facing = aimYaw;
+      this.playerRig.group.rotation.y = aimYaw;
+    }
     const fwdX = Math.sin(aimYaw);
     const fwdZ = Math.cos(aimYaw);
     const muzzleX = this.playerPhys.x + fwdX * (isDriveBy ? 1.6 : 1.1);
@@ -2067,7 +2114,7 @@ export class PlayerController {
     const nextStoryMission =
       STORY_MISSIONS.find(
         (m) => !pState.completedMissions.includes(m.id)
-      ) || STORY_MISSIONS[0];
+      ) || null;
 
     if (activeChoice) {
       this.beaconGroup.position.set(
@@ -2265,6 +2312,21 @@ export class PlayerController {
 
     const storeState = gameStore.getState();
     const isPhotoMode = storeState.photoModeOpen;
+    const modalBlocking = Boolean(
+      storeState.phoneOpen ||
+        storeState.dialogueMission ||
+        storeState.heistBoardOpen ||
+        storeState.customsGarageOpen ||
+        storeState.warungModalOpen ||
+        storeState.activeHeistBreach
+    );
+    if (modalBlocking) {
+      this.keysHeld.clear();
+      this.keysJustPressed.clear();
+      this.mouseJustClicked = false;
+      this.leftMouseHeld = false;
+      this.rightMouseHeld = false;
+    }
     if (this.hitstopTimer > 0) {
       this.hitstopTimer = Math.max(0, this.hitstopTimer - dt);
     }
@@ -2451,11 +2513,13 @@ export class PlayerController {
       soundEngine.playTone(200, 0.1, 'triangle', 0.12, 1.35);
     }
 
+    const isFirstPersonCam = storeState.cameraViewMode === 'first_person';
+    const isAimOrFirstPerson = isTpsAim || isFirstPersonCam;
     const autoFireHeld =
       this.leftMouseHeld &&
-      (isTpsAim ||
-        pState.activeWeapon === 'rifle' ||
-        pState.activeWeapon === 'pasopati');
+      (isAimOrFirstPerson ||
+        ((!this.isOrbitDragging || this.dragDistance < 6) &&
+          (pState.activeWeapon === 'rifle' || pState.activeWeapon === 'pasopati')));
 
     if (
       this.keysJustPressed.has('KeyK') ||
@@ -2465,7 +2529,7 @@ export class PlayerController {
       virtualInputRef.hornTap = false;
       if (this.playerPhys.drivingVehicleId) {
         this.triggerHorn();
-      } else {
+      } else if (!modalBlocking && !isPhotoMode) {
         this.triggerPlayerAttack();
       }
     } else if (
@@ -2483,42 +2547,42 @@ export class PlayerController {
       this.parachuteMesh.visible = true;
       soundEngine.playParachuteOpen();
     } else if (
-      this.keysJustPressed.has('Space') ||
-      this.mouseJustClicked ||
-      autoFireHeld ||
-      virtualInputRef.fireTap ||
-      virtualInputRef.fireHeld ||
-      gpFireHeld
+      !modalBlocking &&
+      !isPhotoMode &&
+      (this.keysJustPressed.has('Space') ||
+        this.mouseJustClicked ||
+        autoFireHeld ||
+        virtualInputRef.fireTap ||
+        virtualInputRef.fireHeld ||
+        gpFireHeld)
     ) {
       virtualInputRef.fireTap = false;
-      if (
-        (!this.playerPhys.drivingVehicleId || Boolean(this.ridingPeerId)) &&
-        !isPhotoMode
-      ) {
+      if (!this.playerPhys.drivingVehicleId || Boolean(this.ridingPeerId)) {
         this.triggerPlayerAttack(Boolean(this.ridingPeerId));
       } else if (
-        this.playerPhys.drivingVehicleId &&
-        !isPhotoMode &&
-        (this.mouseJustClicked || this.leftMouseHeld || virtualInputRef.fireHeld || gpFireHeld)
+        this.mouseJustClicked ||
+        (this.leftMouseHeld && isAimOrFirstPerson) ||
+        virtualInputRef.fireHeld ||
+        gpFireHeld
       ) {
         this.triggerPlayerAttack(true);
-      } else if (
-        this.keysJustPressed.has('Space') &&
-        this.playerPhys.drivingVehicleId
-      ) {
-        const curVeh = this.traffic.vehicles.find(
-          (v) => v.id === this.playerPhys.drivingVehicleId
-        );
-        if (curVeh && !VEHICLE_SPECS[curVeh.type].isAircraft && Math.abs(curVeh.speed) < 2.2) {
-          this.triggerHorn();
-        }
       }
     }
 
     let nearbyMission: StoryMission | null = null;
-    if (!activeChoice && nextStoryMission) {
+    if (
+      !activeChoice &&
+      nextStoryMission &&
+      !storeState.activeRace &&
+      !storeState.activeTurfWar &&
+      !storeState.activeVigilante &&
+      !storeState.activeHeistBreach
+    ) {
       nearbyMission = nextStoryMission;
-      if (this.keysJustPressed.has('KeyE') || virtualInputRef.interactTap) {
+      if (
+        !modalBlocking &&
+        (this.keysJustPressed.has('KeyE') || virtualInputRef.interactTap)
+      ) {
         virtualInputRef.interactTap = false;
         this.callbacks.onOpenMissionDialog(nextStoryMission);
       }
@@ -4208,7 +4272,7 @@ export class PlayerController {
       }
     }
 
-    // Police Reinforcements
+    // Police Reinforcements (spawn clear of solid buildings along approaching perimeter)
     const maxPoliceReinforcements = Math.min(6, pState.wantedLevel + 1);
     if (
       pState.wantedLevel >= 1 &&
@@ -4216,7 +4280,15 @@ export class PlayerController {
       this.enemies.length < maxPoliceReinforcements &&
       Math.random() < 0.018
     ) {
-      this.spawnEnemyGroup(this.playerPhys.x - 16, this.playerPhys.z - 16, 2);
+      const pAng = Math.random() * Math.PI * 2;
+      const safeSpawn = resolveCircleAABBCollision(
+        this.playerPhys.x + Math.cos(pAng) * 26,
+        this.playerPhys.z + Math.sin(pAng) * 26,
+        1.2,
+        undefined,
+        this.buildingGrid
+      );
+      this.spawnEnemyGroup(safeSpawn.x, safeSpawn.z, 2);
     }
 
     // Update Zero-GC Compacted Pooled Particles, Shockwaves & Bullet Tracers

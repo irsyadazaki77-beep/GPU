@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  CITY_BUILDINGS,
   JAKARTA_DISTRICTS,
   STORY_MISSIONS,
   COMBAT_COMBO_WINDOW_MS,
@@ -9,6 +10,7 @@ import {
   NUSANTARA_PACKAGES,
   NUSANTARA_PACKAGE_REWARD_RP,
   TRAFFIC_ROUTES,
+  WANTED_TIER_SPECS,
   WORLD_MAX_BOUND,
   collectNusantaraPackage,
   computeHospitalRespawnState,
@@ -21,6 +23,7 @@ import {
   resolveDistrictAtPosition,
   stepVehicleLongitudinalSpeed,
   stepTrafficVehicleAI,
+  stepWantedSystemCooldown,
 } from './rules';
 import { isOnRoadway } from './world/spatial';
 import { STUNT_RAMPS_CATALOG } from './wave2Systems';
@@ -476,4 +479,49 @@ test('Map decluttering: All stunt ramps, parked vehicles, and street obstacles a
   assert.equal(unjammed.waypointIndex, 1, 'Unjam recovery should advance to next waypoint');
   assert.equal(unjammed.stuckTimer, 0, 'Unjam recovery should reset stuckTimer');
   assert.ok(unjammed.speed > 0, 'Unjam recovery should apply creep speed forward');
+});
+
+test('Gameplay logic polish: Traffic avoids Bundaran HI center, quest approaches stay outside buildings, and wanted stars decay one tier cleanly', async () => {
+  // 1. No traffic route waypoint or segment cuts through Bundaran HI monument center (0, +32, r=7m)
+  for (const [routeId, waypoints] of Object.entries(TRAFFIC_ROUTES)) {
+    for (let i = 0; i < waypoints.length; i++) {
+      const a = waypoints[i];
+      const b = waypoints[(i + 1) % waypoints.length];
+      const vx = b.x - a.x;
+      const vz = b.z - a.z;
+      const lenSq = vx * vx + vz * vz;
+      const t = lenSq > 0 ? Math.max(0, Math.min(1, ((0 - a.x) * vx + (32 - a.z) * vz) / lenSq)) : 0;
+      const closestX = a.x + t * vx;
+      const closestZ = a.z + t * vz;
+      const segDist = Math.hypot(closestX, closestZ - 32);
+      assert.ok(
+        segDist >= 7.0,
+        `Route ${routeId} segment ${i} cuts across Bundaran HI center (${a.x},${a.z}) -> (${b.x},${b.z}) [minDist=${segDist.toFixed(2)}m]`
+      );
+    }
+  }
+
+  // 2. Quest Director Stage 1 approach coordinates never spawn inside a solid building footprint
+  const { buildMissionStages } = await import('./questDirector');
+  for (const mission of STORY_MISSIONS) {
+    for (const choice of mission.choices) {
+      const stages = buildMissionStages(mission, choice);
+      const s0 = stages[0];
+      for (const b of CITY_BUILDINGS) {
+        const insideX = Math.abs(s0.targetX - b.x) < b.width * 0.5;
+        const insideZ = Math.abs(s0.targetZ - b.z) < b.depth * 0.5;
+        assert.equal(
+          insideX && insideZ,
+          false,
+          `Mission ${mission.id} (${choice.id}) Stage 1 point (${s0.targetX}, ${s0.targetZ}) trapped inside ${b.id}`
+        );
+      }
+    }
+  }
+
+  // 3. Wanted cooldown decays cleanly star-by-star with Semanggi overpass 1.65x cover boost
+  const spec5 = WANTED_TIER_SPECS[5];
+  const stepDecayed = stepWantedSystemCooldown(5, spec5.baseCooldownSeconds - 0.5, false, true, false, 0.5);
+  assert.equal(stepDecayed.cleared, true);
+  assert.equal(stepDecayed.wantedLevel, 4, 'Star 5 should step down to 4 rather than resetting straight to 0');
 });

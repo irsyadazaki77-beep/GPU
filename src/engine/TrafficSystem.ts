@@ -876,7 +876,7 @@ export class TrafficSystem {
         (Math.hypot(this.roadblockX - playerX, this.roadblockZ - playerZ) > 68 &&
           this.roadblockCooldown <= 0)
       ) {
-        const anchorZ = playerZ > 0 ? -38 : 38;
+        const anchorZ = playerZ > 56 ? 96 : playerZ > 0 ? 54 : -48;
         this.roadblockX = Math.abs(playerX) < 16 ? 0 : playerX > 0 ? 32 : -32;
         this.roadblockZ = anchorZ;
         this.roadblockGroup.position.set(this.roadblockX, 0, this.roadblockZ);
@@ -933,7 +933,7 @@ export class TrafficSystem {
       const spotTarget = this.chopperSpotLight.target.position;
       const inCone = Math.hypot(playerX - spotTarget.x, playerZ - spotTarget.z) < 8.5;
       const underOverpassCover =
-        Math.abs(playerZ - -26) < 4.5 && playerY < 3.0;
+        Math.abs(playerZ - 80) < 5.5 && Math.abs(playerX) <= 44 && playerY < 4.0;
       if (inCone && !underOverpassCover) {
         spottedByPolice = true;
       }

@@ -3,6 +3,7 @@ import type {
   StoryChoiceOption,
   StoryMission,
 } from './types';
+import { resolveCircleAABBCollision } from './world/spatial';
 
 export type MissionStageType = 'travel' | 'combat' | 'escape' | 'interact';
 
@@ -44,9 +45,12 @@ export function buildMissionStages(
 ): MissionStageSpec[] {
   const stages: MissionStageSpec[] = [];
 
-  // Stage 1: Approach / Infiltrate the designated area
-  const approachX = Math.round((choice.targetX + mission.markerX) * 0.5);
-  const approachZ = Math.round((choice.targetZ + mission.markerZ) * 0.5);
+  // Stage 1: Approach / Infiltrate the designated area (resolved clear of solid buildings)
+  const rawApproachX = Math.round((choice.targetX + mission.markerX) * 0.5);
+  const rawApproachZ = Math.round((choice.targetZ + mission.markerZ) * 0.5);
+  const safeApproach = resolveCircleAABBCollision(rawApproachX, rawApproachZ, 2.5);
+  const approachX = Math.round(safeApproach.x);
+  const approachZ = Math.round(safeApproach.z);
 
   stages.push({
     stageIndex: 0,

@@ -92,7 +92,15 @@ export function useGameKeyboardShortcuts({
 
       if (s.gameState !== 'playing' || isTyping) return;
 
-      if (e.code === 'Tab') {
+      const modalBlocking = Boolean(
+        s.dialogueMission ||
+          s.heistBoardOpen ||
+          s.customsGarageOpen ||
+          s.warungModalOpen ||
+          s.activeHeistBreach
+      );
+
+      if (e.code === 'Tab' && !modalBlocking) {
         e.preventDefault();
         gameStore.setState((prev) => ({
           phoneOpen: !prev.phoneOpen,
@@ -103,7 +111,12 @@ export function useGameKeyboardShortcuts({
           warungModalOpen: false,
           photoModeOpen: false,
         }));
-      } else if (e.code === 'KeyN') {
+        return;
+      }
+
+      if (modalBlocking || s.phoneOpen) return;
+
+      if (e.code === 'KeyN') {
         e.preventDefault();
         soundEngine.playPickup();
         gameStore.setState((prev) => ({
@@ -188,8 +201,6 @@ export function useGameKeyboardShortcuts({
         onCycleWeather();
       } else if (e.code === 'KeyM') {
         gameStore.toggleMute();
-      } else if (e.code === 'KeyR' && !s.drivingVehicle) {
-        onStartNewGame(s.origin, s.selectedStage);
       } else {
         const slotMap: Record<string, WeaponId> = {
           Digit1: 'fist',
