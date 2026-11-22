@@ -592,8 +592,8 @@ let state: GameStoreSnapshot = {
   gameState: isAutostart ? 'playing' : 'title',
   origin: 'anak_jalanan',
   selectedStage: 5,
-  weatherMode: 'senja',
-  worldTimeMinutes: 1050, // 17:30 WIB Senja Emas
+  weatherMode: 'siang',
+  worldTimeMinutes: 630, // 10:30 WIB Siang Terik Khatulistiwa
   autoTimeCycle: true,
   outcomeMode: 'victory',
   playerState: initialPlayer,

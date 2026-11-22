@@ -119,11 +119,14 @@ const CinematicGradeShader = {
         col = mix(col, (col + s1 + s2) * 0.3333, min(0.58, speedBlurMask * 0.65));
       }
 
-      // Tropical Vice-Jakarta Split-Tone Grade (warm coral-amber highlights + cool deep indigo shadows)
+      // Tropical Vice-Jakarta Split-Tone Grade + GTA Daylight Vibrance & Midtone Lift
       float lumaBase = dot(col, vec3(0.299, 0.587, 0.114));
-      vec3 shadowTint = vec3(col.r * 0.96, col.g * 0.98, col.b * 1.07);
-      vec3 highlightTint = vec3(col.r * 1.06, col.g * 1.01, col.b * 0.96);
-      col = mix(shadowTint, highlightTint, smoothstep(0.18, 0.78, lumaBase));
+      vec3 shadowTint = vec3(col.r * 0.98, col.g * 1.0, col.b * 1.05);
+      vec3 highlightTint = vec3(col.r * 1.06, col.g * 1.03, col.b * 0.98);
+      col = mix(shadowTint, highlightTint, smoothstep(0.14, 0.78, lumaBase));
+      float satLuma = dot(col, vec3(0.299, 0.587, 0.114));
+      col = mix(vec3(satLuma), col, 1.14);
+      col = pow(max(col, vec3(0.0)), vec3(0.94));
 
       // Subtle warm golden Fokus highlight + peripheral kinetic energy rim
       vec3 fokusTint = vec3(col.r * 1.08, col.g * 1.03, col.b * 0.86);

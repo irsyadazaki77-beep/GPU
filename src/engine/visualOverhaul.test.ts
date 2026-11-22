@@ -19,9 +19,9 @@ test('computeTimeOfDayToneState scales exposure, IBL, bloom, and night windows s
   const sunset = computeTimeOfDayToneState(0.58, 0.35);
   const night = computeTimeOfDayToneState(1.0, 0.2);
 
-  assert.ok(day.exposure >= 1.05 && day.exposure <= 1.12);
-  assert.ok(sunset.exposure >= 1.0 && sunset.exposure <= 1.08);
-  assert.ok(night.exposure >= 0.9 && night.exposure <= 1.02);
+  assert.ok(day.exposure >= 1.12 && day.exposure <= 1.28);
+  assert.ok(sunset.exposure >= 1.05 && day.exposure >= sunset.exposure);
+  assert.ok(night.exposure >= 0.98 && night.exposure <= 1.1);
 
   // IBL must remain active enough to give realistic reflections (never crushed to 0.12)
   assert.ok(day.envIntensity > 0.6);

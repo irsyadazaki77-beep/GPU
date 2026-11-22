@@ -45,11 +45,11 @@ export function computeTimeOfDayToneState(
   const n = clamp01(nightFactor);
   const w = clamp01(wetnessFactor);
 
-  // Daylight 1.12 -> Golden Hour ~1.08 -> Night 1.02 for AgX Filmic curve
-  const exposure = lerp(1.12, 1.02, n) - w * 0.04;
+  // Daylight 1.26 -> Golden Hour ~1.18 -> Night 1.08 for bright GTA-style AgX Filmic curve
+  const exposure = lerp(1.26, 1.08, n) - w * 0.04;
 
   // High-contrast IBL reflection strength so clearcoat supercars & glass curtain-walls mirror sky/city glow
-  const envIntensity = Math.max(0.46, lerp(0.94, 0.56, n) - w * 0.04);
+  const envIntensity = Math.max(0.56, lerp(1.05, 0.64, n) - w * 0.04);
 
   // Filmic bloom: sun-kissed highlights in day/senja, rich neon/headlight halation at night
   const bloomThreshold = lerp(0.92, 0.82, n);

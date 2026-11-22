@@ -295,7 +295,7 @@ export class CityRenderer {
     urbanGroundCanvas.height = 256;
     const ugCtx = urbanGroundCanvas.getContext('2d');
     if (ugCtx) {
-      ugCtx.fillStyle = '#141c24';
+      ugCtx.fillStyle = '#242f3d';
       ugCtx.fillRect(0, 0, 256, 256);
       ugCtx.strokeStyle = 'rgba(148, 163, 184, 0.08)';
       ugCtx.lineWidth = 2;
@@ -337,8 +337,8 @@ export class CityRenderer {
     const plazaGeo = new THREE.CircleGeometry(18.5, 48);
     plazaGeo.rotateX(-Math.PI / 2);
     const plazaMat = new THREE.MeshStandardMaterial({
-      color: 0x222b3a,
-      roughness: 0.92,
+      color: 0x334155,
+      roughness: 0.88,
       metalness: 0.02,
       envMapIntensity: 0.08,
       polygonOffset: true,
@@ -1480,8 +1480,8 @@ if (uWetness > 0.04) {
 
     if (parkTurfPlacements.length > 0) {
       const turfMat = new THREE.MeshStandardMaterial({
-        color: 0x14532d,
-        roughness: 0.95,
+        color: 0x16a34a,
+        roughness: 0.9,
         metalness: 0.01,
       });
       const parkPathMat = new THREE.MeshStandardMaterial({

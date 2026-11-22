@@ -174,8 +174,9 @@ export class WeatherLightingSystem {
             float cumulusMask = smoothstep(coverage, coverage + 0.32, c1) * smoothstep(0.005, 0.18, h);
             float cirrusMask = smoothstep(0.52, 0.82, c2) * smoothstep(0.03, 0.28, h) * 0.45;
             float mieForward = pow(sunAmt, 7.5) * uSunGlowStrength;
-            vec3 cloudDarkBase = mix(uHorizonColor * 0.48, uTopColor * 0.36, 0.62);
-            vec3 cloudLitRim = mix(uSunColor * (0.62 + mieForward * 1.45), vec3(0.55, 0.65, 0.8), uWetness * 0.65);
+            vec3 dayCloudBase = mix(uHorizonColor * 0.86, vec3(0.94, 0.97, 1.0), 1.0 - uNightFactor);
+            vec3 cloudDarkBase = mix(dayCloudBase, uTopColor * 0.42, uNightFactor * 0.65);
+            vec3 cloudLitRim = mix(vec3(1.0, 0.98, 0.94) * (0.92 + mieForward * 1.25), vec3(0.68, 0.76, 0.88), uWetness * 0.55);
             float edgeDensity = smoothstep(coverage + 0.36, coverage + 0.04, c1);
             vec3 cloudCol = mix(cloudDarkBase, cloudLitRim, clamp(edgeDensity * 0.72 + mieForward * 0.55, 0.0, 1.0)) + vec3(0.46, 0.60, 0.88) * uLightning * 0.9;
             col = mix(col, cloudCol, clamp(cumulusMask * mix(0.62, 0.88, uWetness) + cirrusMask * 0.35, 0.0, 0.92));
@@ -207,12 +208,12 @@ export class WeatherLightingSystem {
     this.skyDomeMesh.frustumCulled = false;
     scene.add(this.skyDomeMesh);
 
-    this.hemiLight = new THREE.HemisphereLight(0x93c5fd, 0x1e293b, 0.56);
+    this.hemiLight = new THREE.HemisphereLight(0xbae6fd, 0x64748b, 1.22);
     this.hemiLight.position.set(0, 60, 0);
     scene.add(this.hemiLight);
 
     const d = this.shadowHalfExtent;
-    this.sunLight = new THREE.DirectionalLight(0xffedd5, 1.15);
+    this.sunLight = new THREE.DirectionalLight(0xfffbeb, 2.65);
     this.sunLight.position.copy(this.sunOffset);
     this.sunLight.castShadow = !isSoftwareGl;
     this.sunLight.shadow.mapSize.width = this.shadowMapSize;
