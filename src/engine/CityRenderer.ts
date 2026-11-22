@@ -288,14 +288,46 @@ export class CityRenderer {
       this.collectibleMeshes.set(pkg.id, g);
     }
 
-    // 1. Extended Terrain & Monas Plaza
+    // 1. Extended Terrain & Monas Plaza (Procedural Urban Pavement & Aggregate Texture)
+    const urbanGroundCanvas = document.createElement('canvas');
+    urbanGroundCanvas.width = 256;
+    urbanGroundCanvas.height = 256;
+    const ugCtx = urbanGroundCanvas.getContext('2d');
+    if (ugCtx) {
+      ugCtx.fillStyle = '#141c24';
+      ugCtx.fillRect(0, 0, 256, 256);
+      ugCtx.strokeStyle = 'rgba(148, 163, 184, 0.08)';
+      ugCtx.lineWidth = 2;
+      for (let g = 0; g <= 256; g += 32) {
+        ugCtx.beginPath();
+        ugCtx.moveTo(g, 0);
+        ugCtx.lineTo(g, 256);
+        ugCtx.moveTo(0, g);
+        ugCtx.lineTo(256, g);
+        ugCtx.stroke();
+      }
+      for (let i = 0; i < 650; i++) {
+        const rx = ((i * 73) % 253) + 1;
+        const ry = ((i * 137) % 251) + 1;
+        ugCtx.fillStyle = i % 3 === 0 ? 'rgba(30, 41, 59, 0.35)' : 'rgba(203, 213, 225, 0.04)';
+        ugCtx.fillRect(rx, ry, 3, 3);
+      }
+    }
+    const urbanGroundTex = new THREE.CanvasTexture(urbanGroundCanvas);
+    urbanGroundTex.wrapS = THREE.RepeatWrapping;
+    urbanGroundTex.wrapT = THREE.RepeatWrapping;
+    urbanGroundTex.repeat.set(42, 42);
+    urbanGroundTex.colorSpace = THREE.SRGBColorSpace;
+    urbanGroundTex.anisotropy = maxAnisotropy;
+
     const groundGeo = new THREE.PlaneGeometry(760, 760);
     groundGeo.rotateX(-Math.PI / 2);
     const groundMat = new THREE.MeshStandardMaterial({
-      color: 0x0f1a14,
-      roughness: 0.96,
-      metalness: 0.02,
-      envMapIntensity: 0.06,
+      color: 0xffffff,
+      map: urbanGroundTex,
+      roughness: 0.92,
+      metalness: 0.04,
+      envMapIntensity: 0.12,
     });
     const groundMesh = new THREE.Mesh(groundGeo, groundMat);
     groundMesh.receiveShadow = true;
@@ -1450,17 +1482,54 @@ if (uWetness > 0.04) {
         roughness: 0.95,
         metalness: 0.01,
       });
+      const parkPathMat = new THREE.MeshStandardMaterial({
+        color: 0x64748b,
+        roughness: 0.85,
+        metalness: 0.05,
+      });
+      const fountainWaterMat = new THREE.MeshStandardMaterial({
+        color: 0x0284c7,
+        emissive: 0x0369a1,
+        emissiveIntensity: 0.25,
+        roughness: 0.18,
+        metalness: 0.5,
+      });
       const turfInst = new THREE.InstancedMesh(boxGeo, turfMat, parkTurfPlacements.length);
+      const pathEWInst = new THREE.InstancedMesh(boxGeo, parkPathMat, parkTurfPlacements.length);
+      const pathNSInst = new THREE.InstancedMesh(boxGeo, parkPathMat, parkTurfPlacements.length);
+      const fountainInst = new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(1.35, 1.5, 0.36, 12),
+        fountainWaterMat,
+        parkTurfPlacements.length
+      );
       parkTurfPlacements.forEach((p, i) => {
+        dummy.rotation.set(0, 0, 0);
         dummy.position.set(p.x, 0.18, p.z);
         dummy.scale.set(p.w, 0.08, p.d);
-        dummy.rotation.set(0, 0, 0);
         dummy.updateMatrix();
         turfInst.setMatrixAt(i, dummy.matrix);
+
+        dummy.position.set(p.x, 0.23, p.z);
+        dummy.scale.set(p.w * 0.94, 0.04, 1.45);
+        dummy.updateMatrix();
+        pathEWInst.setMatrixAt(i, dummy.matrix);
+
+        dummy.position.set(p.x, 0.23, p.z);
+        dummy.scale.set(1.45, 0.04, p.d * 0.94);
+        dummy.updateMatrix();
+        pathNSInst.setMatrixAt(i, dummy.matrix);
+
+        dummy.position.set(p.x, 0.34, p.z);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        fountainInst.setMatrixAt(i, dummy.matrix);
       });
       turfInst.instanceMatrix.needsUpdate = true;
+      pathEWInst.instanceMatrix.needsUpdate = true;
+      pathNSInst.instanceMatrix.needsUpdate = true;
+      fountainInst.instanceMatrix.needsUpdate = true;
       turfInst.receiveShadow = true;
-      group.add(turfInst);
+      group.add(turfInst, pathEWInst, pathNSInst, fountainInst);
     }
 
     // 1. CBD Glass Skyscrapers (Podium + Atrium Glass + Stepped Lower/Upper Tower + Glowing Crown + Spire)
@@ -1509,6 +1578,8 @@ if (uWetness > 0.04) {
       const cbdLowerInst = new THREE.InstancedMesh(boxGeo, skyMat, cbdPlacements.length);
       const cbdUpperInst = new THREE.InstancedMesh(boxGeo, skyMat, cbdPlacements.length);
       const cbdCrownInst = new THREE.InstancedMesh(boxGeo, crownTrimMat, cbdPlacements.length);
+      const cbdHvacInst = new THREE.InstancedMesh(boxGeo, podiumMat, cbdPlacements.length);
+      const cbdFinInst = new THREE.InstancedMesh(boxGeo, crownTrimMat, cbdPlacements.length);
       const cbdSpireInst = new THREE.InstancedMesh(
         new THREE.CylinderGeometry(0.08, 0.2, 1, 6),
         podiumMat,
@@ -1551,17 +1622,46 @@ if (uWetness > 0.04) {
         color.setHex(b.accent);
         cbdCrownInst.setColorAt(i, color);
 
+        dummy.position.set(b.x, roofY + 1.05, b.z);
+        dummy.scale.set(b.w * 0.38, 1.15, b.d * 0.38);
+        dummy.updateMatrix();
+        cbdHvacInst.setMatrixAt(i, dummy.matrix);
+
+        dummy.position.set(b.x, b.podiumH + b.h * 0.5, b.z);
+        dummy.scale.set(b.w * 1.02, b.h * 0.92, 0.28);
+        dummy.updateMatrix();
+        cbdFinInst.setMatrixAt(i, dummy.matrix);
+        cbdFinInst.setColorAt(i, color);
+
         dummy.position.set(b.x, roofY + 2.8, b.z);
         dummy.scale.set(1, 4.6, 1);
         dummy.updateMatrix();
         cbdSpireInst.setMatrixAt(i, dummy.matrix);
       });
 
-      [cbdPodiumInst, cbdLobbyInst, cbdLowerInst, cbdUpperInst, cbdCrownInst, cbdSpireInst].forEach((inst) => {
+      [
+        cbdPodiumInst,
+        cbdLobbyInst,
+        cbdLowerInst,
+        cbdUpperInst,
+        cbdCrownInst,
+        cbdHvacInst,
+        cbdFinInst,
+        cbdSpireInst,
+      ].forEach((inst) => {
         inst.instanceMatrix.needsUpdate = true;
         if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
       });
-      group.add(cbdPodiumInst, cbdLobbyInst, cbdLowerInst, cbdUpperInst, cbdCrownInst, cbdSpireInst);
+      group.add(
+        cbdPodiumInst,
+        cbdLobbyInst,
+        cbdLowerInst,
+        cbdUpperInst,
+        cbdCrownInst,
+        cbdHvacInst,
+        cbdFinInst,
+        cbdSpireInst
+      );
     }
 
     // 2. Jakarta Multi-Bay Ruko & Heritage Shophouses (Step Massing + Shopfront Awning + Pitched Clay Roof + Toren Water Tanks)
@@ -1605,6 +1705,15 @@ if (uWetness > 0.04) {
       const rukoBodyInst = new THREE.InstancedMesh(boxGeo, rukoMat, rukoPlacements.length);
       const rukoAwningInst = new THREE.InstancedMesh(boxGeo, awningMat, rukoPlacements.length);
       const rukoRoofInst = new THREE.InstancedMesh(roofConeGeo, roofMat, rukoPlacements.length);
+      const rukoShopGlassMat = new THREE.MeshStandardMaterial({
+        color: 0xfef3c7,
+        emissive: 0xf59e0b,
+        emissiveIntensity: 0.36,
+        roughness: 0.25,
+        metalness: 0.15,
+      });
+      this.buildingEmissiveMats.push(rukoShopGlassMat);
+      const rukoShopInst = new THREE.InstancedMesh(boxGeo, rukoShopGlassMat, rukoPlacements.length);
 
       const torenList = rukoPlacements.filter((r) => r.hasToren);
       const torenInst =
@@ -1626,6 +1735,11 @@ if (uWetness > 0.04) {
         color.setHex(r.color);
         rukoBodyInst.setColorAt(i, color);
 
+        dummy.position.set(r.x, 1.45, r.z);
+        dummy.scale.set(r.w * 0.88, 2.2, r.d + 0.16);
+        dummy.updateMatrix();
+        rukoShopInst.setMatrixAt(i, dummy.matrix);
+
         dummy.position.set(r.x, 2.85, r.z);
         dummy.scale.set(r.w + 0.35, 0.26, r.d + 1.1);
         dummy.updateMatrix();
@@ -1646,11 +1760,11 @@ if (uWetness > 0.04) {
         }
       });
 
-      [rukoBodyInst, rukoAwningInst, rukoRoofInst].forEach((inst) => {
+      [rukoBodyInst, rukoShopInst, rukoAwningInst, rukoRoofInst].forEach((inst) => {
         inst.instanceMatrix.needsUpdate = true;
         if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
       });
-      group.add(rukoBodyInst, rukoAwningInst, rukoRoofInst);
+      group.add(rukoBodyInst, rukoShopInst, rukoAwningInst, rukoRoofInst);
       if (torenInst) {
         torenInst.instanceMatrix.needsUpdate = true;
         group.add(torenInst);

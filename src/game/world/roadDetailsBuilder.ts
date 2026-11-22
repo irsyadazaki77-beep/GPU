@@ -61,6 +61,22 @@ export function buildProceduralRoadDetailSystem(
     { x: 26.1, z: 0, w: 2.5, d: 13.4 },
     { x: -38.3, z: 0, w: 2.5, d: 13.4 },
     { x: 38.3, z: 0, w: 2.5, d: 13.4 },
+    // Arterial & Outer-Ring Intersections
+    { x: 0, z: -66, w: 13.8, d: 10.8 },
+    { x: 0, z: 80, w: 13.8, d: 10.8 },
+    { x: 0, z: 128, w: 13.8, d: 11.8 },
+    { x: -84, z: 0, w: 9.8, d: 13.8 },
+    { x: 84, z: 0, w: 9.8, d: 13.8 },
+    { x: -84, z: 32, w: 9.8, d: 9.8 },
+    { x: 84, z: 32, w: 9.8, d: 9.8 },
+    { x: -84, z: 80, w: 9.8, d: 10.8 },
+    { x: 84, z: 80, w: 9.8, d: 10.8 },
+    { x: -84, z: 128, w: 9.8, d: 11.8 },
+    { x: 84, z: 128, w: 9.8, d: 11.8 },
+    { x: -128, z: 0, w: 11.8, d: 13.8 },
+    { x: 128, z: 0, w: 11.8, d: 13.8 },
+    { x: -128, z: 128, w: 11.8, d: 11.8 },
+    { x: 128, z: 128, w: 11.8, d: 11.8 },
   ];
   const cleanoutMat = trackMat(
     new THREE.MeshStandardMaterial({
@@ -109,6 +125,15 @@ export function buildProceduralRoadDetailSystem(
     { x: 0, z: -32, w: 12.6, d: 8.8 },
     { x: -32, z: 0, w: 8.8, d: 12.6 },
     { x: 32, z: 0, w: 8.8, d: 12.6 },
+    { x: 0, z: -66, w: 12.6, d: 9.6 },
+    { x: 0, z: 80, w: 12.6, d: 9.6 },
+    { x: 0, z: 128, w: 12.6, d: 10.6 },
+    { x: -84, z: 0, w: 8.8, d: 12.6 },
+    { x: 84, z: 0, w: 8.8, d: 12.6 },
+    { x: -84, z: 80, w: 8.8, d: 9.6 },
+    { x: 84, z: 80, w: 8.8, d: 9.6 },
+    { x: -128, z: 0, w: 10.6, d: 12.6 },
+    { x: 128, z: 0, w: 10.6, d: 12.6 },
   ];
   const yellowBoxInst = new THREE.InstancedMesh(
     unitPlaneGeo,
@@ -286,7 +311,183 @@ export function buildProceduralRoadDetailSystem(
       pushCrosswalk(sx * 26.1, sz * 32, 'ew', 10, 2.05);
       pushCrosswalk(sx * 38.3, sz * 32, 'ew', 10, 2.05);
     }
+    // Outer arterial crosswalks at x = +-84, x = +-128, z = -66, z = 80, z = 128
+    pushCrosswalk(sx * 84, -8.8, 'ns', 10, 2.05);
+    pushCrosswalk(sx * 84, 8.8, 'ns', 10, 2.05);
+    pushCrosswalk(sx * 84, 25.8, 'ns', 10, 2.05);
+    pushCrosswalk(sx * 84, 38.2, 'ns', 10, 2.05);
+    pushCrosswalk(sx * 128, -8.8, 'ns', 12, 2.05);
+    pushCrosswalk(sx * 128, 8.8, 'ns', 12, 2.05);
   }
+  pushCrosswalk(0, -59.2, 'ns', 14, 2.05);
+  pushCrosswalk(0, 73.2, 'ns', 14, 2.05);
+  pushCrosswalk(0, 86.8, 'ns', 14, 2.05);
+  pushCrosswalk(0, 120.8, 'ns', 14, 2.05);
+  pushCrosswalk(0, 135.2, 'ns', 14, 2.05);
+
+  // 4b. Full-City Arterial, Outer-Ring, JORR, Bundaran HI & Tol Layang Lane Markings
+  const centerYellowMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xd97706,
+      roughness: 0.9,
+      metalness: 0.02,
+      transparent: true,
+      opacity: 0.78,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    })
+  );
+  const laneDashMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xcbd5e1,
+      roughness: 0.92,
+      metalness: 0.02,
+      transparent: true,
+      opacity: 0.64,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    })
+  );
+
+  const yellowLines: { x: number; y: number; z: number; w: number; d: number }[] = [];
+  const whiteDashes: { x: number; y: number; z: number; rotY: number; w: number; d: number }[] = [];
+
+  const isNearIntersection = (x: number, z: number): boolean => {
+    if (x * x + z * z < 21 * 21) return true;
+    if (Math.hypot(x, z - 32) < 13.5) return true;
+    const roadXs = [-208, -128, -84, -32, 0, 32, 84, 128, 208];
+    const roadZs = [-66, -32, 0, 32, 80, 128, 208];
+    let hitX = false;
+    let hitZ = false;
+    for (const rx of roadXs) {
+      if (Math.abs(x - rx) < 7.8) {
+        hitX = true;
+        break;
+      }
+    }
+    for (const rz of roadZs) {
+      if (Math.abs(z - rz) < 7.8) {
+        hitZ = true;
+        break;
+      }
+    }
+    return hitX && hitZ;
+  };
+
+  // N-S Arteries & Outer Rings: x = -208, -128, -84, -32, 0, 32, 84, 128, 208
+  for (const rx of [-208, -128, -84, -32, 0, 32, 84, 128, 208]) {
+    const laneOffset = Math.abs(rx) === 0 || Math.abs(rx) === 208 ? 3.5 : Math.abs(rx) === 128 ? 3.0 : 2.5;
+    for (let z = -62; z <= 204; z += 7.5) {
+      if (isNearIntersection(rx, z)) continue;
+      if (rx !== 0) {
+        yellowLines.push({ x: rx, y: 0.049, z, w: 0.18, d: 4.8 });
+      }
+      whiteDashes.push(
+        { x: rx - laneOffset, y: 0.049, z, rotY: 0, w: 0.14, d: 2.8 },
+        { x: rx + laneOffset, y: 0.049, z, rotY: 0, w: 0.14, d: 2.8 }
+      );
+    }
+  }
+
+  // E-W Arteries & Outer Rings: z = -66, -32, 0, 32, 80, 128, 208
+  for (const rz of [-66, -32, 0, 32, 80, 128, 208]) {
+    const laneOffset = rz === 0 || rz === 208 ? 3.5 : rz === 128 ? 3.0 : 2.5;
+    for (let x = -204; x <= 204; x += 7.5) {
+      if (isNearIntersection(x, rz)) continue;
+      yellowLines.push({ x, y: 0.049, z: rz, w: 4.8, d: 0.18 });
+      whiteDashes.push(
+        { x, y: 0.049, z: rz - laneOffset, rotY: Math.PI / 2, w: 0.14, d: 2.8 },
+        { x, y: 0.049, z: rz + laneOffset, rotY: Math.PI / 2, w: 0.14, d: 2.8 }
+      );
+    }
+  }
+
+  // Tol Layang Semanggi Elevated Deck Center Divider & Lane Dashes (z = +80, y = 6.23)
+  for (let x = -38; x <= 38; x += 6.5) {
+    yellowLines.push({ x, y: 6.22, z: 80, w: 4.4, d: 0.22 });
+    whiteDashes.push(
+      { x, y: 6.22, z: 77.9, rotY: Math.PI / 2, w: 0.15, d: 2.6 },
+      { x, y: 6.22, z: 82.1, rotY: Math.PI / 2, w: 0.15, d: 2.6 }
+    );
+  }
+
+  // Bundaran HI Roundabout Circular Lane Guide Dashes (r = 8.4m around 0, +32)
+  for (let ai = 0; ai < 18; ai++) {
+    const ang = (ai / 18) * Math.PI * 2;
+    whiteDashes.push({
+      x: Math.cos(ang) * 8.4,
+      y: 0.052,
+      z: 32 + Math.sin(ang) * 8.4,
+      rotY: -ang,
+      w: 0.16,
+      d: 1.65,
+    });
+  }
+
+  const yellowLineInst = new THREE.InstancedMesh(
+    unitPlaneGeo,
+    centerYellowMat,
+    yellowLines.length
+  );
+  yellowLines.forEach((yl, i) => {
+    dummy.position.set(yl.x, yl.y, yl.z);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(yl.w, 1, yl.d);
+    dummy.updateMatrix();
+    yellowLineInst.setMatrixAt(i, dummy.matrix);
+  });
+  yellowLineInst.instanceMatrix.needsUpdate = true;
+  group.add(yellowLineInst);
+
+  const whiteDashInst = new THREE.InstancedMesh(
+    unitPlaneGeo,
+    laneDashMat,
+    whiteDashes.length
+  );
+  whiteDashes.forEach((wd, i) => {
+    dummy.position.set(wd.x, wd.y, wd.z);
+    dummy.rotation.set(0, wd.rotY, 0);
+    dummy.scale.set(wd.w, 1, wd.d);
+    dummy.updateMatrix();
+    whiteDashInst.setMatrixAt(i, dummy.matrix);
+  });
+  whiteDashInst.instanceMatrix.needsUpdate = true;
+  group.add(whiteDashInst);
+
+  // Curbside Storm-Drainage Iron Grates along Thamrin-Sudirman & Merdeka
+  const grateMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x0f172a,
+      metalness: 0.72,
+      roughness: 0.55,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    })
+  );
+  const grateCoords: { x: number; z: number; rotY: number }[] = [];
+  for (let z = -56; z <= 116; z += 14) {
+    if (isNearIntersection(0, z)) continue;
+    grateCoords.push({ x: -6.65, z, rotY: 0 }, { x: 6.65, z, rotY: 0 });
+  }
+  const grateInst = new THREE.InstancedMesh(
+    unitPlaneGeo,
+    grateMat,
+    grateCoords.length
+  );
+  grateCoords.forEach((gc, i) => {
+    dummy.position.set(gc.x, 0.051, gc.z);
+    dummy.rotation.set(0, gc.rotY, 0);
+    dummy.scale.set(0.48, 1, 1.15);
+    dummy.updateMatrix();
+    grateInst.setMatrixAt(i, dummy.matrix);
+  });
+  grateInst.instanceMatrix.needsUpdate = true;
+  group.add(grateInst);
 
   const zebraInst = new THREE.InstancedMesh(
     unitPlaneGeo,

@@ -37,47 +37,8 @@ export function buildJakartaDistrictProps(
   const color = new THREE.Color();
 
   // =========================================================================
-  // 1. SUDIRMAN–THAMRIN TRANSJAKARTA RED BUSWAY CORRIDOR + SEPARATOR CURBS
+  // 1. SUDIRMAN–THAMRIN TRANSJAKARTA SEPARATOR CURBS
   // =========================================================================
-  const buswayTex = proceduralTextures.getAsphaltTextures(
-    maxAnisotropy,
-    'busway'
-  );
-  buswayTex.map.repeat.set(1, 3);
-  buswayTex.bumpMap.repeat.set(1, 3);
-  buswayTex.roughnessMap.repeat.set(1, 3);
-
-  const buswayMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    map: buswayTex.map,
-    bumpMap: buswayTex.bumpMap,
-    bumpScale: 0.04,
-    roughnessMap: buswayTex.roughnessMap,
-    roughness: 0.84,
-    metalness: 0.04,
-    envMapIntensity: 0.45,
-    polygonOffset: true,
-    polygonOffsetFactor: -1,
-    polygonOffsetUnits: -1,
-  });
-
-  // Clean Sudirman–Thamrin & Blok M busway segments positioned between intersections
-  // (y=0.040 sits cleanly above nsRoad y=0.036 and below crosswalks/yellow-box decals y=0.05+)
-  const busSegments: { zCenter: number; length: number }[] = [
-    { zCenter: -49, length: 24 }, // Glodok–Kota Tua North Corridor
-    { zCenter: -22.5, length: 6.5 }, // North of Monas Plaza
-    { zCenter: 58, length: 26 }, // Sudirman Central Corridor (Bundaran HI - Semanggi)
-    { zCenter: 104, length: 34 }, // Blok M Corridor South
-  ];
-  for (const seg of busSegments) {
-    const segGeo = new THREE.PlaneGeometry(13.6, seg.length);
-    segGeo.rotateX(-Math.PI / 2);
-    const segMesh = new THREE.Mesh(segGeo, buswayMat);
-    segMesh.position.set(0, 0.04, seg.zCenter);
-    segMesh.receiveShadow = true;
-    group.add(segMesh);
-  }
-
   // Instanced concrete separator curbs along the TransJakarta busway lane
   const curbCoords: { x: number; z: number }[] = [];
   for (let z = -60; z <= -22; z += 5.5) {
@@ -114,84 +75,107 @@ export function buildJakartaDistrictProps(
   group.add(busCurbInst);
 
   // =========================================================================
-  // 2. TRANSJAKARTA HALTE SHELTERS (Sudirman–Thamrin & Blok M Corridor)
+  // 2. ICONIC JAKARTA JPO (JEMBATAN PENYEBERANGAN ORANG) PHINISI SKYBRIDGES
   // =========================================================================
-  const halteSteelMat = new THREE.MeshStandardMaterial({
-    color: 0x1e3a5f,
+  const jpoSteelMat = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
     metalness: 0.72,
     roughness: 0.34,
     envMapIntensity: 0.85,
   });
-  const halteGlassMat = new THREE.MeshPhysicalMaterial({
-    color: 0x0ea5e9,
+  const jpoSailMat = new THREE.MeshStandardMaterial({
+    color: 0xea580c,
+    emissive: 0xc2410c,
+    emissiveIntensity: 0.28,
+    roughness: 0.4,
+    metalness: 0.35,
+  });
+  const jpoGlassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x38bdf8,
     roughness: 0.14,
     metalness: 0.25,
     clearcoat: 0.8,
     transparent: true,
-    opacity: 0.56,
+    opacity: 0.48,
     envMapIntensity: 1.0,
   });
-  const halteNeonMat = new THREE.MeshStandardMaterial({
-    color: 0x38bdf8,
-    emissive: 0x0ea5e9,
-    emissiveIntensity: 0.9,
+  const jpoLedMat = new THREE.MeshStandardMaterial({
+    color: 0xfef3c7,
+    emissive: 0xf59e0b,
+    emissiveIntensity: 1.15,
     roughness: 0.25,
   });
 
-  const halteLocations: { x: number; z: number; rotY: number }[] = [
-    { x: -9.4, z: -46, rotY: 0 }, // Halte Bundaran HI / Sudirman
-    { x: 9.4, z: -60, rotY: Math.PI }, // Halte Dukuh Atas / Thamrin
-    { x: -9.4, z: 44, rotY: 0 }, // Halte Blok M Corridor
-    { x: 9.8, z: 21, rotY: Math.PI }, // Halte Monas Selatan
-  ];
+  for (const jpoZ of [-42, 54]) {
+    const jpoGrp = new THREE.Group();
+    jpoGrp.position.set(0, 0, jpoZ);
 
-  for (const h of halteLocations) {
-    if (isNearBuilding(h.x, h.z, 2.0)) continue;
-    const hGrp = new THREE.Group();
-    hGrp.position.set(h.x, 0.14, h.z);
-    hGrp.rotation.y = h.rotY;
-
-    const platform = new THREE.Mesh(
-      new THREE.BoxGeometry(2.5, 0.36, 9.4),
-      halteSteelMat
+    // Main overhead pedestrian deck (5.4m clearance above Sudirman road)
+    const deck = new THREE.Mesh(
+      new THREE.BoxGeometry(17.6, 0.34, 2.4),
+      jpoSteelMat
     );
-    platform.position.y = 0.18;
-    platform.receiveShadow = true;
-    hGrp.add(platform);
+    deck.position.y = 5.4;
+    deck.castShadow = true;
+    deck.receiveShadow = true;
+    jpoGrp.add(deck);
 
-    const roof = new THREE.Mesh(
-      new THREE.BoxGeometry(2.8, 0.18, 9.8),
-      halteSteelMat
-    );
-    roof.position.y = 3.1;
-    roof.castShadow = true;
-    hGrp.add(roof);
-
-    const neonHeader = new THREE.Mesh(
-      new THREE.BoxGeometry(2.86, 0.34, 9.86),
-      halteNeonMat
-    );
-    neonHeader.position.y = 3.34;
-    hGrp.add(neonHeader);
-
-    const backGlass = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 2.45, 8.6),
-      halteGlassMat
-    );
-    backGlass.position.set(-1.12, 1.65, 0);
-    hGrp.add(backGlass);
-
-    for (const pz of [-4.2, 0, 4.2]) {
-      const post = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.08, 0.08, 2.85, 8),
-        halteSteelMat
+    // Warm LED under-deck & side architectural light strips
+    for (const sz of [-1.22, 1.22]) {
+      const ledStrip = new THREE.Mesh(
+        new THREE.BoxGeometry(17.2, 0.12, 0.08),
+        jpoLedMat
       );
-      post.position.set(1.05, 1.65, pz);
-      hGrp.add(post);
+      ledStrip.position.set(0, 5.42, sz);
+      jpoGrp.add(ledStrip);
+
+      const railGlass = new THREE.Mesh(
+        new THREE.BoxGeometry(16.8, 1.15, 0.08),
+        jpoGlassMat
+      );
+      railGlass.position.set(0, 6.1, sz * 0.94);
+      jpoGrp.add(railGlass);
     }
 
-    group.add(hGrp);
-    lightAnchors.push({ x: h.x, z: h.z });
+    // Iconic Phinisi sculptural arch ribs curving over the bridge deck
+    for (let ri = -3; ri <= 3; ri++) {
+      const rx = ri * 2.2;
+      const archH = 2.6 - Math.abs(ri) * 0.38;
+      const archRib = new THREE.Mesh(
+        new THREE.BoxGeometry(0.24, archH, 2.65),
+        jpoSailMat
+      );
+      archRib.position.set(rx, 5.5 + archH * 0.5, 0);
+      jpoGrp.add(archRib);
+    }
+    const spineBeam = new THREE.Mesh(
+      new THREE.BoxGeometry(15.6, 0.22, 0.45),
+      jpoSailMat
+    );
+    spineBeam.position.set(0, 8.05, 0);
+    jpoGrp.add(spineBeam);
+
+    // Left & Right sidewalk support piers + stepped access ramps
+    for (const sideX of [-8.4, 8.4]) {
+      const pier = new THREE.Mesh(
+        new THREE.BoxGeometry(1.1, 5.5, 1.8),
+        jpoSteelMat
+      );
+      pier.position.set(sideX, 2.75, 0);
+      pier.castShadow = true;
+      jpoGrp.add(pier);
+
+      const stairRamp = new THREE.Mesh(
+        new THREE.BoxGeometry(1.25, 0.28, 6.4),
+        jpoSteelMat
+      );
+      stairRamp.position.set(sideX + (sideX < 0 ? -0.35 : 0.35), 2.7, 3.1);
+      stairRamp.rotation.x = 0.72;
+      jpoGrp.add(stairRamp);
+    }
+
+    group.add(jpoGrp);
+    lightAnchors.push({ x: -7.5, z: jpoZ }, { x: 7.5, z: jpoZ });
   }
 
   // =========================================================================
@@ -611,7 +595,7 @@ export function buildJakartaDistrictProps(
   }
 
   // =========================================================================
-  // 7. ENHANCED BUNDARAN HI FOUNTAIN JETS & NIGHT WATER GLOW (-15.5, 0, -52)
+  // 7. ENHANCED BUNDARAN HI FOUNTAIN JETS & NIGHT WATER GLOW (0, 0, 32)
   // =========================================================================
   const fountainJetMat = new THREE.MeshBasicMaterial({
     color: 0x7dd3fc,
@@ -621,7 +605,7 @@ export function buildJakartaDistrictProps(
     depthWrite: false,
   });
   const fountainJetsGroup = new THREE.Group();
-  fountainJetsGroup.position.set(-15.5, 0.72, -52);
+  fountainJetsGroup.position.set(0, 0.72, 32);
   const jetGeo = new THREE.ConeGeometry(0.14, 2.6, 6, 1, true);
   jetGeo.translate(0, 1.3, 0);
   for (let i = 0; i < 8; i++) {
@@ -633,12 +617,12 @@ export function buildJakartaDistrictProps(
     fountainJetsGroup.add(jet);
   }
   group.add(fountainJetsGroup);
-  lightAnchors.push({ x: -15.5, z: -52 });
+  lightAnchors.push({ x: 0, z: 32 });
 
   const setWeatherTransition = (nightFactor: number, elapsedTime: number) => {
     const n = Math.max(0, Math.min(1, nightFactor));
     warungLanternMat.emissiveIntensity = 0.25 + n * 1.95;
-    halteNeonMat.emissiveIntensity = 0.35 + n * 1.35;
+    jpoLedMat.emissiveIntensity = 0.55 + n * 1.35;
     neonBoardMat.emissiveIntensity = 0.22 + n * 1.45;
     fountainJetMat.opacity = 0.38 + n * 0.35 + Math.sin(elapsedTime * 4.2) * 0.08;
     fountainJetsGroup.scale.y = 0.92 + Math.sin(elapsedTime * 3.1) * 0.1;

@@ -173,6 +173,124 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
       }
     }
   }
+  // Extend PJU streetlights to Arterial & Outer-Ring Boulevards (x = +-84, +-128; z = -66, +128)
+  for (const ax of [-128, -84, 84, 128]) {
+    const curbOff = Math.abs(ax) === 128 ? 6.4 : 5.4;
+    for (let z = -54; z <= 194; z += 28) {
+      if (
+        Math.abs(z) < 9 ||
+        Math.abs(Math.abs(z) - 32) < 8 ||
+        Math.abs(z - 80) < 9 ||
+        Math.abs(z - 128) < 9
+      ) {
+        continue;
+      }
+      polePositions.push(
+        { x: ax - curbOff, z, rotY: 0 },
+        { x: ax + curbOff, z, rotY: Math.PI }
+      );
+    }
+  }
+  for (const az of [-66, 128]) {
+    const curbOff = az === 128 ? 6.4 : 5.8;
+    for (let x = -192; x <= 192; x += 28) {
+      if (
+        Math.abs(x) < 9 ||
+        Math.abs(Math.abs(x) - 32) < 8 ||
+        Math.abs(Math.abs(x) - 84) < 8 ||
+        Math.abs(Math.abs(x) - 128) < 9
+      ) {
+        continue;
+      }
+      polePositions.push(
+        { x, z: az - curbOff, rotY: -Math.PI / 2 },
+        { x, z: az + curbOff, rotY: Math.PI / 2 }
+      );
+    }
+  }
+
+  // Northern Coastal Seawall & Harbour Promenade (Tanggul Pantai Ancol - Tanjung Priok at z = -71.8)
+  const seawallConcreteMat = new THREE.MeshStandardMaterial({
+    color: 0x334155,
+    roughness: 0.85,
+    metalness: 0.08,
+  });
+  const seawallWalk = new THREE.Mesh(
+    new THREE.BoxGeometry(436, 0.22, 2.2),
+    sidewalkMat
+  );
+  seawallWalk.position.set(0, 0.11, -71.6);
+  seawallWalk.receiveShadow = true;
+  group.add(seawallWalk);
+
+  const seawallParapet = new THREE.Mesh(
+    new THREE.BoxGeometry(436, 0.85, 0.45),
+    seawallConcreteMat
+  );
+  seawallParapet.position.set(0, 0.48, -72.55);
+  seawallParapet.castShadow = true;
+  group.add(seawallParapet);
+
+  const seawallCap = new THREE.Mesh(
+    new THREE.BoxGeometry(436, 0.14, 0.56),
+    curbYellowMat
+  );
+  seawallCap.position.set(0, 0.94, -72.55);
+  group.add(seawallCap);
+
+  // Boulevard Median Planter Islands (Concrete Curbs + Tropical Greenery along Outer Boulevards)
+  const planterCurbMat = new THREE.MeshStandardMaterial({
+    color: 0x475569,
+    roughness: 0.84,
+    metalness: 0.05,
+  });
+  const planterFoliageMat = new THREE.MeshStandardMaterial({
+    color: 0x15803d,
+    roughness: 0.9,
+    metalness: 0.02,
+  });
+  const medianIslands: { x: number; z: number; w: number; d: number }[] = [
+    { x: -58, z: -66, w: 24, d: 0.75 },
+    { x: 58, z: -66, w: 24, d: 0.75 },
+    { x: -168, z: -66, w: 38, d: 0.75 },
+    { x: 168, z: -66, w: 38, d: 0.75 },
+    { x: -58, z: 128, w: 24, d: 0.85 },
+    { x: 58, z: 128, w: 24, d: 0.85 },
+    { x: -168, z: 128, w: 38, d: 0.85 },
+    { x: 168, z: 128, w: 38, d: 0.85 },
+    { x: -84, z: -49, w: 0.75, d: 16 },
+    { x: 84, z: -49, w: 0.75, d: 16 },
+    { x: -84, z: 56, w: 0.75, d: 22 },
+    { x: 84, z: 56, w: 0.75, d: 22 },
+    { x: -84, z: 104, w: 0.75, d: 22 },
+    { x: 84, z: 104, w: 0.75, d: 22 },
+  ];
+  const medianBoxGeo = new THREE.BoxGeometry(1, 1, 1);
+  const medianCurbInst = new THREE.InstancedMesh(
+    medianBoxGeo,
+    planterCurbMat,
+    medianIslands.length
+  );
+  const medianShrubInst = new THREE.InstancedMesh(
+    medianBoxGeo,
+    planterFoliageMat,
+    medianIslands.length
+  );
+  medianIslands.forEach((mi, idx) => {
+    dummy.rotation.set(0, 0, 0);
+    dummy.position.set(mi.x, 0.14, mi.z);
+    dummy.scale.set(mi.w, 0.24, mi.d);
+    dummy.updateMatrix();
+    medianCurbInst.setMatrixAt(idx, dummy.matrix);
+
+    dummy.position.set(mi.x, 0.36, mi.z);
+    dummy.scale.set(Math.max(0.45, mi.w - 0.35), 0.32, Math.max(0.45, mi.d - 0.35));
+    dummy.updateMatrix();
+    medianShrubInst.setMatrixAt(idx, dummy.matrix);
+  });
+  medianCurbInst.instanceMatrix.needsUpdate = true;
+  medianShrubInst.instanceMatrix.needsUpdate = true;
+  group.add(medianCurbInst, medianShrubInst);
 
   const pjuMetalMat = new THREE.MeshStandardMaterial({
     color: 0x334155,
