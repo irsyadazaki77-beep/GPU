@@ -33,7 +33,7 @@ export class WeatherLightingSystem {
   public readonly transitionState: WeatherTransitionState;
 
   private readonly sunOffset = new THREE.Vector3(46, 68, 38);
-  private readonly shadowHalfExtent = 46;
+  private readonly shadowHalfExtent = 64;
   private readonly shadowMapSize: number;
   private readonly rainCount: number;
 
@@ -211,9 +211,9 @@ export class WeatherLightingSystem {
     this.sunLight.shadow.camera.top = d;
     this.sunLight.shadow.camera.bottom = -d;
     this.sunLight.shadow.camera.near = 6;
-    this.sunLight.shadow.camera.far = 165;
-    this.sunLight.shadow.bias = -0.0004;
-    this.sunLight.shadow.normalBias = 0.025;
+    this.sunLight.shadow.camera.far = 195;
+    this.sunLight.shadow.bias = -0.0003;
+    this.sunLight.shadow.normalBias = 0.02;
     scene.add(this.sunLight);
     scene.add(this.sunLight.target);
 

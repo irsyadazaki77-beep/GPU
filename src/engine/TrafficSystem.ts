@@ -668,13 +668,35 @@ export class TrafficSystem {
           rotor.rotation.y += dt * (isPlayerVeh ? 22 : 4.5);
         }
       } else if (isPlayerVeh || dSq <= 95 * 95) {
-        // Spin 3D wheels proportionally to linear speed for nearby vehicles only
+        // Spin 3D wheels proportionally to linear speed + steer front wheels + punctured tire slump
         const wheels = v.mesh.userData.wheels as THREE.Object3D[] | undefined;
-        if (wheels && Math.abs(v.speed) > 0.05) {
+        if (wheels) {
+          const spinDelta = Math.abs(v.speed) > 0.05 ? v.speed * dt : 0;
           for (let wi = 0; wi < wheels.length; wi++) {
             const wObj = wheels[wi];
             const radius = (wObj.userData.wheelRadius as number) || 0.38;
-            wObj.rotation.x += (v.speed * dt) / radius;
+            if (spinDelta !== 0) {
+              wObj.rotation.x += spinDelta / radius;
+            }
+            const isFlat = Boolean(v.damage.puncturedTires[wi % 4]);
+            wObj.scale.set(1, isFlat ? 0.72 : 1, isFlat ? 0.72 : 1);
+            wObj.rotation.z = isFlat ? (wi % 2 === 0 ? 0.14 : -0.14) : 0;
+          }
+        }
+        const frontPivots = v.mesh.userData.frontWheelPivots as THREE.Group[] | undefined;
+        if (frontPivots && frontPivots.length > 0) {
+          const targetSteer = v.isDrifting
+            ? THREE.MathUtils.clamp(-v.driftAngle * 1.15, -0.45, 0.45)
+            : v.id === drivingVehicleId
+            ? THREE.MathUtils.clamp((v.rollAngle || 0) * -2.8, -0.38, 0.38)
+            : 0;
+          for (let pi = 0; pi < frontPivots.length; pi++) {
+            frontPivots[pi].rotation.y = THREE.MathUtils.damp(
+              frontPivots[pi].rotation.y,
+              targetSteer,
+              12,
+              dt
+            );
           }
         }
       }
@@ -696,8 +718,14 @@ export class TrafficSystem {
       const headMat = v.mesh.userData.headlightMat as
         | THREE.MeshStandardMaterial
         | undefined;
+      const bothHeadlightsBroken =
+        v.damage.headlightsBroken[0] && v.damage.headlightsBroken[1];
+      const oneHeadlightBroken =
+        v.damage.headlightsBroken[0] || v.damage.headlightsBroken[1];
       if (headMat) {
-        headMat.emissiveIntensity = 0.55 + nightFactor * 2.25;
+        headMat.emissiveIntensity = bothHeadlightsBroken
+          ? 0.05
+          : (0.55 + nightFactor * 2.25) * (oneHeadlightBroken ? 0.55 : 1.0);
       }
       const coneMat = v.mesh.userData.headlightConeMat as
         | THREE.MeshBasicMaterial
@@ -705,8 +733,10 @@ export class TrafficSystem {
       if (coneMat) {
         const activeOrMoving = v.id === drivingVehicleId || v.isTraffic;
         coneMat.opacity =
-          activeOrMoving && nightFactor > 0.16
-            ? (nightFactor - 0.16) * (v.id === drivingVehicleId ? 0.24 : 0.14)
+          !bothHeadlightsBroken && activeOrMoving && nightFactor > 0.16
+            ? (nightFactor - 0.16) *
+              (v.id === drivingVehicleId ? 0.24 : 0.14) *
+              (oneHeadlightBroken ? 0.52 : 1.0)
             : 0;
       }
 

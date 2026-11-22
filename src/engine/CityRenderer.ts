@@ -54,16 +54,44 @@ function buildExpansionZonesGroup(uTimeUniform: { value: number }): {
       .replace(
         '#include <common>',
         `#include <common>
-uniform float uTime;`
+uniform float uTime;
+varying vec3 vWaterWorldPos;`
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
-float sanWaveY = sin(position.x * 0.14 + uTime * 2.1) * 0.09 + cos(position.z * 0.18 + uTime * 2.6) * 0.07;
+float sanWaveY = sin(position.x * 0.14 + uTime * 2.1) * 0.11 + cos(position.z * 0.18 + uTime * 2.6) * 0.08;
 transformed.y += sanWaveY;`
+      )
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+vWaterWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform float uTime;
+varying vec3 vWaterWorldPos;`
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        `vec3 wView = normalize(cameraPosition - vWaterWorldPos);
+float r1 = sin(vWaterWorldPos.x * 0.65 + uTime * 2.2) * cos(vWaterWorldPos.z * 0.55 - uTime * 1.8);
+float r2 = sin((vWaterWorldPos.x + vWaterWorldPos.z) * 1.15 - uTime * 3.1);
+vec3 rippleN = normalize(vec3(r1 * 0.12, 1.0, r2 * 0.12));
+float wFresnel = pow(1.0 - max(dot(wView, rippleN), 0.0), 3.0);
+float sparkle = pow(max(dot(reflect(-wView, rippleN), normalize(vec3(0.45, 0.55, 0.7))), 0.0), 28.0);
+float shoreEdge = smoothstep(-80.0, -72.8, vWaterWorldPos.z);
+float foamLine = shoreEdge * (0.55 + 0.45 * sin(vWaterWorldPos.x * 0.8 + uTime * 3.6 + r1 * 2.0));
+gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.28, 0.56, 0.78), wFresnel * 0.48);
+gl_FragColor.rgb += vec3(0.95, 0.92, 0.82) * sparkle * 0.38;
+gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.88, 0.96, 1.0), clamp(foamLine * 0.65, 0.0, 0.72));
+#include <dithering_fragment>`
       );
   };
-  bayWaterMat.customProgramCacheKey = () => 'san-nabilo-bay-waves-v1';
+  bayWaterMat.customProgramCacheKey = () => 'san-nabilo-bay-waves-v2';
 
   const bayGeo = new THREE.PlaneGeometry(540, 175, 48, 18);
   bayGeo.rotateX(-Math.PI / 2);

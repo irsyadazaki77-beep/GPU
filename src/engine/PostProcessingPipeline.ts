@@ -53,6 +53,16 @@ const CinematicGradeShader = {
       float b = texture2D(tDiffuse, vUv - offset).b;
       vec3 col = vec3(r, g, b);
 
+      // Subtle 4-tap local micro-sharpen to keep road markings, storefront signs & car lines crisp over FXAA
+      float texel = 0.00085;
+      vec3 blurNeighbors = (
+        texture2D(tDiffuse, vUv + vec2(texel, 0.0)).rgb +
+        texture2D(tDiffuse, vUv - vec2(texel, 0.0)).rgb +
+        texture2D(tDiffuse, vUv + vec2(0.0, texel)).rgb +
+        texture2D(tDiffuse, vUv - vec2(0.0, texel)).rgb
+      ) * 0.25;
+      col = clamp(col + (col - blurNeighbors) * 0.26, vec3(0.0), vec3(1.5));
+
       // Subtle high-speed / Nitro peripheral radial motion blur streaks
       float speedBlurMask = smoothstep(0.52, 1.15, uSpeedRatio + uFokusMix * 0.28) * smoothstep(0.24, 0.72, dist);
       if (speedBlurMask > 0.005) {

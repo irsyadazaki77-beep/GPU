@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
   CombatHitFeedbackEvent,
   DistrictZone,
@@ -186,6 +185,9 @@ export class WorldEngine {
   private speedTrapCooldowns: Record<string, number> = {};
   private lightningTimer = 9;
   private lightningFlash = 0;
+  private readonly envCache = new Map<WeatherMode, THREE.Texture>();
+  private activeEnvWeather: WeatherMode | null = null;
+  private pmremGenerator: THREE.PMREMGenerator;
 
   constructor(container: HTMLElement, initialProps: WorldEngineProps) {
     this.container = container;
@@ -227,12 +229,9 @@ export class WorldEngine {
     const maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy();
 
     this.scene = new THREE.Scene();
-    const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
-    const roomEnv = new RoomEnvironment();
-    this.scene.environment = pmremGenerator.fromScene(roomEnv, 0.04).texture;
-    this.scene.environmentIntensity = 0.62;
-    roomEnv.dispose();
-    pmremGenerator.dispose();
+    this.pmremGenerator = new THREE.PMREMGenerator(this.renderer);
+    this.pmremGenerator.compileEquirectangularShader();
+    this.applySkyEnvironmentForWeather(initialProps.weatherMode);
 
     this.camera = new THREE.PerspectiveCamera(
       60,
@@ -779,6 +778,56 @@ export class WorldEngine {
     };
   }
 
+  private applySkyEnvironmentForWeather(mode: WeatherMode): void {
+    this.activeEnvWeather = mode;
+    const cached = this.envCache.get(mode);
+    if (cached) {
+      this.scene.environment = cached;
+      return;
+    }
+
+    const palette: Record<
+      WeatherMode,
+      { top: number; horizon: number; ground: number; accent: number }
+    > = {
+      senja: { top: 0x1e293b, horizon: 0xf97316, ground: 0x1e1b2e, accent: 0xfde047 },
+      malam: { top: 0x050814, horizon: 0x0284c7, ground: 0x090d16, accent: 0x38bdf8 },
+      siang: { top: 0x0284c7, horizon: 0xbae6fd, ground: 0x334155, accent: 0xfef9c3 },
+      hujan: { top: 0x0f172a, horizon: 0x475569, ground: 0x0f172a, accent: 0x7dd3fc },
+    };
+    const p = palette[mode] || palette.senja;
+
+    const envScene = new THREE.Scene();
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      uniforms: {
+        uTop: { value: new THREE.Color(p.top) },
+        uHor: { value: new THREE.Color(p.horizon) },
+        uBot: { value: new THREE.Color(p.ground) },
+      },
+      vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+      fragmentShader: `uniform vec3 uTop; uniform vec3 uHor; uniform vec3 uBot; varying vec3 vP; void main(){ float h = normalize(vP).y; vec3 c = mix(uBot, uHor, smoothstep(-0.2, 0.05, h)); c = mix(c, uTop, smoothstep(0.05, 0.55, h)); gl_FragColor = vec4(c, 1.0); }`,
+    });
+    const sphereGeo = new THREE.SphereGeometry(12, 16, 12);
+    const skyMesh = new THREE.Mesh(sphereGeo, skyMat);
+    envScene.add(skyMesh);
+
+    const sunOrbGeo = new THREE.SphereGeometry(1.4, 8, 8);
+    const sunOrbMat = new THREE.MeshBasicMaterial({ color: p.accent });
+    const sunOrb = new THREE.Mesh(sunOrbGeo, sunOrbMat);
+    sunOrb.position.set(6, mode === 'senja' ? 2.4 : 7.5, 5);
+    envScene.add(sunOrb);
+
+    const rt = this.pmremGenerator.fromScene(envScene, 0.04);
+    sphereGeo.dispose();
+    skyMat.dispose();
+    sunOrbGeo.dispose();
+    sunOrbMat.dispose();
+
+    this.envCache.set(mode, rt.texture);
+    this.scene.environment = rt.texture;
+  }
+
   private captureViralThumbnailInternal(): string | null {
     try {
       const src = this.renderer.domElement;
@@ -863,6 +912,9 @@ export class WorldEngine {
     const tone = computeTimeOfDayToneState(nightFactor, wetnessFactor);
     this.renderer.toneMappingExposure = tone.exposure;
     this.scene.environmentIntensity = tone.envIntensity;
+    if (this.activeEnvWeather !== this.props.weatherMode) {
+      this.applySkyEnvironmentForWeather(this.props.weatherMode);
+    }
 
     if (lightningTriggered && currentGameState === 'playing') {
       soundEngine.playThunderBoom();
@@ -1609,7 +1661,11 @@ export class WorldEngine {
     this.postProcessing.dispose();
     cityAudio.dispose();
     proceduralTextures.disposeAll();
-    this.scene.environment?.dispose();
+    for (const tex of this.envCache.values()) {
+      tex.dispose();
+    }
+    this.envCache.clear();
+    this.pmremGenerator.dispose();
     this.renderer.dispose();
 
     if (this.renderer.domElement.parentNode === this.container) {

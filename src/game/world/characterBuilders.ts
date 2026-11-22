@@ -6,6 +6,8 @@ export interface CharacterRigHandle {
   group: THREE.Group;
   leftLeg: THREE.Mesh;
   rightLeg: THREE.Mesh;
+  leftShin?: THREE.Group;
+  rightShin?: THREE.Group;
   leftArm: THREE.Group;
   rightArm: THREE.Group;
   leftForearm: THREE.Group;
@@ -90,11 +92,29 @@ export function animateCharacterRig(
     dt
   );
 
-  // 3. Articulated legs + counter-swinging upper/lower arms with natural elbow bend
+  // 3. Articulated legs (thigh + knee shin bend) + counter-swinging upper/lower arms
+  const crouchKnee = isCrouching ? 0.58 : 0;
+  const crouchHip = isCrouching ? -0.34 : 0;
   if (isMoving) {
     const stride = Math.sin(walkDist * 2.25);
-    rig.leftLeg.rotation.x = stride * 0.54;
-    rig.rightLeg.rotation.x = -stride * 0.54;
+    rig.leftLeg.rotation.x = stride * 0.54 + crouchHip;
+    rig.rightLeg.rotation.x = -stride * 0.54 + crouchHip;
+    if (rig.leftShin) {
+      rig.leftShin.rotation.x = THREE.MathUtils.damp(
+        rig.leftShin.rotation.x,
+        Math.max(0, -stride) * 0.68 + crouchKnee,
+        14,
+        dt
+      );
+    }
+    if (rig.rightShin) {
+      rig.rightShin.rotation.x = THREE.MathUtils.damp(
+        rig.rightShin.rotation.x,
+        Math.max(0, stride) * 0.68 + crouchKnee,
+        14,
+        dt
+      );
+    }
 
     rig.leftArm.rotation.x = THREE.MathUtils.damp(
       rig.leftArm.rotation.x,
@@ -126,16 +146,32 @@ export function animateCharacterRig(
   } else {
     rig.leftLeg.rotation.x = THREE.MathUtils.damp(
       rig.leftLeg.rotation.x,
-      0,
+      crouchHip,
       10,
       dt
     );
     rig.rightLeg.rotation.x = THREE.MathUtils.damp(
       rig.rightLeg.rotation.x,
-      0,
+      crouchHip,
       10,
       dt
     );
+    if (rig.leftShin) {
+      rig.leftShin.rotation.x = THREE.MathUtils.damp(
+        rig.leftShin.rotation.x,
+        crouchKnee,
+        10,
+        dt
+      );
+    }
+    if (rig.rightShin) {
+      rig.rightShin.rotation.x = THREE.MathUtils.damp(
+        rig.rightShin.rotation.x,
+        crouchKnee,
+        10,
+        dt
+      );
+    }
     rig.leftArm.rotation.x = THREE.MathUtils.damp(
       rig.leftArm.rotation.x,
       0.04 + breath * 0.03,
@@ -276,9 +312,11 @@ export function buildCharacterRig(
   group.userData.pantsMat = pantsMat;
   group.userData.capMat = accentMat;
 
-  // Legs with sneakers & ankle cuffs
-  const legGeo = new THREE.CapsuleGeometry(0.095, 0.48, 4, 8);
-  legGeo.translate(0, -0.34, 0);
+  // Articulated two-segment legs (thigh + knee shin joint + sneakers)
+  const thighGeo = new THREE.CapsuleGeometry(0.095, 0.22, 4, 8);
+  thighGeo.translate(0, -0.17, 0);
+  const shinGeo = new THREE.CapsuleGeometry(0.082, 0.22, 4, 8);
+  shinGeo.translate(0, -0.16, 0);
 
   const buildShoeAndCuff = () => {
     const sub = new THREE.Group();
@@ -286,26 +324,36 @@ export function buildCharacterRig(
       new THREE.BoxGeometry(0.185, 0.115, 0.29),
       shoeMat
     );
-    shoeUpper.position.set(0, -0.62, 0.05);
+    shoeUpper.position.set(0, -0.3, 0.05);
     const shoeSole = new THREE.Mesh(
       new THREE.BoxGeometry(0.195, 0.04, 0.31),
       soleMat
     );
-    shoeSole.position.set(0, -0.68, 0.05);
+    shoeSole.position.set(0, -0.36, 0.05);
     sub.add(shoeUpper, shoeSole);
     return sub;
   };
 
-  const leftLeg = new THREE.Mesh(legGeo, pantsMat);
+  const leftLeg = new THREE.Mesh(thighGeo, pantsMat);
   leftLeg.position.set(-0.145, 0.74, 0);
   leftLeg.castShadow = true;
-  leftLeg.add(buildShoeAndCuff());
+  const leftShin = new THREE.Group();
+  leftShin.position.set(0, -0.33, 0);
+  const leftShinMesh = new THREE.Mesh(shinGeo, pantsMat);
+  leftShinMesh.castShadow = true;
+  leftShin.add(leftShinMesh, buildShoeAndCuff());
+  leftLeg.add(leftShin);
   group.add(leftLeg);
 
-  const rightLeg = new THREE.Mesh(legGeo, pantsMat);
+  const rightLeg = new THREE.Mesh(thighGeo, pantsMat);
   rightLeg.position.set(0.145, 0.74, 0);
   rightLeg.castShadow = true;
-  rightLeg.add(buildShoeAndCuff());
+  const rightShin = new THREE.Group();
+  rightShin.position.set(0, -0.33, 0);
+  const rightShinMesh = new THREE.Mesh(shinGeo, pantsMat);
+  rightShinMesh.castShadow = true;
+  rightShin.add(rightShinMesh, buildShoeAndCuff());
+  rightLeg.add(rightShin);
   group.add(rightLeg);
 
   // Upper body breathing container (torso + angled shoulders + collar + neck + head + arms)
@@ -357,6 +405,17 @@ export function buildCharacterRig(
   );
   buckle.position.set(0, 0.79, 0);
   torsoGroup.add(buckle);
+
+  if (role === 'player' || role === 'crew') {
+    // Sleek urban sling pack across back & chest strap
+    const slingPack = new THREE.Mesh(
+      new THREE.BoxGeometry(0.32, 0.4, 0.12),
+      darkGearMat
+    );
+    slingPack.position.set(0, 1.13, -0.18);
+    slingPack.castShadow = true;
+    torsoGroup.add(slingPack);
+  }
 
   const backpack = new THREE.Mesh(
     new THREE.BoxGeometry(0.32, 0.4, 0.13),
@@ -671,6 +730,8 @@ export function buildCharacterRig(
     group,
     leftLeg,
     rightLeg,
+    leftShin,
+    rightShin,
     leftArm,
     rightArm,
     leftForearm,

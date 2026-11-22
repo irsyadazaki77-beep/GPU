@@ -361,10 +361,48 @@ export function buildJakartaBuilding(
     emissive: new THREE.Color(0xffffff),
     emissiveMap,
     emissiveIntensity: 0.65,
-    roughness: b.style === 'skyscraper' ? 0.92 : 0.94,
-    metalness: b.style === 'skyscraper' ? 0.44 : 0.14,
-    envMapIntensity: b.style === 'skyscraper' ? 1.12 : 0.55,
+    roughness: b.style === 'skyscraper' ? 0.88 : 0.94,
+    metalness: b.style === 'skyscraper' ? 0.52 : 0.14,
+    envMapIntensity: b.style === 'skyscraper' ? 1.24 : 0.55,
   });
+
+  if (b.style === 'skyscraper') {
+    bodyMat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+varying vec3 vTowerWorldPos;
+varying vec3 vTowerWorldNormal;`
+        )
+        .replace(
+          '#include <project_vertex>',
+          `#include <project_vertex>
+vTowerWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+vTowerWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+varying vec3 vTowerWorldPos;
+varying vec3 vTowerWorldNormal;`
+        )
+        .replace(
+          '#include <dithering_fragment>',
+          `vec3 tView = normalize(cameraPosition - vTowerWorldPos);
+vec2 roomCell = fract(vTowerWorldPos.xy * 0.24 + vTowerWorldPos.zy * 0.24);
+vec2 parallax = (tView.xy - vTowerWorldNormal.xy * dot(tView, vTowerWorldNormal)) * 0.18;
+vec2 roomInner = fract(roomCell + parallax);
+float roomDepthShade = smoothstep(0.08, 0.38, roomInner.x) * smoothstep(0.92, 0.62, roomInner.x) * smoothstep(0.1, 0.35, roomInner.y);
+float glassFresnel = pow(1.0 - max(dot(tView, normalize(vTowerWorldNormal)), 0.0), 3.4);
+gl_FragColor.rgb += vec3(0.14, 0.28, 0.44) * glassFresnel * 0.26;
+gl_FragColor.rgb *= (0.94 + roomDepthShade * 0.12);
+#include <dithering_fragment>`
+        );
+    };
+    bodyMat.customProgramCacheKey = () => 'san-nabilo-tower-parallax-v1';
+  }
 
   const accentMat = new THREE.MeshStandardMaterial({
     color: b.accentColor,
@@ -525,10 +563,10 @@ export function buildJakartaIconicLandmarks(): THREE.Group {
   const waterMat = new THREE.MeshStandardMaterial({
     color: 0x0284c7,
     emissive: 0x0369a1,
-    emissiveIntensity: 0.18,
-    roughness: 0.65,
-    metalness: 0.1,
-    envMapIntensity: 0.1,
+    emissiveIntensity: 0.24,
+    roughness: 0.14,
+    metalness: 0.52,
+    envMapIntensity: 0.95,
   });
 
   // 1. Bundaran HI Fountain & Patung Selamat Datang Plaza (-15.5, 0, -52)

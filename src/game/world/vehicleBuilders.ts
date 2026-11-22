@@ -121,12 +121,28 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
 
   const collectWheels = (root: THREE.Group) => {
     const wheels: THREE.Object3D[] = [];
+    const frontWheelPivots: THREE.Group[] = [];
+    const rawWheels: THREE.Object3D[] = [];
     root.traverse((child) => {
       if (child.userData?.isWheel) {
-        wheels.push(child);
+        rawWheels.push(child);
       }
     });
+    for (const w of rawWheels) {
+      wheels.push(w);
+      if (w.position.z > 0.25 && w.parent) {
+        const pivot = new THREE.Group();
+        pivot.position.copy(w.position);
+        w.position.set(0, 0, 0);
+        const parent = w.parent;
+        parent.remove(w);
+        pivot.add(w);
+        parent.add(pivot);
+        frontWheelPivots.push(pivot);
+      }
+    }
     root.userData.wheels = wheels;
+    root.userData.frontWheelPivots = frontWheelPivots;
   };
 
   const mats: VehicleMaterialSet = {

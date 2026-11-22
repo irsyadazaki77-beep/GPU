@@ -11,31 +11,50 @@ export function createWheelAssembly(
   wGroup.userData.isWheel = true;
   wGroup.userData.wheelRadius = radius;
 
-  const tireGeo = new THREE.CylinderGeometry(radius, radius, width, 16);
+  const tireGeo = new THREE.CylinderGeometry(radius, radius, width, 20);
   tireGeo.rotateZ(Math.PI / 2);
   const tire = new THREE.Mesh(tireGeo, tireMat);
   tire.castShadow = true;
   wGroup.add(tire);
 
   const rimGeo = new THREE.CylinderGeometry(
-    radius * 0.62,
-    radius * 0.62,
+    radius * 0.64,
+    radius * 0.64,
     width + 0.02,
-    10
+    14
   );
   rimGeo.rotateZ(Math.PI / 2);
   const rim = new THREE.Mesh(rimGeo, rimMat);
   wGroup.add(rim);
 
-  const spokeGeo = new THREE.BoxGeometry(width + 0.035, radius * 1.1, radius * 0.18);
-  const spoke = new THREE.Mesh(spokeGeo, tireMat);
-  wGroup.add(spoke);
+  // Inner dark wheel barrel + brake disc rotor for realistic 3D depth
+  const barrelGeo = new THREE.CylinderGeometry(
+    radius * 0.54,
+    radius * 0.54,
+    width + 0.025,
+    12
+  );
+  barrelGeo.rotateZ(Math.PI / 2);
+  const barrelMat = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
+    roughness: 0.45,
+    metalness: 0.72,
+  });
+  wGroup.add(new THREE.Mesh(barrelGeo, barrelMat));
+
+  // 5-Spoke Sport Star Alloy Spokes
+  const spokeGeo = new THREE.BoxGeometry(width + 0.036, radius * 1.12, radius * 0.14);
+  for (let s = 0; s < 3; s++) {
+    const spoke = new THREE.Mesh(spokeGeo, rimMat);
+    spoke.rotation.x = (s * Math.PI) / 3;
+    wGroup.add(spoke);
+  }
 
   const hubGeo = new THREE.CylinderGeometry(
-    radius * 0.22,
-    radius * 0.22,
-    width + 0.04,
-    8
+    radius * 0.2,
+    radius * 0.2,
+    width + 0.045,
+    10
   );
   hubGeo.rotateZ(Math.PI / 2);
   const hub = new THREE.Mesh(hubGeo, tireMat);
