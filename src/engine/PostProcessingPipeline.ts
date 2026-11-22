@@ -256,7 +256,7 @@ export class PostProcessingPipeline {
           thickness: 2.2,
           samples: 8,
         });
-        gtao.output = GTAOPass.OUTPUT.Denoise;
+        gtao.output = GTAOPass.OUTPUT.Default;
         gtao.blendIntensity = 0.62;
         this.gtaoPass = gtao;
         this.composer.addPass(gtao);
