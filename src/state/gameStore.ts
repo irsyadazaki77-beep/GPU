@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import {
   AcousticZoneId,
+  ActiveRivalBossState,
   ActiveStreetContractState,
   ActiveStreetRaceSession,
   ActiveTurfWarSession,
@@ -8,9 +9,13 @@ import {
   CoopHeistSyncState,
   ParachuteState,
   RadioBroadcastMessage,
+  SpeedTrapFlashBanner,
   StealthStatusState,
+  VigilantePatrolSession,
   buildDynamicRadioBroadcast,
+  computeSurgeFareMultiplier,
   createActiveQuestState,
+  createVigilantePatrolSession,
   stepQuestStageProgress,
   AudioChannelVolumes,
   COMBAT_COMBO_WINDOW_MS,
@@ -448,6 +453,15 @@ export interface GameStoreSnapshot {
   nearbyMrtStationName: string | null;
   ridingMrt: boolean;
   coopHeistSync: CoopHeistSyncState;
+  // Grand Plan 6.0 State
+  droneReconActive: boolean;
+  droneEmpReady: boolean;
+  slipstreamActive: boolean;
+  speedTrapRecords: Record<string, number>;
+  speedTrapBanner: SpeedTrapFlashBanner | null;
+  activeVigilante: VigilantePatrolSession | null;
+  vigilanteStreak: number;
+  activeRivalBoss: ActiveRivalBossState | null;
 }
 
 export function buildInitialStateForStage(
@@ -666,6 +680,14 @@ let state: GameStoreSnapshot = {
     crewRoles: {},
     updatedAtMs: 0,
   },
+  droneReconActive: false,
+  droneEmpReady: true,
+  slipstreamActive: false,
+  speedTrapRecords: {},
+  speedTrapBanner: null,
+  activeVigilante: null,
+  vigilanteStreak: 0,
+  activeRivalBoss: null,
 };
 
 const listeners = new Set<() => void>();
@@ -1029,7 +1051,19 @@ export const gameStore = {
   ): ActiveStreetContractState | null => {
     if (state.activeContract) return null;
     soundEngine.playPickup();
-    const fare = createQuickPassengerFare(playerX, playerZ, vehicleLabel);
+    const rawFare = createQuickPassengerFare(playerX, playerZ, vehicleLabel);
+    const surgeMult = computeSurgeFareMultiplier(
+      state.weatherMode,
+      state.worldTimeMinutes
+    );
+    const fare: ActiveStreetContractState = {
+      ...rawFare,
+      rewardRp: Math.round(rawFare.rewardRp * surgeMult),
+      subtitle:
+        surgeMult > 1.05
+          ? `${rawFare.subtitle} (Surge x${surgeMult})`
+          : rawFare.subtitle,
+    };
     state = {
       ...state,
       activeContract: fare,
@@ -2293,6 +2327,115 @@ export const gameStore = {
         updatedAtMs: Date.now(),
       },
     };
+    emitChange();
+  },
+
+  setDroneReconState: (active: boolean, empReady: boolean) => {
+    if (
+      state.droneReconActive === active &&
+      state.droneEmpReady === empReady
+    ) {
+      return;
+    }
+    state = {
+      ...state,
+      droneReconActive: active,
+      droneEmpReady: empReady,
+    };
+    emitChange();
+  },
+
+  setSlipstreamActive: (active: boolean) => {
+    if (state.slipstreamActive === active) return;
+    state = { ...state, slipstreamActive: active };
+    emitChange();
+  },
+
+  triggerSpeedTrapFlash: (banner: SpeedTrapFlashBanner) => {
+    const prevBest = state.speedTrapRecords[banner.trapId] ?? 0;
+    const nextBest = Math.max(prevBest, banner.speedKmh);
+    const nextScore = state.playerState.score + Math.round(banner.speedKmh * 2);
+    state = {
+      ...state,
+      speedTrapRecords: {
+        ...state.speedTrapRecords,
+        [banner.trapId]: nextBest,
+      },
+      speedTrapBanner: banner,
+      playerState: {
+        ...state.playerState,
+        rupiah: state.playerState.rupiah + banner.rewardRp,
+        wantedLevel: banner.wantedTriggered
+          ? Math.max(1, state.playerState.wantedLevel)
+          : state.playerState.wantedLevel,
+        score: nextScore,
+        bestScore: Math.max(state.playerState.bestScore, nextScore),
+      },
+    };
+    emitChange();
+  },
+
+  clearExpiredSpeedTrapBanner: (nowMs: number = Date.now()) => {
+    if (state.speedTrapBanner && nowMs - state.speedTrapBanner.stamp > 3400) {
+      state = { ...state, speedTrapBanner: null };
+      emitChange();
+    }
+  },
+
+  startVigilantePatrol: () => {
+    const session = createVigilantePatrolSession(state.vigilanteStreak);
+    soundEngine.playPoliceSiren();
+    state = {
+      ...state,
+      activeVigilante: session,
+      customWaypoint: {
+        x: session.targetX,
+        z: session.targetZ,
+        label: `Buronan: ${session.targetName}`,
+        category: 'custom',
+      },
+      lastOutcomeText: `Patroli Patwal Aktif: Kejar ${session.targetName} di ${session.districtName}!`,
+    };
+    emitChange();
+    return session;
+  },
+
+  updateVigilantePatrol: (patch: Partial<VigilantePatrolSession>) => {
+    if (!state.activeVigilante) return;
+    state = {
+      ...state,
+      activeVigilante: { ...state.activeVigilante, ...patch },
+    };
+    emitChange();
+  },
+
+  completeVigilantePatrol: () => {
+    const vig = state.activeVigilante;
+    if (!vig) return;
+    soundEngine.playMissionFanfare();
+    const nextScore = state.playerState.score + 450;
+    state = {
+      ...state,
+      activeVigilante: null,
+      vigilanteStreak: state.vigilanteStreak + 1,
+      customWaypoint: null,
+      playerState: {
+        ...state.playerState,
+        rupiah: state.playerState.rupiah + vig.rewardRp,
+        reputation: {
+          ...state.playerState.reputation,
+          rakyat: state.playerState.reputation.rakyat + 6,
+        },
+        score: nextScore,
+        bestScore: Math.max(state.playerState.bestScore, nextScore),
+      },
+      lastOutcomeText: `PATROLI TUNTAS! ${vig.targetName} dilumpuhkan (+Rp ${vig.rewardRp.toLocaleString('id-ID')})`,
+    };
+    emitChange();
+  },
+
+  setRivalBossState: (boss: ActiveRivalBossState | null) => {
+    state = { ...state, activeRivalBoss: boss };
     emitChange();
   },
 };

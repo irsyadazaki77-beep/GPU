@@ -20,16 +20,20 @@ import {
   WARUNG_STALL_LOCATIONS,
   WEAPON_MAGAZINE_SIZES,
   WEAPON_RELOAD_SEC,
+  DroneReconPose,
   RagdollMotionState,
+  RivalBossSpec,
   VehicleDebrisPartKind,
   applyCoverDamageMitigation,
   canDeployParachute,
   canPerformSilentTakedown,
   checkPlayerDetourProgress,
   computeDriftCounterSteerBoost,
+  computeDroneEmpRadius,
   computeHeadshotResolution,
   computeMrtTrainState,
   computeNearMissBonus,
+  computeSlipstreamDraftBoost,
   computeSpeedSensitiveTurnRate,
   computeStealthDetectionProfile,
   computeVehicleArmorMitigation,
@@ -49,6 +53,7 @@ import {
   resolveCircleAABBCollision,
   resolveCoopPassengerOffset,
   scoreStuntJump,
+  stepDroneReconPose,
   stepEnemyMovementPolicy,
   stepParachuteGlide,
   stepRagdollState,
@@ -109,6 +114,8 @@ export interface EnemyEntity {
   staggerType?: 'head' | 'chest' | 'leg';
   ragdoll?: RagdollMotionState;
   alerted?: boolean;
+  tagged?: boolean;
+  bossSpec?: RivalBossSpec;
 }
 
 export interface VehicleDebrisEntity {
@@ -277,6 +284,16 @@ export class PlayerController {
   private ridingMrt = false;
   private mrtOffsetZ = 0;
   private readonly debrisPieces: VehicleDebrisEntity[] = [];
+  // Grand Plan 6.0: Rajawali-X FPV Drone Recon & Rival Boss Tracking
+  private droneReconActive = false;
+  private droneReconPose: DroneReconPose = {
+    x: 0,
+    y: 8,
+    z: 26,
+    yaw: Math.PI,
+    empCooldownSec: 0,
+  };
+  private activeBossEnemyId: string | null = null;
   private readonly turfWarEnemyIds = new Set<string>();
   private captainEnemyId: string | null = null;
   private readonly stuntJump = {
@@ -910,6 +927,93 @@ export class PlayerController {
     return { remaining, captainAlive };
   }
 
+  public toggleDroneRecon(): void {
+    const pState = this.callbacks.getPlayerState();
+    if (pState.currentInterior !== 'exterior' || this.playerPhys.drivingVehicleId) {
+      this.droneReconActive = false;
+      gameStore.setDroneReconState(false, true);
+      return;
+    }
+    this.droneReconActive = !this.droneReconActive;
+    if (this.droneReconActive) {
+      if (!pState.droneActive) {
+        gameStore.updatePlayerState((prev) => ({
+          ...prev,
+          droneLevel: Math.max(1, prev.droneLevel),
+          droneActive: true,
+        }));
+      }
+      this.droneReconPose = {
+        x: this.playerPhys.x,
+        y: Math.max(5.5, this.playerPhys.y + 6.5),
+        z: this.playerPhys.z,
+        yaw: this.playerPhys.facing,
+        empCooldownSec: 0,
+      };
+      soundEngine.playTone(620, 0.12, 'sine', 0.14, 1.45);
+      gameStore.setState({
+        lastOutcomeText: 'Mode FPV Drone Rajawali-X Aktif! [WASD] Terbang · [SPACE/C] Naik/Turun · [KLIK] EMP · [F4] Keluar',
+      });
+    } else {
+      soundEngine.playTone(340, 0.09, 'sine', 0.1, 0.72);
+    }
+    gameStore.setDroneReconState(
+      this.droneReconActive,
+      this.droneReconPose.empCooldownSec <= 0
+    );
+  }
+
+  public spawnRivalBoss(boss: RivalBossSpec): void {
+    // Remove previous active boss if any
+    if (this.activeBossEnemyId) {
+      const idx = this.enemies.findIndex((e) => e.id === this.activeBossEnemyId);
+      if (idx >= 0) {
+        this.scene.remove(this.enemies[idx].rig.group);
+        this.enemies.splice(idx, 1);
+      }
+    }
+    const rig = buildCharacterRig(boss.policy);
+    rig.group.scale.setScalar(1.32);
+    const groundY = getGroundElevationAt(boss.x, boss.z);
+    rig.group.position.set(boss.x, groundY, boss.z);
+    this.scene.add(rig.group);
+    const id = `boss_${boss.id}_${Date.now()}`;
+    this.activeBossEnemyId = id;
+    this.enemies.push({
+      id,
+      policy: boss.policy,
+      rig,
+      x: boss.x,
+      z: boss.z,
+      vx: 0,
+      vz: 0,
+      facing: 0,
+      hp: boss.maxHp,
+      maxHp: boss.maxHp,
+      state: 'alive',
+      koTimer: 0,
+      hitFlashTimer: 0,
+      windupTimer: 0,
+      cooldownTimer: 0.7,
+      phaseTimer: 0,
+      bossSpec: boss,
+    });
+    gameStore.setRivalBossState({
+      spec: boss,
+      hp: boss.maxHp,
+      defeated: false,
+    });
+    gameStore.setState({
+      customWaypoint: {
+        x: boss.x,
+        z: boss.z,
+        label: `Boss Jalanan: ${boss.name}`,
+        category: 'custom',
+      },
+      lastOutcomeText: `BOSS TERDETEKSI! ${boss.name} (${boss.title}) menantangmu!`,
+    });
+  }
+
   public toggleCover(): void {
     if (this.playerPhys.drivingVehicleId || this.ridingPeerId) {
       this.stealthCrouching = false;
@@ -1457,7 +1561,7 @@ export class PlayerController {
         if (d <= wSpec.splashRadius) {
           const dmgMult = pState.fokusActive ? 1.75 : 1.0;
           const dealtDmg = Math.round(wSpec.damage * dmgMult);
-          en.hp -= dealtDmg;
+          en.hp -= en.tagged ? Math.round(dealtDmg * 1.25) : dealtDmg;
           en.hitFlashTimer = 0.08;
           const pushAng = Math.atan2(en.x - blastX, en.z - blastZ);
           en.vx += Math.sin(pushAng) * 12;
@@ -1530,7 +1634,7 @@ export class PlayerController {
           this.spawnParticles(en.x, 1.2, en.z, 14, 0xef4444, 8);
         }
 
-        en.hp -= dealtDmg;
+        en.hp -= en.tagged ? Math.round(dealtDmg * 1.25) : dealtDmg;
         en.hitFlashTimer = 0.06;
         en.vx += dirX * (wSpec.isMelee ? 9.5 : 5.5);
         en.vz += dirZ * (wSpec.isMelee ? 9.5 : 5.5);
@@ -1577,6 +1681,13 @@ export class PlayerController {
         if (ko) {
           this.markEnemyKo(en, activeChoice);
         } else {
+          if (en.bossSpec && en.id === this.activeBossEnemyId) {
+            gameStore.setRivalBossState({
+              spec: en.bossSpec,
+              hp: Math.max(0, en.hp),
+              defeated: false,
+            });
+          }
           this.hitstopTimer = headshotRes.isHeadshot ? 0.065 : 0.042;
           this.cameraTrauma = Math.min(
             1,
@@ -1719,6 +1830,21 @@ export class PlayerController {
     if (isCaptain) {
       this.captainEnemyId = null;
     }
+    if (en.bossSpec && en.id === this.activeBossEnemyId) {
+      this.activeBossEnemyId = null;
+      gameStore.setRivalBossState({
+        spec: en.bossSpec,
+        hp: 0,
+        defeated: true,
+      });
+      gameStore.updatePlayerState((prev) => ({
+        ...prev,
+        rupiah: prev.rupiah + en.bossSpec!.rewardRp,
+      }));
+      gameStore.setState({
+        lastOutcomeText: `BOSS KALAH! ${en.bossSpec.name} (${en.bossSpec.title}) tumbang! +Rp ${en.bossSpec.rewardRp.toLocaleString('id-ID')}`,
+      });
+    }
     if (this.turfWarEnemyIds.has(en.id)) {
       this.turfWarEnemyIds.delete(en.id);
     }
@@ -1855,7 +1981,14 @@ export class PlayerController {
 
     const droneEnabled = pState.droneLevel > 0 && pState.droneActive;
     this.droneMesh.visible = droneEnabled;
-    if (droneEnabled) {
+    if (droneEnabled && this.droneReconActive) {
+      this.droneMesh.position.set(
+        this.droneReconPose.x,
+        this.droneReconPose.y,
+        this.droneReconPose.z
+      );
+      this.droneMesh.rotation.y = this.droneReconPose.yaw;
+    } else if (droneEnabled) {
       const orbitAng = nowMs * 0.0026;
       const dx = this.playerPhys.x + Math.cos(orbitAng) * 2.1;
       const dz = this.playerPhys.z + Math.sin(orbitAng) * 2.1;
@@ -2262,6 +2395,8 @@ export class PlayerController {
       gameStore.setSquadOrder('attack');
     } else if (this.keysJustPressed.has('F3')) {
       gameStore.setSquadOrder('hold');
+    } else if (this.keysJustPressed.has('F4')) {
+      this.toggleDroneRecon();
     }
     if (this.keysJustPressed.has('KeyR')) {
       if (this.playerPhys.drivingVehicleId) {
@@ -2467,8 +2602,24 @@ export class PlayerController {
         rakaBoost;
 
       const handlingPenalty = getVehicleHandlingPenalty(activeVehicle.damage);
+      const slipstream = !vSpec.isAircraft
+        ? computeSlipstreamDraftBoost({
+            playerX: activeVehicle.x,
+            playerZ: activeVehicle.z,
+            playerHeading: activeVehicle.heading,
+            playerSpeed: activeVehicle.speed,
+            otherVehicles: this.traffic.vehicles.filter((o) => o.id !== activeVehicle.id),
+          })
+        : { drafting: false, speedMultiplier: 1.0, fokusBonusPerSec: 0 };
+      gameStore.setSlipstreamActive(slipstream.drafting);
+      if (slipstream.drafting && slipstream.fokusBonusPerSec > 0 && pState.fokusEnergy < 100) {
+        pState.fokusEnergy = Math.min(100, pState.fokusEnergy + slipstream.fokusBonusPerSec * simDt);
+      }
       const effectiveMaxSpeed =
-        vSpec.maxSpeed * turboMult * handlingPenalty.speedMultiplier;
+        vSpec.maxSpeed *
+        turboMult *
+        handlingPenalty.speedMultiplier *
+        slipstream.speedMultiplier;
       const isWetRoad =
         storeState.weatherMode === 'hujan' || storeState.weatherMode === 'senja';
       const wetGripMult =
@@ -3117,7 +3268,56 @@ export class PlayerController {
       const mag = Math.hypot(inputX, inputZ);
       const isFirstPerson = storeState.cameraViewMode === 'first_person';
 
-      if (this.parachuteDeployed) {
+      if (this.droneReconActive) {
+        const climbIn =
+          (this.keysHeld.has('Space') ? 1 : 0) -
+          (this.keysHeld.has('KeyC') || this.keysHeld.has('ControlLeft') ? 1 : 0);
+        const yawIn = this.keysHeld.has('KeyQ') ? -1 : this.keysHeld.has('KeyE') ? 1 : 0;
+        this.droneReconPose = stepDroneReconPose({
+          pose: this.droneReconPose,
+          playerX: this.playerPhys.x,
+          playerZ: this.playerPhys.z,
+          forwardInput: moveForward,
+          strafeInput: strafeRight,
+          climbInput: climbIn,
+          yawInput: yawIn - gpLookX,
+          dt: simDt,
+        });
+        // Auto-tag enemies within 22m of Drone
+        for (const en of this.enemies) {
+          if (en.state !== 'alive') continue;
+          if (Math.hypot(en.x - this.droneReconPose.x, en.z - this.droneReconPose.z) <= 22) {
+            en.tagged = true;
+          }
+        }
+        if (
+          (this.leftMouseHeld || this.mouseJustClicked || this.keysHeld.has('KeyK')) &&
+          this.droneReconPose.empCooldownSec <= 0
+        ) {
+          this.droneReconPose.empCooldownSec = 6.0;
+          const empR = computeDroneEmpRadius(pState.droneLevel);
+          this.spawnShockwave(this.droneReconPose.x, 0.3, this.droneReconPose.z, empR, 0x22d3ee, 0.52);
+          this.triggerFlashLight(this.droneReconPose.x, this.droneReconPose.y, this.droneReconPose.z, 0x22d3ee, 14);
+          this.traffic.applyEmpPulseAt(this.droneReconPose.x, this.droneReconPose.z, empR, null);
+          let stunned = 0;
+          for (const en of this.enemies) {
+            if (en.state !== 'alive') continue;
+            if (Math.hypot(en.x - this.droneReconPose.x, en.z - this.droneReconPose.z) <= empR) {
+              en.tagged = true;
+              en.staggerTimer = 3.5;
+              en.staggerType = 'head';
+              en.hp -= 28;
+              stunned++;
+              if (en.hp <= 0) this.markEnemyKo(en, activeChoice);
+            }
+          }
+          soundEngine.playTone(480, 0.25, 'sawtooth', 0.2, 0.45);
+          gameStore.setState({
+            lastOutcomeText: `PULSA EMP RAJAWALI-X! ${stunned} musuh ter-tag & lumpuh sementara!`,
+          });
+        }
+        gameStore.setDroneReconState(true, this.droneReconPose.empCooldownSec <= 0);
+      } else if (this.parachuteDeployed) {
         const gY = getGroundElevationAt(this.playerPhys.x, this.playerPhys.z);
         const glide = stepParachuteGlide({
           x: this.playerPhys.x,
@@ -4269,6 +4469,22 @@ export class PlayerController {
       camera.position.y = THREE.MathUtils.damp(camera.position.y, targetCamY, 8.5, dt);
       camera.position.z = THREE.MathUtils.damp(camera.position.z, targetCamZ, 8.5, dt);
       camera.lookAt(vx, lookY, vz);
+    } else if (this.droneReconActive) {
+      // Grand Plan 6.0: Rajawali-X Drone FPV Tactical Recon Camera
+      this.playerRig.group.visible = true;
+      const fwdX = Math.sin(this.droneReconPose.yaw);
+      const fwdZ = Math.cos(this.droneReconPose.yaw);
+      camera.position.set(
+        this.droneReconPose.x - fwdX * 0.4,
+        this.droneReconPose.y - 0.15,
+        this.droneReconPose.z - fwdZ * 0.4
+      );
+      this._v2.set(
+        this.droneReconPose.x + fwdX * 18,
+        Math.max(0, this.droneReconPose.y - 6.5),
+        this.droneReconPose.z + fwdZ * 18
+      );
+      camera.lookAt(this._v2);
     } else if (this.stuntJump.airborne && activeVehicle) {
       // Dramatic Stunt Jump Slow-Mo Side Camera
       const sideAng = activeVehicle.heading + Math.PI * 0.42;
@@ -4505,6 +4721,10 @@ export class PlayerController {
         out[i].alive = alive;
       }
     }
+  }
+
+  public isDroneReconActive(): boolean {
+    return this.droneReconActive;
   }
 
   public dispose(): void {

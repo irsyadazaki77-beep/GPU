@@ -1257,6 +1257,56 @@ export interface CoopHeistSyncState {
   updatedAtMs: number;
 }
 
+export interface SpeedTrapSpec {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  targetKmh: number;
+  rewardRp: number;
+}
+
+export interface SpeedTrapFlashBanner {
+  trapId: string;
+  trapName: string;
+  speedKmh: number;
+  isNewRecord: boolean;
+  rewardRp: number;
+  wantedTriggered: boolean;
+  stamp: number;
+}
+
+export interface VigilantePatrolSession {
+  id: string;
+  targetName: string;
+  districtName: string;
+  targetX: number;
+  targetZ: number;
+  targetHp: number;
+  maxHp: number;
+  rewardRp: number;
+  streak: number;
+  status: 'active' | 'completed';
+}
+
+export interface RivalBossSpec {
+  id: string;
+  name: string;
+  title: string;
+  districtId: string;
+  x: number;
+  z: number;
+  maxHp: number;
+  rewardRp: number;
+  policy: EnemyBehaviorPolicy;
+}
+
+export interface ActiveRivalBossState {
+  spec: RivalBossSpec;
+  hp: number;
+  defeated: boolean;
+}
+
 
 
 

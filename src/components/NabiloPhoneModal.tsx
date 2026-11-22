@@ -14,6 +14,7 @@ import {
   PlayerProgressState,
   ProtagonistId,
   RADIO_STATIONS,
+  RIVAL_BOSS_CATALOG,
   RadioStationId,
   STORY_MISSIONS,
   STREET_RACES,
@@ -84,6 +85,8 @@ interface NabiloPhoneModalProps {
   onCaptureViralSnap?: () => void;
   onStartTurfWar?: (districtId: string) => void;
   onWarpToRamp?: (rampId: string) => void;
+  onSpawnRivalBoss?: (bossId: string) => void;
+  onStartVigilantePatrol?: () => void;
 }
 
 type AppScreenId =
@@ -249,6 +252,8 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
   onCaptureViralSnap,
   onStartTurfWar,
   onWarpToRamp,
+  onSpawnRivalBoss,
+  onStartVigilantePatrol,
 }) => {
   const phoneTargetScreen = useGameStore((s) => s.phoneTargetScreen);
   const [screen, setScreen] = useState<AppScreenId>(phoneTargetScreen || 'home');
@@ -1545,6 +1550,52 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                     </div>
                   );
                 })}
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-white/15 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-mono-num uppercase tracking-wider text-[#f59e0b] font-bold">
+                    Boss Jalanan & Patroli Patwal
+                  </span>
+                  {onStartVigilantePatrol && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onStartVigilantePatrol();
+                        onClose();
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-[#ef4444]/25 hover:bg-[#ef4444]/40 text-[#fca5a5] text-[10px] font-bold cursor-pointer"
+                    >
+                      Mulai Patroli
+                    </button>
+                  )}
+                </div>
+                {RIVAL_BOSS_CATALOG.map((boss) => (
+                  <div
+                    key={boss.id}
+                    className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between gap-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-[#fbbf24] truncate">
+                        {boss.name}
+                      </div>
+                      <div className="text-[10px] text-[#94a3b8] truncate">
+                        {boss.title} · {boss.maxHp} HP
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playPickup();
+                        onSpawnRivalBoss?.(boss.id);
+                        onClose();
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-[#f59e0b] text-[#090c12] text-[11px] font-bold cursor-pointer shrink-0"
+                    >
+                      Tantang ({formatRupiah(boss.rewardRp)})
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
           )}

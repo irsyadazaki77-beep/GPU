@@ -120,9 +120,14 @@ export function useGameKeyboardShortcuts({
       } else if (e.code === 'KeyL') {
         e.preventDefault();
         onTriggerProtagonistAbility();
-      } else if (e.code === 'F1' || e.code === 'F2' || e.code === 'F3') {
-        // Prevent browser help/search shortcuts; PlayerController handles F1/F2/F3 Squad Orders
+      } else if (e.code === 'F1' || e.code === 'F2' || e.code === 'F3' || e.code === 'F4') {
+        // Prevent browser help/search/close shortcuts; PlayerController handles F1-F4
         e.preventDefault();
+      } else if (e.code === 'F5') {
+        e.preventDefault();
+        if (s.drivingVehicle === 'polisi' || s.drivingVehicle === 'barracuda') {
+          gameStore.startVigilantePatrol();
+        }
       } else if (e.code === 'F8') {
         e.preventDefault();
         gameStore.togglePerfOverlay();

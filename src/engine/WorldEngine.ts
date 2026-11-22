@@ -9,6 +9,7 @@ import {
   NUSANTARA_PACKAGES,
   PlayerProgressState,
   ProtagonistId,
+  RIVAL_BOSS_CATALOG,
   STUNT_RAMPS_CATALOG,
   SquadOrderMode,
   StoryChoiceOption,
@@ -20,10 +21,12 @@ import {
   advanceTurfWarWave,
   clampDt,
   computePlayerRacePosition,
+  evaluateSpeedTrapTrigger,
   isPlayerNearMrtStation,
   isPlayerWithinStreetEvent,
   resolveAcousticZone,
   resolveDistrictAtPosition,
+  stepVigilanteTargetMovement,
 } from '../game/rules';
 import { soundEngine } from '../game/sound';
 import { engineTelemetryRef, gameStore } from '../state/gameStore';
@@ -85,6 +88,9 @@ export interface WorldControllerHandle {
   startTurfWar: (districtId: string) => void;
   abortTurfWar: () => void;
   teleportToStuntRamp: (rampId: string) => void;
+  toggleDroneRecon: () => void;
+  startVigilantePatrol: () => void;
+  spawnRivalBoss: (bossId: string) => void;
 }
 
 export interface WorldHudPayload {
@@ -177,6 +183,9 @@ export class WorldEngine {
   private lastChunkZ = 9999;
   private lastAmbientCalloutAt = 0;
   private radioBroadcastAccum = 0;
+  private speedTrapCooldowns: Record<string, number> = {};
+  private lightningTimer = 9;
+  private lightningFlash = 0;
 
   constructor(container: HTMLElement, initialProps: WorldEngineProps) {
     this.container = container;
@@ -755,6 +764,18 @@ export class WorldEngine {
           lastOutcomeText: `Siap meluncur ke ${ramp.name}! Gas penuh & pakai Nitro!`,
         });
       },
+      toggleDroneRecon: () => {
+        this.playerController.toggleDroneRecon();
+      },
+      startVigilantePatrol: () => {
+        gameStore.startVigilantePatrol();
+      },
+      spawnRivalBoss: (bossId: string) => {
+        const spec =
+          RIVAL_BOSS_CATALOG.find((b) => b.id === bossId) ||
+          RIVAL_BOSS_CATALOG[0];
+        this.playerController.spawnRivalBoss(spec);
+      },
     };
   }
 
@@ -1000,6 +1021,80 @@ export class WorldEngine {
       } else {
         this.radioBroadcastAccum = 9.5;
       }
+
+      // Grand Plan 6.0: ETLE Speed Traps, Vigilante Patrol Chase & Monsoon Lightning
+      const nowEpochMs = Date.now();
+      gameStore.clearExpiredSpeedTrapBanner(nowEpochMs);
+      if (activeVeh && !VEHICLE_SPECS[activeVeh.type].isAircraft) {
+        const speedKmh = Math.round(Math.abs(activeVeh.speed) * 3.2);
+        const trapRes = evaluateSpeedTrapTrigger({
+          x: activeVeh.x,
+          z: activeVeh.z,
+          speedKmh,
+          records: gameStore.getState().speedTrapRecords,
+          cooldowns: this.speedTrapCooldowns,
+          nowMs: nowEpochMs,
+        });
+        if (trapRes.triggered && trapRes.trap) {
+          this.speedTrapCooldowns[trapRes.trap.id] = nowEpochMs;
+          this.playerController.triggerFlashLight(activeVeh.x, activeVeh.y + 3.2, activeVeh.z, 0xf8fafc, 16);
+          soundEngine.playTone(980, 0.08, 'sine', 0.14, 1.45);
+          gameStore.triggerSpeedTrapFlash({
+            trapId: trapRes.trap.id,
+            trapName: trapRes.trap.name,
+            speedKmh,
+            isNewRecord: trapRes.isNewRecord,
+            rewardRp: trapRes.rewardRp,
+            wantedTriggered: trapRes.wantedTriggered,
+            stamp: nowEpochMs,
+          });
+        }
+      }
+
+      const activeVig = gameStore.getState().activeVigilante;
+      if (activeVig && activeVig.status === 'active') {
+        const moveVig = stepVigilanteTargetMovement({
+          targetX: activeVig.targetX,
+          targetZ: activeVig.targetZ,
+          playerX: phys.x,
+          playerZ: phys.z,
+          dt,
+        });
+        this.trafficSystem.syncVigilanteTarget(moveVig.x, moveVig.z, moveVig.heading, true);
+        const distVig = Math.hypot(moveVig.x - phys.x, moveVig.z - phys.z);
+        let nextVigHp = activeVig.targetHp;
+        if (distVig < 5.8 && activeVeh && Math.abs(activeVeh.speed) > 7) {
+          nextVigHp -= Math.round(Math.abs(activeVeh.speed) * 3.6);
+          activeVeh.speed *= 0.65;
+          this.playerController.spawnParticles(moveVig.x, 0.8, moveVig.z, 12, 0xf97316, 8);
+          soundEngine.playPropCrash(0);
+        } else if (distVig < 9 && pState.fokusActive) {
+          nextVigHp -= Math.round(25 * dt);
+        }
+        if (nextVigHp <= 0) {
+          this.trafficSystem.syncVigilanteTarget(0, 0, 0, false);
+          this.playerController.spawnShockwave(moveVig.x, 0.2, moveVig.z, 9, 0xef4444, 0.45);
+          gameStore.completeVigilantePatrol();
+        } else {
+          gameStore.updateVigilantePatrol({
+            targetX: moveVig.x,
+            targetZ: moveVig.z,
+            targetHp: nextVigHp,
+          });
+        }
+      } else {
+        this.trafficSystem.syncVigilanteTarget(0, 0, 0, false);
+      }
+
+      if (this.props.weatherMode === 'hujan') {
+        this.lightningTimer -= dt;
+        if (this.lightningTimer <= 0) {
+          this.lightningTimer = 9 + Math.random() * 11;
+          this.lightningFlash = 1.0;
+          soundEngine.playTone(58, 0.55, 'sawtooth', 0.16, 0.35, 'ambience');
+        }
+      }
+      this.lightningFlash = Math.max(0, this.lightningFlash - dt * 3.4);
 
       this._camRight.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
       const vehSpec = activeVeh ? VEHICLE_SPECS[activeVeh.type] : null;
@@ -1478,6 +1573,8 @@ export class WorldEngine {
         photoFilter: storeSnap.photoModeOpen
           ? storeSnap.photoConfig.filter
           : 'standar',
+        droneReconActive: this.playerController.isDroneReconActive(),
+        lightningFlash: this.lightningFlash,
       },
       this.props.onGraphicsTierResolved
     );

@@ -20,6 +20,8 @@ const CinematicGradeShader = {
     uSpeedRatio: { value: 0 },
     uPhotoFilter: { value: 0 },
     uTime: { value: 0 },
+    uDroneReconMix: { value: 0 },
+    uLightningFlash: { value: 0 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -37,6 +39,8 @@ const CinematicGradeShader = {
     uniform float uSpeedRatio;
     uniform float uPhotoFilter;
     uniform float uTime;
+    uniform float uDroneReconMix;
+    uniform float uLightningFlash;
     varying vec2 vUv;
 
     void main() {
@@ -100,6 +104,18 @@ const CinematicGradeShader = {
       float grain = (fract(sin(dot(vUv * vec2(1280.0, 720.0) + uTime * 37.0, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 0.014;
       col += grain * (1.0 - lumaBase * 0.45);
 
+      // Rajawali-X Tactical Drone FPV Scanline & Cyber Optic Grade
+      if (uDroneReconMix > 0.01) {
+        float scan = 0.92 + 0.08 * sin(vUv.y * 540.0 + uTime * 8.0);
+        vec3 cyberCol = vec3(col.r * 0.72, col.g * 1.12, col.b * 1.24) * scan;
+        col = mix(col, cyberCol, clamp(uDroneReconMix, 0.0, 1.0));
+      }
+
+      // Monsoon Lightning Flash
+      if (uLightningFlash > 0.005) {
+        col = mix(col, vec3(0.88, 0.95, 1.0), clamp(uLightningFlash * 0.48, 0.0, 0.65));
+      }
+
       gl_FragColor = vec4(col, 1.0);
     }
   `,
@@ -114,6 +130,8 @@ export interface PostProcessingFrameParams {
   damagePulse: number;
   requestedTier: GraphicsQualityTier;
   photoFilter?: PhotoFilterId;
+  droneReconActive?: boolean;
+  lightningFlash?: number;
 }
 
 export class PostProcessingPipeline {
@@ -334,6 +352,8 @@ export class PostProcessingPipeline {
     u.uSpeedRatio.value = params.speedRatio;
     u.uPhotoFilter.value = filterCode;
     u.uTime.value = this.elapsedTime;
+    u.uDroneReconMix.value = params.droneReconActive ? 1.0 : 0.0;
+    u.uLightningFlash.value = params.lightningFlash ?? 0;
 
     this.composer.render();
   }

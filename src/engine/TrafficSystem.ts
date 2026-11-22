@@ -18,6 +18,7 @@ import {
   VehicleType,
   applyTirePuncture,
   applyVehicleImpactDamage,
+  computeAmbientSkyAndMarinePose,
   computePoliceInterceptVector,
   createInitialTrafficSignalState,
   createInitialVehicleDamage,
@@ -77,6 +78,9 @@ export class TrafficSystem {
   private roadblockCooldown = 0;
   private pendingHornPulse = false;
   private workerAheadBuffer: Float32Array | null = null;
+  private readonly ambientSkyHelis: THREE.Group[] = [];
+  private readonly ambientBayBoats: THREE.Group[] = [];
+  private readonly vigilanteTargetMesh: THREE.Group;
   private readonly raceRivals: {
     id: string;
     name: string;
@@ -289,6 +293,32 @@ export class TrafficSystem {
     this.roadblockGroup.add(spikeStripMesh);
     this.roadblockGroup.visible = false;
     scene.add(this.roadblockGroup);
+
+    // Grand Plan 6.0: Ambient Sky Airspace Helicopters & Jakarta Bay Marine Boats
+    for (let hi = 0; hi < 2; hi++) {
+      const hMesh = buildIndonesianVehicleMesh('heli');
+      hMesh.scale.setScalar(0.95);
+      hMesh.position.set(0, 32 + hi * 6, 0);
+      scene.add(hMesh);
+      this.ambientSkyHelis.push(hMesh);
+    }
+    for (let bi = 0; bi < 2; bi++) {
+      const bMesh = buildIndonesianVehicleMesh('speedboat');
+      bMesh.position.set(0, 0.18, -110 - bi * 18);
+      scene.add(bMesh);
+      this.ambientBayBoats.push(bMesh);
+    }
+
+    // Vigilante Patrol Fleeing Target Supercar + Overhead Beacon
+    this.vigilanteTargetMesh = buildIndonesianVehicleMesh('supercar');
+    const vigBeacon = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.55, 0),
+      new THREE.MeshBasicMaterial({ color: 0xef4444 })
+    );
+    vigBeacon.position.y = 2.6;
+    this.vigilanteTargetMesh.add(vigBeacon);
+    this.vigilanteTargetMesh.visible = false;
+    scene.add(this.vigilanteTargetMesh);
 
     // Dynamic World Clock Road Event 3D Group (Road Construction & Traffic Jam Obstacles)
     this.roadEventGroup = new THREE.Group();
@@ -785,6 +815,25 @@ export class TrafficSystem {
     const signalPhase: TrafficSignalPhase = kiranaHack.forceGreenLights
       ? 'ns_green'
       : this.signalState.phase;
+
+    // Step Ambient Jakarta Sky Helicopters & Bay Coastal Boats
+    const skySea = computeAmbientSkyAndMarinePose(nowMs * 0.001);
+    const skyPoses = [skySea.skyHeli1, skySea.skyHeli2];
+    for (let hi = 0; hi < this.ambientSkyHelis.length; hi++) {
+      const h = this.ambientSkyHelis[hi];
+      const p = skyPoses[hi];
+      h.position.set(p.x, p.y, p.z);
+      h.rotation.y = p.heading;
+      const rotor = h.getObjectByName('mainRotor');
+      if (rotor) rotor.rotation.y += simDt * 24;
+    }
+    const seaPoses = [skySea.bayBoat1, skySea.bayBoat2];
+    for (let bi = 0; bi < this.ambientBayBoats.length; bi++) {
+      const b = this.ambientBayBoats[bi];
+      const p = seaPoses[bi];
+      b.position.set(p.x, p.y + Math.sin(nowMs * 0.003 + bi) * 0.08, p.z);
+      b.rotation.y = p.heading;
+    }
 
     // Tactical Police Roadblock (Wanted >= 3)
     this.roadblockCooldown = Math.max(0, this.roadblockCooldown - simDt);
@@ -1385,6 +1434,20 @@ export class TrafficSystem {
     return disrupted;
   }
 
+  public syncVigilanteTarget(
+    x: number,
+    z: number,
+    heading: number,
+    active: boolean
+  ): void {
+    this.vigilanteTargetMesh.visible = active;
+    if (active) {
+      const y = getGroundElevationAt(x, z);
+      this.vigilanteTargetMesh.position.set(x, y, z);
+      this.vigilanteTargetMesh.rotation.y = heading;
+    }
+  }
+
   public dispose(): void {
     const disposeGroup = (grp: THREE.Object3D) => {
       grp.traverse((obj) => {
@@ -1401,6 +1464,13 @@ export class TrafficSystem {
     for (const v of this.vehicles) {
       disposeGroup(v.mesh);
     }
+    for (const h of this.ambientSkyHelis) {
+      disposeGroup(h);
+    }
+    for (const b of this.ambientBayBoats) {
+      disposeGroup(b);
+    }
+    disposeGroup(this.vigilanteTargetMesh);
     disposeGroup(this.policeHeliMesh);
     disposeGroup(this.roadblockGroup);
     disposeGroup(this.roadEventGroup);

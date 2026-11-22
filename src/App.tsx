@@ -1534,6 +1534,12 @@ export default function App() {
             onWarpToRamp={(rampId) =>
               controllerRef.current?.teleportToStuntRamp(rampId)
             }
+            onSpawnRivalBoss={(bossId) =>
+              controllerRef.current?.spawnRivalBoss(bossId)
+            }
+            onStartVigilantePatrol={() =>
+              controllerRef.current?.startVigilantePatrol()
+            }
           />
         )}
 

@@ -228,6 +228,12 @@ export const GameHud: React.FC<GameHudProps> = ({
   const nearbyPeerVehicleName = useGameStore((s) => s.nearbyPeerVehicleName);
   const nearbyMrtStationName = useGameStore((s) => s.nearbyMrtStationName);
   const ridingMrt = useGameStore((s) => s.ridingMrt);
+  const droneReconActive = useGameStore((s) => s.droneReconActive);
+  const droneEmpReady = useGameStore((s) => s.droneEmpReady);
+  const slipstreamActive = useGameStore((s) => s.slipstreamActive);
+  const speedTrapBanner = useGameStore((s) => s.speedTrapBanner);
+  const activeVigilante = useGameStore((s) => s.activeVigilante);
+  const activeRivalBoss = useGameStore((s) => s.activeRivalBoss);
   const activeRoadEvent = worldClockEventState.activeEvent;
 
   const claimableChallengesCount = dailyChallenges.items.filter(
@@ -1044,6 +1050,97 @@ export const GameHud: React.FC<GameHudProps> = ({
               </div>
             </div>
           )}
+
+          {/* Grand Plan 6.0: Drone FPV Recon, ETLE Speed Trap, Slipstream, Vigilante & Boss Bars */}
+          {droneReconActive && (
+            <div
+              data-testid="drone-recon-hud"
+              className="aaa-glass-subtle rounded-lg px-3 py-1.5 border-l-2 border-l-[#22d3ee] text-[11px] font-mono-num text-[#67e8f9] flex flex-col gap-0.5"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-bold">RAJAWALI-X FPV RECON</span>
+                <span className={droneEmpReady ? 'text-[#22c55e] font-bold' : 'text-[#94a3b8]'}>
+                  {droneEmpReady ? 'EMP SIAP [KLIK]' : 'EMP ISI ULANG'}
+                </span>
+              </div>
+              <span className="text-[10px] text-[#cbd5e1]">
+                [WASD] Terbang · [SPACE/C] Naik/Turun · [F4] Keluar
+              </span>
+            </div>
+          )}
+
+          {slipstreamActive && drivingVehicle && (
+            <div
+              data-testid="slipstream-hud-badge"
+              className="aaa-glass-subtle rounded-lg px-2.5 py-1 border-l-2 border-l-[#38bdf8] text-[11px] font-mono-num font-bold text-[#38bdf8] animate-pulse"
+            >
+              SLIPSTREAM DRAFT +18% TOP SPEED
+            </div>
+          )}
+
+          {speedTrapBanner && (
+            <div
+              data-testid="speed-trap-banner"
+              className="aaa-glass-subtle rounded-lg px-3 py-1.5 border-l-2 border-l-[#facc15] text-xs font-mono-num"
+            >
+              <div className="font-bold text-[#facc15]">
+                KAMERA ETLE! {speedTrapBanner.speedKmh} KM/J
+                {speedTrapBanner.isNewRecord ? ' · REKOR BARU!' : ''}
+              </div>
+              <div className="text-[11px] text-[#e2e8f0]">
+                {speedTrapBanner.trapName} · +Rp {speedTrapBanner.rewardRp.toLocaleString('id-ID')}
+                {speedTrapBanner.wantedTriggered ? ' · KEJARAN PATWAL!' : ''}
+              </div>
+            </div>
+          )}
+
+          {activeVigilante && activeVigilante.status === 'active' && (
+            <div
+              data-testid="vigilante-patrol-hud"
+              className="aaa-glass-subtle rounded-lg px-3 py-1.5 border-l-2 border-l-[#ef4444] w-72"
+            >
+              <div className="flex items-center justify-between text-[11px] font-mono-num">
+                <span className="font-bold text-[#fca5a5]">
+                  PATROLI: {activeVigilante.targetName}
+                </span>
+                <span className="text-[#fde047]">
+                  Streak {activeVigilante.streak}
+                </span>
+              </div>
+              <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden mt-1">
+                <div
+                  className="h-full bg-[#ef4444] transition-all duration-150"
+                  style={{
+                    width: `${Math.max(0, Math.min(100, (activeVigilante.targetHp / activeVigilante.maxHp) * 100))}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {activeRivalBoss && !activeRivalBoss.defeated && (
+            <div
+              data-testid="rival-boss-hud"
+              className="aaa-glass-subtle rounded-lg px-3 py-1.5 border-l-2 border-l-[#f59e0b] w-72"
+            >
+              <div className="flex items-center justify-between text-[11px] font-mono-num">
+                <span className="font-bold text-[#fbbf24]">
+                  BOSS: {activeRivalBoss.spec.name}
+                </span>
+                <span className="text-[#e2e8f0]">
+                  {Math.max(0, Math.round(activeRivalBoss.hp))} HP
+                </span>
+              </div>
+              <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden mt-1">
+                <div
+                  className="h-full bg-[#f59e0b] transition-all duration-150"
+                  style={{
+                    width: `${Math.max(0, Math.min(100, (activeRivalBoss.hp / activeRivalBoss.spec.maxHp) * 100))}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* TOP-RIGHT: Frameless GTA V Wanted Stars (only when wanted), Cash, Weapon & 2 Discreet Icons */}
@@ -1114,6 +1211,18 @@ export const GameHud: React.FC<GameHudProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 mt-0.5 opacity-80 hover:opacity-100 transition-opacity">
+            {(drivingVehicle === 'polisi' || drivingVehicle === 'barracuda') &&
+              !activeVigilante && (
+                <button
+                  type="button"
+                  data-testid="start-vigilante-btn"
+                  onClick={() => gameStore.startVigilantePatrol()}
+                  title="Mulai Patroli Patwal [F5]"
+                  className="px-2 py-1 rounded-md aaa-glass-subtle hover:bg-white/15 text-[10px] font-mono-num font-bold text-[#ef4444] cursor-pointer"
+                >
+                  [F5] Patroli
+                </button>
+              )}
             {onTriggerProtagonistAbility && (
               <button
                 type="button"
