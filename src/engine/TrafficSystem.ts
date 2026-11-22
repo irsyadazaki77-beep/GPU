@@ -45,6 +45,7 @@ export interface VehicleEntity extends TrafficAISteppable {
   type: VehicleType;
   mesh: THREE.Group;
   y: number;
+  fallVy?: number;
   isTraffic: boolean;
   routeId: TrafficRouteId;
   driftAngle: number;
@@ -127,14 +128,14 @@ export class TrafficSystem {
       heading: number;
     }[] = [
       { type: 'vtol_jet', x: -15.8, z: -15.4, heading: Math.PI * 0.25 },
-      { type: 'bajaj', x: -14.5, z: 21.0, heading: Math.PI * 0.5 },
-      { type: 'ojek', x: 14.5, z: 21.0, heading: -Math.PI * 0.5 },
+      { type: 'bajaj', x: -24.5, z: 25.5, heading: Math.PI * 0.5 },
+      { type: 'ojek', x: 24.5, z: 25.5, heading: -Math.PI * 0.5 },
       { type: 'heli', x: 15.2, z: -15.2, heading: -Math.PI * 0.25 },
-      { type: 'barracuda', x: -14.8, z: 14.2, heading: -Math.PI * 0.75 },
+      { type: 'barracuda', x: -24.5, z: -25.5, heading: -Math.PI * 0.75 },
       { type: 'supercar', x: 11.8, z: 45.0, heading: Math.PI },
       { type: 'supercar', x: 28, z: -26, heading: -Math.PI / 2 },
       { type: 'angkot', x: -11.8, z: 45.5, heading: Math.PI },
-      { type: 'sedan', x: 12.0, z: -15.0, heading: 0 },
+      { type: 'sedan', x: 22.0, z: -15.0, heading: 0 },
       { type: 'speedboat', x: -28, z: -82, heading: 0 },
       // Outer Megapolitan parked fleet (Pondok Indah, Kemang, Kelapa Gading, Marunda Bay)
       { type: 'supercar', x: -146, z: 162, heading: Math.PI * 0.5 },
@@ -145,7 +146,7 @@ export class TrafficSystem {
 
     parkedVehicles.forEach((vCfg, idx) => {
       const vMesh = buildIndonesianVehicleMesh(vCfg.type);
-      const groundY = getGroundElevationAt(vCfg.x, vCfg.z);
+      const groundY = getGroundElevationAt(vCfg.x, vCfg.z, 0);
       vMesh.position.set(vCfg.x, groundY, vCfg.z);
       vMesh.rotation.y = vCfg.heading;
       scene.add(vMesh);
@@ -481,16 +482,28 @@ export class TrafficSystem {
     facing: number,
     customs: VehicleCustomConfig
   ): { x: number; y: number; z: number } {
-    const spawnX = px + Math.sin(facing) * 4.5;
-    const spawnZ = pz + Math.cos(facing) * 4.5;
+    let sx = px + Math.sin(facing) * 4.5;
+    let sz = pz + Math.cos(facing) * 4.5;
+    for (const existing of this.vehicles) {
+      if (existing.y > 2.2) continue;
+      const dx = sx - existing.x;
+      const dz = sz - existing.z;
+      const dist = Math.hypot(dx, dz);
+      const minClear = 4.6;
+      if (dist < minClear) {
+        const pushAngle = dist > 0.05 ? Math.atan2(dx, dz) : facing + Math.PI * 0.5;
+        sx = existing.x + Math.sin(pushAngle) * minClear;
+        sz = existing.z + Math.cos(pushAngle) * minClear;
+      }
+    }
     const safe = resolveCircleAABBCollision(
-      spawnX,
-      spawnZ,
+      sx,
+      sz,
       2.5,
       undefined,
       this.buildingGrid
     );
-    const gY = getGroundElevationAt(safe.x, safe.z);
+    const gY = getGroundElevationAt(safe.x, safe.z, 0);
     const vMesh = buildIndonesianVehicleMesh(type);
     applyVehicleCustomizationToMesh(vMesh, customs);
     vMesh.position.set(safe.x, gY, safe.z);
@@ -950,6 +963,9 @@ export class TrafficSystem {
       const v = this.vehicles[vi];
       if (v.id === drivingVehicleId) continue;
       if (!v.isTraffic) {
+        const groundY = getGroundElevationAt(v.x, v.z, v.y);
+        let moved = false;
+
         // Unmanned coasting momentum (e.g. after GTA high-speed bail-out)
         if (Math.abs(v.speed) > 0.25) {
           v.speed *= Math.exp(-2.1 * simDt);
@@ -967,12 +983,32 @@ export class TrafficSystem {
           }
           v.x = col.x;
           v.z = col.z;
-          v.y = getGroundElevationAt(v.x, v.z);
-          v.mesh.position.set(v.x, v.y, v.z);
-          v.mesh.rotation.y = v.heading;
+          moved = true;
         } else if (v.speed !== 0) {
           v.speed = 0;
           v.isBraking = false;
+        }
+
+        // Smooth gravity descent when an unmanned vehicle/aircraft is left mid-air
+        if (v.y > groundY + 0.12) {
+          v.fallVy = (v.fallVy ?? 0) - 18.5 * simDt;
+          v.y = Math.max(groundY, v.y + v.fallVy * simDt);
+          if (v.y <= groundY + 0.05) {
+            v.y = groundY;
+            v.fallVy = 0;
+          }
+          moved = true;
+        } else {
+          v.fallVy = 0;
+          if (Math.abs(v.y - groundY) > 0.01) {
+            v.y = groundY;
+            moved = true;
+          }
+        }
+
+        if (moved) {
+          v.mesh.position.set(v.x, v.y, v.z);
+          v.mesh.rotation.y = v.heading;
         }
         continue;
       }
@@ -996,11 +1032,31 @@ export class TrafficSystem {
         if (intercept.distance < 32) {
           spottedByPolice = true;
         }
-        if (intercept.distance > 4.5) {
-          v.heading = Math.atan2(intercept.dirX, intercept.dirZ);
+        if (intercept.distance > 5.0) {
+          let moveX = intercept.dirX;
+          let moveZ = intercept.dirZ;
+          // Mild lateral avoidance around nearby vehicles so pursuit units flank instead of stacking
+          for (let oi = 0; oi < this.vehicles.length; oi++) {
+            if (oi === vi) continue;
+            const other = this.vehicles[oi];
+            if (Math.abs(other.y - v.y) > 2.2) continue;
+            const dxO = v.x - other.x;
+            const dzO = v.z - other.z;
+            const dSq = dxO * dxO + dzO * dzO;
+            if (dSq > 0.01 && dSq < 28) {
+              const d = Math.sqrt(dSq);
+              const w = (5.3 - d) / 5.3;
+              moveX += (dxO / d) * w * 0.9;
+              moveZ += (dzO / d) * w * 0.9;
+            }
+          }
+          const mLen = Math.hypot(moveX, moveZ) || 1;
+          moveX /= mLen;
+          moveZ /= mLen;
+          v.heading = Math.atan2(moveX, moveZ);
           v.speed = pSpeed;
-          const nx = v.x + intercept.dirX * pSpeed * simDt;
-          const nz = v.z + intercept.dirZ * pSpeed * simDt;
+          const nx = v.x + moveX * pSpeed * simDt;
+          const nz = v.z + moveZ * pSpeed * simDt;
           const col = resolveCircleAABBCollision(
             nx,
             nz,
@@ -1011,40 +1067,72 @@ export class TrafficSystem {
           v.x = col.x;
           v.z = col.z;
         }
-        v.y = getGroundElevationAt(v.x, v.z);
+        v.y = getGroundElevationAt(v.x, v.z, v.y);
       } else {
         let minAheadDist = 999;
         const sinH = Math.sin(v.heading);
         const cosH = Math.cos(v.heading);
-        const workerBuf = this.workerAheadBuffer;
+        const rV = VEHICLE_SPECS[v.type]?.radius ?? 1.9;
+        void this.workerAheadBuffer;
 
-        if (workerBuf && vi * 4 < workerBuf.length) {
-          minAheadDist = workerBuf[vi * 4] || 999;
-        } else {
-          for (let oi = 0; oi < this.vehicles.length; oi++) {
-            if (oi === vi) continue;
-            const other = this.vehicles[oi];
-            if (Math.abs(other.y - v.y) > 2.2) continue;
-            const dxO = other.x - v.x;
-            const dzO = other.z - v.z;
-            const fwdDot = dxO * sinH + dzO * cosH;
-            if (fwdDot > 0.4 && fwdDot < minAheadDist) {
-              const latDist = Math.abs(dxO * cosH - dzO * sinH);
-              if (latDist < 2.25) {
-                minAheadDist = fwdDot;
+        for (let oi = 0; oi < this.vehicles.length; oi++) {
+          if (oi === vi) continue;
+          const other = this.vehicles[oi];
+          if (Math.abs(other.y - v.y) > 2.2) continue;
+          if (
+            (other.type === 'heli' || other.type === 'vtol_jet') &&
+            other.y > 2.2
+          ) {
+            continue;
+          }
+          const rOther = VEHICLE_SPECS[other.type]?.radius ?? 1.9;
+          const dxO = other.x - v.x;
+          const dzO = other.z - v.z;
+          const fwdDot = dxO * sinH + dzO * cosH;
+          const latDist = Math.abs(dxO * cosH - dzO * sinH);
+          const latCorridor = rV + rOther + 0.35;
+
+          if (fwdDot >= -0.3 && latDist < latCorridor) {
+            const bumperGap = Math.max(0, fwdDot - (rV + rOther) * 0.45);
+            if (bumperGap < minAheadDist) {
+              minAheadDist = bumperGap;
+            }
+          } else if (
+            other.isTraffic &&
+            other.speed > 0.8 &&
+            fwdDot > 0.5 &&
+            fwdDot < 11.5 &&
+            latDist < 9.5
+          ) {
+            // Intersection cross-traffic yield: prevent 90-degree crashes while breaking symmetric ties by ID
+            const oSin = Math.sin(other.heading);
+            const oCos = Math.cos(other.heading);
+            const headingDot = sinH * oSin + cosH * oCos;
+            if (headingDot < 0.45) {
+              const otherFwd = -dxO * oSin - dzO * oCos;
+              if (otherFwd > -1.0 && otherFwd < 10.0) {
+                const shouldYield =
+                  otherFwd + 1.0 < fwdDot ||
+                  (Math.abs(otherFwd - fwdDot) <= 1.0 && v.id > other.id);
+                if (shouldYield) {
+                  const crossStop = Math.max(0, fwdDot - (rV + rOther + 0.8));
+                  if (crossStop < minAheadDist) {
+                    minAheadDist = crossStop;
+                  }
+                }
               }
             }
           }
+        }
 
-          if (Math.abs(playerY - v.y) < 2.2) {
-            const dxP = playerX - v.x;
-            const dzP = playerZ - v.z;
-            const fwdP = dxP * sinH + dzP * cosH;
-            if (fwdP > 0.4 && fwdP < minAheadDist) {
-              const latP = Math.abs(dxP * cosH - dzP * sinH);
-              if (latP < 2.1) {
-                minAheadDist = fwdP;
-              }
+        if (Math.abs(playerY - v.y) < 2.2) {
+          const dxP = playerX - v.x;
+          const dzP = playerZ - v.z;
+          const fwdP = dxP * sinH + dzP * cosH;
+          if (fwdP >= 0 && fwdP < 18) {
+            const latP = Math.abs(dxP * cosH - dzP * sinH);
+            if (latP < rV + 1.4) {
+              minAheadDist = Math.min(minAheadDist, Math.max(0, fwdP - rV * 0.5));
             }
           }
         }
@@ -1059,7 +1147,10 @@ export class TrafficSystem {
           activeRoadEvent:
             gameStore.getState().worldClockEventState.activeEvent,
         });
-        v.y = v.layer === 'elevated' ? getGroundElevationAt(v.x, v.z) : 0;
+        v.y =
+          v.layer === 'elevated'
+            ? getGroundElevationAt(v.x, v.z, Math.max(v.y, 6.2))
+            : getGroundElevationAt(v.x, v.z, v.y);
       }
 
       v.mesh.position.set(v.x, v.y, v.z);
@@ -1081,32 +1172,55 @@ export class TrafficSystem {
     // Soft elastic vehicle-vehicle separation to prevent clipping & intersecting pile-ups
     for (let i = 0; i < this.vehicles.length; i++) {
       const vA = this.vehicles[i];
-      if (vA.layer !== 'ground' || !vA.isTraffic) continue;
+      if (!vA.isTraffic || vA.id === drivingVehicleId) continue;
+      if ((vA.type === 'heli' || vA.type === 'vtol_jet') && vA.y > 2.2) continue;
       const specA = VEHICLE_SPECS[vA.type];
-      const rA = specA ? specA.radius * 0.72 : 1.5;
+      const rA = specA ? specA.radius * 0.78 : 1.5;
       for (let j = i + 1; j < this.vehicles.length; j++) {
         const vB = this.vehicles[j];
-        if (vB.layer !== 'ground') continue;
+        if (vB.id === drivingVehicleId) continue;
+        if ((vB.type === 'heli' || vB.type === 'vtol_jet') && vB.y > 2.2) continue;
         if (Math.abs(vA.y - vB.y) > 1.8) continue;
+        if (vA.layer !== vB.layer) continue;
         const dx = vB.x - vA.x;
         const dz = vB.z - vA.z;
         const distSq = dx * dx + dz * dz;
         const specB = VEHICLE_SPECS[vB.type];
-        const rB = specB ? specB.radius * 0.72 : 1.5;
+        const rB = specB ? specB.radius * 0.78 : 1.5;
         const minDist = rA + rB;
         if (distSq > 0.0001 && distSq < minDist * minDist) {
           const dist = Math.sqrt(distSq);
           const overlap = minDist - dist;
-          const pushFraction = overlap * 0.5 * Math.min(1, simDt * 6);
+          const pushFraction = overlap * 0.55 * Math.min(1, simDt * 8);
           const pushX = (dx / dist) * pushFraction;
           const pushZ = (dz / dist) * pushFraction;
-          vA.x -= pushX;
-          vA.z -= pushZ;
+          const safeA =
+            vA.layer === 'elevated'
+              ? { x: vA.x - pushX, z: vA.z - pushZ }
+              : resolveCircleAABBCollision(
+                  vA.x - pushX,
+                  vA.z - pushZ,
+                  rA,
+                  undefined,
+                  this.buildingGrid
+                );
+          vA.x = safeA.x;
+          vA.z = safeA.z;
           vA.mesh.position.x = vA.x;
           vA.mesh.position.z = vA.z;
           if (vB.isTraffic) {
-            vB.x += pushX;
-            vB.z += pushZ;
+            const safeB =
+              vB.layer === 'elevated'
+                ? { x: vB.x + pushX, z: vB.z + pushZ }
+                : resolveCircleAABBCollision(
+                    vB.x + pushX,
+                    vB.z + pushZ,
+                    rB,
+                    undefined,
+                    this.buildingGrid
+                  );
+            vB.x = safeB.x;
+            vB.z = safeB.z;
             vB.mesh.position.x = vB.x;
             vB.mesh.position.z = vB.z;
           }
@@ -1393,9 +1507,32 @@ export class TrafficSystem {
       const col = resolveCircleAABBCollision(nx, nz, 2.0, undefined, this.buildingGrid);
       rv.x = col.x;
       rv.z = col.z;
-      rv.y = getGroundElevationAt(rv.x, rv.z);
+      rv.y = getGroundElevationAt(rv.x, rv.z, rv.y);
       rv.mesh.position.set(rv.x, rv.y, rv.z);
       rv.mesh.rotation.y = rv.heading;
+    }
+
+    // Prevent race rivals from stacking inside each other around tight corners
+    for (let i = 0; i < this.raceRivals.length; i++) {
+      for (let j = i + 1; j < this.raceRivals.length; j++) {
+        const a = this.raceRivals[i];
+        const b = this.raceRivals[j];
+        if (Math.abs(a.y - b.y) > 2.0) continue;
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.01 && dist < 3.6) {
+          const push = (3.6 - dist) * 0.5;
+          const px = (dx / dist) * push;
+          const pz = (dz / dist) * push;
+          a.x -= px;
+          a.z -= pz;
+          b.x += px;
+          b.z += pz;
+          a.mesh.position.set(a.x, a.y, a.z);
+          b.mesh.position.set(b.x, b.y, b.z);
+        }
+      }
     }
   }
 
@@ -1472,7 +1609,7 @@ export class TrafficSystem {
   ): void {
     this.vigilanteTargetMesh.visible = active;
     if (active) {
-      const y = getGroundElevationAt(x, z);
+      const y = getGroundElevationAt(x, z, 0);
       this.vigilanteTargetMesh.position.set(x, y, z);
       this.vigilanteTargetMesh.rotation.y = heading;
     }

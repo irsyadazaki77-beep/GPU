@@ -571,8 +571,8 @@ export const TRAFFIC_ROUTES: Record<TrafficRouteId, TrafficWaypoint[]> = {
   ],
   sudirman_north_arterial: [
     { x: -4.6, z: -34.4 },
-    { x: -4.6, z: -92 },
-    { x: 4.6, z: -92 },
+    { x: -4.6, z: -64 },
+    { x: 4.6, z: -64 },
     { x: 4.6, z: -34.4 },
   ],
   sudirman_south_arterial: [
@@ -583,10 +583,10 @@ export const TRAFFIC_ROUTES: Record<TrafficRouteId, TrafficWaypoint[]> = {
   ],
   busway_corridor_north: [
     { x: -1.85, z: -38 },
-    { x: -1.85, z: -52, pauseSec: 1.6 },
-    { x: -1.85, z: -90, pauseSec: 1.6 },
-    { x: 1.85, z: -90 },
-    { x: 1.85, z: -52, pauseSec: 1.6 },
+    { x: -1.85, z: -50, pauseSec: 1.6 },
+    { x: -1.85, z: -64, pauseSec: 1.6 },
+    { x: 1.85, z: -64 },
+    { x: 1.85, z: -50, pauseSec: 1.6 },
     { x: 1.85, z: -38 },
   ],
   busway_corridor_south: [
@@ -612,8 +612,8 @@ export const TRAFFIC_ROUTES: Record<TrafficRouteId, TrafficWaypoint[]> = {
   grand_boulevard_circuit: [
     { x: -34.4, z: -34.4 },
     { x: -4.6, z: -34.4 },
-    { x: -4.6, z: -78 },
-    { x: 4.6, z: -78 },
+    { x: -4.6, z: -64 },
+    { x: 4.6, z: -64 },
     { x: 4.6, z: -34.4 },
     { x: 34.4, z: -34.4 },
     { x: 34.4, z: 4.6 },
@@ -640,37 +640,30 @@ export const TRAFFIC_ROUTES: Record<TrafficRouteId, TrafficWaypoint[]> = {
     { x: -65, z: 78.2 },
   ],
   outer_ring_express: [
-    { x: -126, z: 2.5 },
-    { x: -34.4, z: 2.5 },
-    { x: -34.4, z: 34.4 },
-    { x: -10.2, z: 34.4 },
-    { x: 0, z: 42.6 },
-    { x: 10.2, z: 34.4 },
-    { x: 34.4, z: 34.4 },
-    { x: 34.4, z: 2.5 },
-    { x: 126, z: 2.5 },
-    { x: 126, z: 126 },
-    { x: -126, z: 126 },
+    { x: -81.5, z: 32 },
+    { x: -81.5, z: -32 },
+    { x: 81.5, z: -32 },
+    { x: 81.5, z: 4.6 },
+    { x: 125.5, z: 4.6 },
+    { x: 125.5, z: 125.5 },
+    { x: -81.5, z: 125.5 },
+    { x: -81.5, z: 80 },
   ],
   jorr_perimeter_loop: [
-    { x: -208, z: 208 },
-    { x: 208, z: 208 },
-    { x: 208, z: -66 },
-    { x: 128, z: -66 },
-    { x: 128, z: 2.5 },
-    { x: 34.4, z: 2.5 },
-    { x: 34.4, z: 128 },
-    { x: -34.4, z: 128 },
-    { x: -34.4, z: 2.5 },
-    { x: -128, z: 2.5 },
-    { x: -128, z: -66 },
-    { x: -208, z: -66 },
+    { x: -205.5, z: 208 },
+    { x: -205.5, z: 0 },
+    { x: -205.5, z: -64 },
+    { x: 0, z: -64 },
+    { x: 205.5, z: -64 },
+    { x: 205.5, z: 0 },
+    { x: 205.5, z: 208 },
+    { x: 0, z: 208 },
   ],
   south_jakarta_boulevard: [
-    { x: -128, z: 128 },
-    { x: 128, z: 128 },
-    { x: 128, z: 208 },
-    { x: -128, z: 208 },
+    { x: -125.5, z: 130.5 },
+    { x: 130.5, z: 130.5 },
+    { x: 130.5, z: 205.5 },
+    { x: -125.5, z: 205.5 },
   ],
 };
 
@@ -698,28 +691,28 @@ export function generateInitialTrafficSpawns(): TrafficSpawnSpec[] {
     t: number;
     speed: number;
   }[] = [
-    { id: 'traffic_tj_n1', type: 'transjakarta', routeId: 'busway_corridor_north', seg: 0, t: 0.35, speed: 9.2 },
-    { id: 'traffic_tj_n2', type: 'transjakarta', routeId: 'busway_corridor_north', seg: 3, t: 0.4, speed: 9.2 },
+    { id: 'traffic_tj_n1', type: 'transjakarta', routeId: 'busway_corridor_north', seg: 0, t: 0.1, speed: 9.2 },
+    { id: 'traffic_tj_n2', type: 'transjakarta', routeId: 'busway_corridor_north', seg: 3, t: 0.15, speed: 9.2 },
     { id: 'traffic_tj_s1', type: 'transjakarta', routeId: 'busway_corridor_south', seg: 0, t: 0.45, speed: 9.2 },
-    { id: 'traffic_polisi_1', type: 'polisi', routeId: 'ring_clockwise', seg: 1, t: 0.42, speed: 11.2 },
-    { id: 'traffic_polisi_2', type: 'polisi', routeId: 'grand_boulevard_circuit', seg: 10, t: 0.5, speed: 11.4 },
+    { id: 'traffic_polisi_1', type: 'polisi', routeId: 'ring_clockwise', seg: 1, t: 0.72, speed: 11.2 },
+    { id: 'traffic_polisi_2', type: 'polisi', routeId: 'grand_boulevard_circuit', seg: 13, t: 0.4, speed: 11.4 },
     { id: 'traffic_angkot_ring', type: 'angkot', routeId: 'ring_clockwise', seg: 3, t: 0.35, speed: 9.4 },
     { id: 'traffic_sedan_ring', type: 'sedan', routeId: 'ring_ccw', seg: 0, t: 0.48, speed: 12.2 },
     { id: 'traffic_bajaj_ring', type: 'bajaj', routeId: 'ring_ccw', seg: 2, t: 0.52, speed: 7.8 },
-    { id: 'traffic_sedan_ns1', type: 'sedan', routeId: 'sudirman_north_arterial', seg: 0, t: 0.38, speed: 12.6 },
-    { id: 'traffic_ojek_ns2', type: 'ojek', routeId: 'sudirman_north_arterial', seg: 2, t: 0.42, speed: 11.0 },
+    { id: 'traffic_sedan_ns1', type: 'sedan', routeId: 'sudirman_north_arterial', seg: 0, t: 0.55, speed: 12.6 },
+    { id: 'traffic_ojek_ns2', type: 'ojek', routeId: 'sudirman_north_arterial', seg: 2, t: 0.55, speed: 11.0 },
     { id: 'traffic_angkot_ss1', type: 'angkot', routeId: 'sudirman_south_arterial', seg: 0, t: 0.35, speed: 9.5 },
     { id: 'traffic_bajaj_ss2', type: 'bajaj', routeId: 'sudirman_south_arterial', seg: 2, t: 0.5, speed: 8.0 },
     { id: 'traffic_metromini_ew1', type: 'metromini', routeId: 'merdeka_west_arterial', seg: 0, t: 0.3, speed: 8.6 },
     { id: 'traffic_ojek_ew2', type: 'ojek', routeId: 'merdeka_east_arterial', seg: 0, t: 0.45, speed: 11.2 },
-    { id: 'traffic_angkot_grand', type: 'angkot', routeId: 'grand_boulevard_circuit', seg: 1, t: 0.55, speed: 9.6 },
+    { id: 'traffic_angkot_grand', type: 'angkot', routeId: 'grand_boulevard_circuit', seg: 7, t: 0.45, speed: 9.6 },
     { id: 'traffic_sedan_tol1', type: 'sedan', routeId: 'tol_layang_express', seg: 0, t: 0.32, speed: 15.8 },
     { id: 'traffic_sedan_tol2', type: 'sedan', routeId: 'tol_layang_express', seg: 2, t: 0.35, speed: 14.8 },
     { id: 'traffic_supercar_outer', type: 'supercar', routeId: 'outer_ring_express', seg: 1, t: 0.4, speed: 17.5 },
-    { id: 'traffic_tj_outer', type: 'transjakarta', routeId: 'outer_ring_express', seg: 2, t: 0.55, speed: 11.2 },
+    { id: 'traffic_tj_outer', type: 'transjakarta', routeId: 'outer_ring_express', seg: 5, t: 0.55, speed: 11.2 },
     { id: 'traffic_jorr_supercar', type: 'supercar', routeId: 'jorr_perimeter_loop', seg: 0, t: 0.35, speed: 18.8 },
-    { id: 'traffic_jorr_polisi', type: 'polisi', routeId: 'jorr_perimeter_loop', seg: 1, t: 0.45, speed: 13.5 },
-    { id: 'traffic_jorr_tj', type: 'transjakarta', routeId: 'jorr_perimeter_loop', seg: 10, t: 0.5, speed: 11.8 },
+    { id: 'traffic_jorr_polisi', type: 'polisi', routeId: 'jorr_perimeter_loop', seg: 4, t: 0.45, speed: 13.5 },
+    { id: 'traffic_jorr_tj', type: 'transjakarta', routeId: 'jorr_perimeter_loop', seg: 6, t: 0.5, speed: 11.8 },
     { id: 'traffic_jorr_ojek', type: 'ojek', routeId: 'south_jakarta_boulevard', seg: 0, t: 0.6, speed: 12.8 },
     { id: 'traffic_south_angkot', type: 'angkot', routeId: 'south_jakarta_boulevard', seg: 1, t: 0.5, speed: 10.2 },
     { id: 'traffic_south_sedan', type: 'sedan', routeId: 'south_jakarta_boulevard', seg: 2, t: 0.35, speed: 14.5 },
@@ -1378,15 +1371,16 @@ export function stepTrafficVehicleInPlace(
   }
 
   // Natural GTA-style following distance: Ojol can filter close, cars maintain smooth queue
-  const hardStopDist = vehicle.vehicleType === 'ojek' ? 2.4 : 3.8;
+  const hardStopDist = vehicle.vehicleType === 'ojek' ? 2.4 : 4.2;
   if (effectiveAheadDist < hardStopDist) {
     targetSpeed = 0;
-  } else if (effectiveAheadDist < 14.0) {
-    const gapFactor = (effectiveAheadDist - hardStopDist) / (14.0 - hardStopDist);
+  } else if (effectiveAheadDist < 15.0) {
+    const gapFactor = (effectiveAheadDist - hardStopDist) / (15.0 - hardStopDist);
     targetSpeed = Math.min(targetSpeed, vehicle.preferredSpeed * (gapFactor * gapFactor));
   }
 
-  // Anti-gridlock unjam recovery: if stopped for > 8s without stopTimer or red light, advance waypoint
+  // Anti-gridlock unjam recovery: only advance waypoint if blocked by geometry/corner,
+  // never drive blindly into a vehicle directly blocking in front.
   const isWaitingSignal =
     options?.signalPhase &&
     isStoppedAtTrafficSignal(
@@ -1398,7 +1392,7 @@ export function stepTrafficVehicleInPlace(
     );
   if (vehicle.speed < 0.25 && vehicle.stopTimer <= 0 && !isWaitingSignal) {
     vehicle.stuckTimer = (vehicle.stuckTimer ?? 0) + dt;
-    if (vehicle.stuckTimer > 8.0) {
+    if (vehicle.stuckTimer > 8.0 && effectiveAheadDist > hardStopDist + 1.2) {
       vehicle.waypointIndex = (wpIdx + 1) % route.length;
       vehicle.stuckTimer = 0;
       targetSpeed = Math.min(vehicle.preferredSpeed * 0.45, 4.0);
@@ -1407,15 +1401,24 @@ export function stepTrafficVehicleInPlace(
     vehicle.stuckTimer = 0;
   }
 
-  const rate = targetSpeed < vehicle.speed ? 16.5 : 8.5;
-  const deltaV = targetSpeed - vehicle.speed;
-  const maxStep = rate * dt;
-  if (Math.abs(deltaV) <= maxStep) {
-    vehicle.speed = targetSpeed;
+  if (effectiveAheadDist < hardStopDist * 0.55) {
+    vehicle.speed = 0;
   } else {
-    vehicle.speed += Math.sign(deltaV) * maxStep;
+    const rate =
+      effectiveAheadDist < hardStopDist
+        ? 26.0
+        : targetSpeed < vehicle.speed
+        ? 16.5
+        : 8.5;
+    const deltaV = targetSpeed - vehicle.speed;
+    const maxStep = rate * dt;
+    if (Math.abs(deltaV) <= maxStep) {
+      vehicle.speed = targetSpeed;
+    } else {
+      vehicle.speed += Math.sign(deltaV) * maxStep;
+    }
+    if (vehicle.speed < 0) vehicle.speed = 0;
   }
-  if (vehicle.speed < 0) vehicle.speed = 0;
 
   const nx = vehicle.x + Math.sin(vehicle.heading) * vehicle.speed * dt;
   const nz = vehicle.z + Math.cos(vehicle.heading) * vehicle.speed * dt;

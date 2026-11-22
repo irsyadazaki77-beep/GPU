@@ -107,7 +107,11 @@ export function stepDrivenVehicleKinematics(
   const travelAngle = nextHeading - nextDriftAngle * 0.55;
   const nextX = input.x + Math.sin(travelAngle) * nextSpeed * simDt;
   const nextZ = input.z + Math.cos(travelAngle) * nextSpeed * simDt;
-  const surfaceElev = getGroundElevationAt(nextX, nextZ);
+  const surfaceElev = getGroundElevationAt(
+    nextX,
+    nextZ,
+    input.isAircraft ? 99 : input.y
+  );
 
   let inFloodSplash = false;
   if (!input.isAircraft && !input.isAirborne) {

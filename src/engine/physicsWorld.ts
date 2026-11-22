@@ -546,9 +546,11 @@ export class JakartaPhysicsWorld {
     // Pairwise impulse-based vehicle collision solver (squared-distance broadphase avoids Math.hypot allocation/sqrt)
     for (let i = 0; i < vehicleList.length; i++) {
       const a = vehicleList[i];
+      if ((a.type === 'heli' || a.type === 'vtol_jet') && a.y > 2.2) continue;
       const recA = this.vehicles.get(a.id)!;
       for (let j = i + 1; j < vehicleList.length; j++) {
         const b = vehicleList[j];
+        if ((b.type === 'heli' || b.type === 'vtol_jet') && b.y > 2.2) continue;
         if (Math.abs(a.y - b.y) > 2.2) continue;
 
         const recB = this.vehicles.get(b.id)!;
@@ -677,7 +679,14 @@ export class JakartaPhysicsWorld {
           floodRes.lateralFrictionMultiplier
         );
 
-        if (v.type === 'speedboat' || isInJakartaBayWaterZone(v.x, v.z)) {
+        const inOpenNorthernBay = v.z <= -72 && Math.abs(v.x) <= 238;
+        if (
+          v.type === 'speedboat' ||
+          (inOpenNorthernBay &&
+            v.type !== 'heli' &&
+            v.type !== 'vtol_jet' &&
+            v.y < 1.5)
+        ) {
           const buoy = computeWaterBuoyancyStep(
             v.x,
             v.y,

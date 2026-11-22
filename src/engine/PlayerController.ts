@@ -1153,7 +1153,7 @@ export class PlayerController {
       if (v) {
         const isAir = Boolean(VEHICLE_SPECS[v.type].isAircraft);
         const wasHighSpeedBail = !isAir && Math.abs(v.speed) > 10;
-        const gY = getGroundElevationAt(v.x, v.z);
+        const gY = getGroundElevationAt(v.x, v.z, isAir ? 0 : v.y);
         const bailHeight = isAir ? Math.max(gY, v.y) : gY;
         if (!isAir) {
           v.y = gY;
@@ -2842,6 +2842,17 @@ export class PlayerController {
             soundEngine.playTone(420, 0.22, 'sawtooth', 0.14, 1.45);
             this.spawnParticles(nextVX, activeVehicle.y + 0.4, nextVZ, 14, 0x38bdf8, 8);
           }
+        } else if (activeVehicle.y > surfaceElev + 0.45) {
+          this.stuntJump.airborne = true;
+          this.stuntJump.ramp = null;
+          this.stuntJump.launchX = nextVX;
+          this.stuntJump.launchZ = nextVZ;
+          this.stuntJump.airTime = 0.02;
+          this.stuntJump.vy = -1.5;
+          activeVehicle.y = Math.max(
+            surfaceElev,
+            activeVehicle.y + this.stuntJump.vy * simDt
+          );
         } else {
           activeVehicle.y = surfaceElev;
         }
@@ -3473,7 +3484,7 @@ export class PlayerController {
 
       const nextPX = this.playerPhys.x + this.playerPhys.vx * simDt;
       const nextPZ = this.playerPhys.z + this.playerPhys.vz * simDt;
-      const elevY = getGroundElevationAt(nextPX, nextPZ);
+      const elevY = getGroundElevationAt(nextPX, nextPZ, this.playerPhys.y);
       const col =
         elevY > 2.5
           ? {
@@ -3975,7 +3986,7 @@ export class PlayerController {
       deb.x += deb.vx * dt;
       deb.y += deb.vy * dt;
       deb.z += deb.vz * dt;
-      const gDeb = getGroundElevationAt(deb.x, deb.z);
+      const gDeb = getGroundElevationAt(deb.x, deb.z, deb.y);
       if (deb.y <= gDeb + 0.12) {
         deb.y = gDeb + 0.12;
         if (Math.abs(deb.vy) > 2.2) {
@@ -4065,7 +4076,7 @@ export class PlayerController {
           );
           en.x = safeRag.x;
           en.z = safeRag.z;
-          const ragGround = getGroundElevationAt(en.x, en.z);
+          const ragGround = getGroundElevationAt(en.x, en.z, 0);
           en.rig.group.position.set(en.x, ragGround + en.ragdoll.yOffset, en.z);
           applyCharacterRagdollPose(
             en.rig,
@@ -4252,7 +4263,7 @@ export class PlayerController {
         }
       }
 
-      const enGroundY = getGroundElevationAt(en.x, en.z);
+      const enGroundY = getGroundElevationAt(en.x, en.z, 0);
       en.rig.group.position.set(en.x, enGroundY, en.z);
       en.rig.group.rotation.y = en.facing;
 

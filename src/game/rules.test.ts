@@ -25,6 +25,7 @@ import {
   STREET_RACES,
   STORY_MISSIONS,
   CITY_BUILDINGS,
+  getGroundElevationAt,
   TRAFFIC_ROUTES,
   TrafficAISteppable,
   generateInitialTrafficSpawns,
@@ -370,6 +371,54 @@ test('stepTrafficVehicleAI handles Halte bus stops, Angkot ngetem nudging, and O
   );
   assert.equal((ojolWeave.weaveOffset ?? 0) > 0, true);
   assert.equal((ojolWeave.hornReactionTimer ?? 0) > 1.0, true);
+});
+
+test('height-aware Semanggi elevation, non-overlapping traffic spawns, dry routes, and blocked car queue guard', () => {
+  // Street traffic driving under Tol Layang Semanggi stays at ground level (0) instead of teleporting up to 6.2m
+  assert.equal(getGroundElevationAt(0, 80, 0), 0);
+  // Elevated Tol Layang vehicles and ramp entrants ride the 6.2m deck cleanly
+  assert.equal(getGroundElevationAt(0, 80, 6.2), 6.2);
+  const rampMouthY = getGroundElevationAt(-63, 80, 0);
+  assert.ok(rampMouthY > 0.5 && rampMouthY <= 1.85);
+
+  const spawns = generateInitialTrafficSpawns();
+  for (let i = 0; i < spawns.length; i++) {
+    if (spawns[i].layer === 'ground') {
+      assert.ok(spawns[i].z > -72, `Ground spawn ${spawns[i].id} must stay on dry land`);
+    }
+    for (let j = i + 1; j < spawns.length; j++) {
+      if (spawns[i].layer !== spawns[j].layer) continue;
+      const dist = Math.hypot(spawns[i].x - spawns[j].x, spawns[i].z - spawns[j].z);
+      assert.ok(
+        dist >= 7.5,
+        `Traffic spawns ${spawns[i].id} and ${spawns[j].id} too close (${dist.toFixed(2)}m)`
+      );
+    }
+  }
+
+  for (const [routeId, wps] of Object.entries(TRAFFIC_ROUTES)) {
+    for (const wp of wps) {
+      if (routeId !== 'tol_layang_express') {
+        assert.ok(wp.z > -72, `Route ${routeId} waypoint (${wp.x}, ${wp.z}) enters Jakarta Bay sea`);
+      }
+    }
+  }
+
+  // Blocked car must hold at zero speed behind lead car even after stuckTimer accumulates
+  const blockedCar: TrafficAISteppable = {
+    x: 4.6,
+    z: 60,
+    heading: 0,
+    speed: 0,
+    waypointIndex: 1,
+    stopTimer: 0,
+    stuckTimer: 10,
+    preferredSpeed: 11,
+    layer: 'ground',
+    vehicleType: 'sedan',
+  };
+  const stepped = stepTrafficVehicleAI(blockedCar, TRAFFIC_ROUTES.sudirman_south_arterial, 1.5, 0.2);
+  assert.equal(stepped.speed, 0);
 });
 
 test('resolveJakartaAmbientProfile cycles through authentic Jakarta soundscapes by district and time of day', () => {

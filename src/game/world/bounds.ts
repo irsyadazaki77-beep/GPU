@@ -380,20 +380,33 @@ export const MAIN_BOULEVARD_SIDEWALK_SLABS: SidewalkBounds[] = [
 /**
  * Returns the physical surface elevation Y (in meters) at world coordinates (x, z),
  * including the Elevated Semanggi-Gatot Subroto Inner-City Tollway at z = +80.
+ *
+ * When `currentY` is supplied, ground-level actors/vehicles passing beneath the bridge
+ * remain at street level (`0`), whereas entities approaching from the ground-level ramp
+ * mouths (`bridgeY <= 1.85`) or already near/above deck elevation (`currentY >= bridgeY - 2.4`)
+ * smoothly ride the elevated deck & ramps.
  */
-export function getGroundElevationAt(x: number, z: number): number {
+export function getGroundElevationAt(
+  x: number,
+  z: number,
+  currentY?: number
+): number {
+  let bridgeY = 0;
   if (z >= 75.5 && z <= 84.5) {
     if (x >= -42 && x <= 42) {
-      return 6.2;
-    }
-    if (x >= -68 && x < -42) {
+      bridgeY = 6.2;
+    } else if (x >= -68 && x < -42) {
       const t = (x - -68) / 26;
-      return Math.max(0, Math.min(6.2, t * 6.2));
-    }
-    if (x > 42 && x <= 68) {
+      bridgeY = Math.max(0, Math.min(6.2, t * 6.2));
+    } else if (x > 42 && x <= 68) {
       const t = (68 - x) / 26;
-      return Math.max(0, Math.min(6.2, t * 6.2));
+      bridgeY = Math.max(0, Math.min(6.2, t * 6.2));
     }
+  }
+  if (bridgeY <= 0) return 0;
+  if (currentY === undefined) return bridgeY;
+  if (currentY >= bridgeY - 2.4 || bridgeY <= 1.85) {
+    return bridgeY;
   }
   return 0;
 }
