@@ -10,6 +10,7 @@ import type {
   CustomRaceTrackSpec,
   HeistId,
   MultiplayerConnectionState,
+  MultiplayerLobbyState,
   MultiplayerRoomMode,
   NetCoopEvent,
   NetPeerSnapshot,
@@ -199,6 +200,7 @@ export class MultiplayerClientSync {
             roomId?: string;
             mode?: MultiplayerRoomMode;
             peers?: NetPeerSnapshot[];
+            lobby?: MultiplayerLobbyState;
             clientTime?: number;
             track?: Partial<CustomRaceTrackSpec>;
             event?: NetCoopEvent;
@@ -214,6 +216,14 @@ export class MultiplayerClientSync {
             if (Array.isArray(data.peers)) {
               this.ingestPeerList(data.peers);
             }
+            if (data.lobby) {
+              gameStore.setMultiplayerLobbyState(data.lobby);
+            }
+            return;
+          }
+
+          if (data.type === 'room:lobby' && data.lobby) {
+            gameStore.setMultiplayerLobbyState(data.lobby);
             return;
           }
 
@@ -221,6 +231,9 @@ export class MultiplayerClientSync {
             this.connectionState = 'connected';
             if (data.roomId) this.roomId = data.roomId;
             if (data.mode) this.roomMode = data.mode;
+            if (data.lobby) {
+              gameStore.setMultiplayerLobbyState(data.lobby);
+            }
             this.ingestPeerList(data.peers);
             return;
           }
@@ -332,6 +345,25 @@ export class MultiplayerClientSync {
         JSON.stringify({
           type: 'coop:event',
           event,
+        })
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  public sendLobbyAction(payload: {
+    action: 'ready' | 'start_race' | 'finish_race' | 'heist_loot';
+    elapsedSec?: number;
+    lootDelta?: number;
+  }): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      this.ws.send(
+        JSON.stringify({
+          type: 'lobby:action',
+          ...payload,
         })
       );
       return true;

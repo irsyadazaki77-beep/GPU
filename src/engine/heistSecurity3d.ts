@@ -16,9 +16,45 @@ interface VaultSecurityRig {
   baseZ: number;
 }
 
+export interface LaserTripwireResult {
+  tripped: boolean;
+  heistId: HeistId | null;
+  vaultX: number;
+  vaultZ: number;
+}
+
+/**
+ * Pure check testing whether the player stepped or drove into an armed
+ * 3D Heist Vault security laser gate before disabling it with Drone EMP.
+ */
+export function evaluateHeistLaserTripwire(params: {
+  playerX: number;
+  playerY: number;
+  playerZ: number;
+  sabotagedIds: string[];
+}): LaserTripwireResult {
+  if (params.playerY > 2.75) {
+    return { tripped: false, heistId: null, vaultX: 0, vaultZ: 0 };
+  }
+  for (const h of GRAND_HEISTS) {
+    if (params.sabotagedIds.includes(h.id)) continue;
+    const dx = params.playerX - h.vaultX;
+    const dz = params.playerZ - (h.vaultZ + 3.8);
+    if (Math.abs(dx) <= 3.6 && Math.abs(dz) <= 0.72) {
+      return {
+        tripped: true,
+        heistId: h.id,
+        vaultX: h.vaultX,
+        vaultZ: h.vaultZ + 3.8,
+      };
+    }
+  }
+  return { tripped: false, heistId: null, vaultX: 0, vaultZ: 0 };
+}
+
 /**
  * Renders 3D Heist Vault security CCTV vision cones, sweeping red laser tripwires,
- * and alarm beacons at Jakarta's Grand Heist vault locations.
+ * armored vault door arch, gold bullion pallets, and alarm beacons at Jakarta's Grand Heist sites.
  * Responds dynamically to Rajawali-X EMP sabotage (`sabotagedHeistCctvIds`).
  */
 export class HeistSecurity3DManager {
@@ -31,6 +67,24 @@ export class HeistSecurity3DManager {
       roughness: 0.55,
       metalness: 0.7,
     });
+    const vaultSteelMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      roughness: 0.35,
+      metalness: 0.85,
+    });
+    const goldMat = new THREE.MeshStandardMaterial({
+      color: 0xfacc15,
+      emissive: 0xca8a04,
+      emissiveIntensity: 0.25,
+      roughness: 0.22,
+      metalness: 0.92,
+    });
+    const terminalMat = new THREE.MeshStandardMaterial({
+      color: 0x0ea5e9,
+      emissive: 0x38bdf8,
+      emissiveIntensity: 0.9,
+      roughness: 0.3,
+    });
     const camBodyMat = new THREE.MeshStandardMaterial({
       color: 0xf8fafc,
       roughness: 0.4,
@@ -38,6 +92,10 @@ export class HeistSecurity3DManager {
     });
 
     const poleGeo = new THREE.CylinderGeometry(0.11, 0.14, 5.2, 8);
+    const pillarGeo = new THREE.BoxGeometry(0.45, 3.6, 0.45);
+    const lintelGeo = new THREE.BoxGeometry(7.9, 0.42, 0.52);
+    const goldBarGeo = new THREE.BoxGeometry(1.1, 0.55, 0.7);
+    const terminalGeo = new THREE.BoxGeometry(0.42, 1.35, 0.32);
     const camGeo = new THREE.BoxGeometry(0.38, 0.24, 0.58);
     const coneGeo = new THREE.ConeGeometry(2.6, 7.2, 16, 1, true);
     coneGeo.translate(0, -3.6, 0);
@@ -51,6 +109,19 @@ export class HeistSecurity3DManager {
     for (const h of GRAND_HEISTS) {
       const root = new THREE.Group();
       root.position.set(h.vaultX, 0, h.vaultZ);
+
+      // Walkable 3D Armored Vault Archway & Gold Bullion Interior Cache
+      const leftPillar = new THREE.Mesh(pillarGeo, vaultSteelMat);
+      leftPillar.position.set(-3.75, 1.8, 3.8);
+      const rightPillar = new THREE.Mesh(pillarGeo, vaultSteelMat);
+      rightPillar.position.set(3.75, 1.8, 3.8);
+      const topLintel = new THREE.Mesh(lintelGeo, vaultSteelMat);
+      topLintel.position.set(0, 3.65, 3.8);
+      const goldStack = new THREE.Mesh(goldBarGeo, goldMat);
+      goldStack.position.set(0, 0.28, 1.1);
+      const cyberConsole = new THREE.Mesh(terminalGeo, terminalMat);
+      cyberConsole.position.set(2.8, 0.68, 2.2);
+      root.add(leftPillar, rightPillar, topLintel, goldStack, cyberConsole);
 
       // Perimeter security mast next to vault entrance
       const mast = new THREE.Mesh(poleGeo, poleMat);

@@ -89,6 +89,7 @@ interface GameHudProps {
   onCancelStreetRace?: () => void;
   onAbortTurfWar?: () => void;
   onOpenImperium?: () => void;
+  onMultiplayerLobbyAction?: (action: 'ready' | 'start_race') => void;
 }
 
 /** Custom SVG Weapon Silhouettes for AAA Top-Right HUD & Wheel */
@@ -188,6 +189,7 @@ export const GameHud: React.FC<GameHudProps> = ({
   onCancelStreetRace,
   onAbortTurfWar,
   onOpenImperium,
+  onMultiplayerLobbyAction,
 }) => {
   const customWaypoint = useGameStore((s) => s.customWaypoint);
   const zenHudMode = useGameStore((s) => s.zenHudMode);
@@ -234,6 +236,7 @@ export const GameHud: React.FC<GameHudProps> = ({
   const speedTrapBanner = useGameStore((s) => s.speedTrapBanner);
   const activeVigilante = useGameStore((s) => s.activeVigilante);
   const activeRivalBoss = useGameStore((s) => s.activeRivalBoss);
+  const multiplayerLobby = useGameStore((s) => s.multiplayerLobby);
   const activeRoadEvent = worldClockEventState.activeEvent;
 
   const claimableChallengesCount = dailyChallenges.items.filter(
@@ -654,6 +657,29 @@ export const GameHud: React.FC<GameHudProps> = ({
           </div>
         </div>
       )}
+
+      {/* ACTIVE MULTIPLAYER RACE COUNTDOWN / SHARED LOOT POT STRIP */}
+      {multiplayerLobby &&
+        (multiplayerLobby.raceStatus === 'countdown' ||
+          multiplayerLobby.placements.length > 0) && (
+          <div
+            data-testid="multiplayer-lobby-banner"
+            className="fixed top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-aaa-up"
+          >
+            <div className="px-4 py-1.5 rounded-xl bg-[#090d16]/92 border border-[#38bdf8]/55 shadow-xl text-center font-mono-num text-xs">
+              {multiplayerLobby.raceStatus === 'countdown' ? (
+                <span className="text-[#f59e0b] font-extrabold tracking-wider">
+                  BALAP KRU DIMULAI DALAM {Math.max(1, Math.ceil(multiplayerLobby.countdownSec))}...
+                </span>
+              ) : (
+                <span className="text-[#22c55e] font-bold">
+                  Juara Room: #1 {multiplayerLobby.placements[0]?.displayName} (
+                  {multiplayerLobby.placements[0]?.finishSec.toFixed(1)}s)
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
       {/* COMBAT TAKEDOWN COMBO STREAK BADGE */}
       {combatCombo && combatCombo.count >= 2 && (
@@ -1403,6 +1429,46 @@ export const GameHud: React.FC<GameHudProps> = ({
                   {cloudSyncStatus || `Slot ${activeSaveSlot} v3`}
                 </span>
               </div>
+              {multiplayerLobby && (
+                <div className="mt-1.5 pt-1.5 border-t border-white/10 flex flex-col gap-1 text-[10px]">
+                  <div className="flex items-center justify-between text-[#cbd5e1]">
+                    <span>
+                      Lobby:{' '}
+                      <strong className="text-[#38bdf8]">
+                        {multiplayerLobby.raceStatus.toUpperCase()}
+                      </strong>
+                      {multiplayerLobby.raceStatus === 'countdown' &&
+                        ` (${Math.ceil(multiplayerLobby.countdownSec)}s)`}
+                    </span>
+                    <span className="text-[#22c55e] font-bold">
+                      Siap: {multiplayerLobby.readyPeerIds.length}
+                    </span>
+                  </div>
+                  {multiplayerLobby.sharedHeistPotRp > 0 && (
+                    <div className="text-[#facc15] font-bold">
+                      Pot Heist Kru: {formatRupiah(multiplayerLobby.sharedHeistPotRp)}
+                    </div>
+                  )}
+                  {onMultiplayerLobbyAction && (
+                    <div className="grid grid-cols-2 gap-1 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => onMultiplayerLobbyAction('ready')}
+                        className="py-1 rounded bg-[#38bdf8]/20 hover:bg-[#38bdf8]/35 text-[#7dd3fc] font-bold cursor-pointer"
+                      >
+                        Siap Kru
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onMultiplayerLobbyAction('start_race')}
+                        className="py-1 rounded bg-[#22c55e]/20 hover:bg-[#22c55e]/35 text-[#4ade80] font-bold cursor-pointer"
+                      >
+                        Mulai Balap
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

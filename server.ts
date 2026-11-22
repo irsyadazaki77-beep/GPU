@@ -314,6 +314,16 @@ export function createApiApp(options?: CreateAppOptions): Express {
   });
 
   app.post('/api/ugc/tracks/:trackId/play', (req, res) => {
+    const clientKey = req.ip || 'anonymous';
+    const rate = checkSocialHubRateLimit(clientKey);
+    if (!rate.allowed) {
+      res.status(429).json({
+        error: 'Rate limit exceeded',
+        retryAfterMs: rate.retryAfterMs,
+      });
+      return;
+    }
+
     const updated = socialHub.recordUgcPlay(req.params.trackId);
     if (!updated) {
       res.status(404).json({ error: 'Track UGC tidak ditemukan' });

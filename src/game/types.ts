@@ -1333,3 +1333,14 @@ export interface CommunityUgcTrack {
   publishedAt: number;
 }
 
+export interface MultiplayerLobbyState {
+  roomId: string;
+  mode: MultiplayerRoomMode;
+  raceStatus: 'idle' | 'countdown' | 'racing' | 'finished';
+  countdownSec: number;
+  readyPeerIds: string[];
+  placements: { peerId: string; displayName: string; finishSec: number }[];
+  sharedHeistPotRp: number;
+}
+
+

@@ -289,6 +289,20 @@ export class JakartaPhysicsWorld {
   private world: RAPIER_NS.World | null = null;
   private bodyMap = new Map<string, RAPIER_NS.RigidBody>();
   private chunkStaticBodies = new Map<string, RAPIER_NS.RigidBody>();
+  private debrisBodies = new Map<
+    string,
+    {
+      rb: RAPIER_NS.RigidBody | null;
+      x: number;
+      y: number;
+      z: number;
+      vx: number;
+      vy: number;
+      vz: number;
+      ttl: number;
+    }
+  >();
+  private debrisCounter = 0;
   private vehicles = new Map<string, VehiclePhysicsRecord>();
   private accumulator = 0;
   private disposed = false;
@@ -722,7 +736,109 @@ export class JakartaPhysicsWorld {
       }
     }
 
+    this.stepDynamicDebris(dt);
+
     return { playerCollisionImpact, playerInFloodZone };
+  }
+
+  /**
+   * Spawns real 3D rigid-body debris fragments driven by Rapier3D collisions & gravity
+   * (with ballistic fallback before WASM completes loading).
+   */
+  public spawnExplosionDebris(
+    originX: number,
+    originY: number,
+    originZ: number,
+    count: number = 4
+  ): void {
+    const safeCount = Math.max(1, Math.min(8, Math.floor(count)));
+    for (let i = 0; i < safeCount; i++) {
+      if (this.debrisBodies.size >= 24) {
+        const oldestKey = this.debrisBodies.keys().next().value;
+        if (oldestKey) this.removeDebrisById(oldestKey);
+      }
+      this.debrisCounter += 1;
+      const id = `debris_${this.debrisCounter}`;
+      const angle = (i / safeCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+      const spd = 6 + Math.random() * 7;
+      const vx = Math.cos(angle) * spd;
+      const vy = 5 + Math.random() * 6;
+      const vz = Math.sin(angle) * spd;
+
+      let rb: RAPIER_NS.RigidBody | null = null;
+      if (this.world && this.rapierReady) {
+        const desc = RAPIER.RigidBodyDesc.dynamic()
+          .setTranslation(originX, Math.max(0.5, originY), originZ)
+          .setLinvel(vx, vy, vz)
+          .setAngvel({
+            x: (Math.random() - 0.5) * 9,
+            y: (Math.random() - 0.5) * 9,
+            z: (Math.random() - 0.5) * 9,
+          })
+          .setLinearDamping(0.35)
+          .setAngularDamping(0.3);
+        rb = this.world.createRigidBody(desc);
+        const col = RAPIER.ColliderDesc.cuboid(0.28, 0.16, 0.35)
+          .setRestitution(0.45)
+          .setFriction(0.7);
+        this.world.createCollider(col, rb);
+      }
+
+      this.debrisBodies.set(id, {
+        rb,
+        x: originX,
+        y: Math.max(0.5, originY),
+        z: originZ,
+        vx,
+        vy,
+        vz,
+        ttl: 5.5,
+      });
+    }
+  }
+
+  private stepDynamicDebris(dt: number): void {
+    for (const [id, d] of this.debrisBodies.entries()) {
+      d.ttl -= dt;
+      if (d.ttl <= 0) {
+        this.removeDebrisById(id);
+        continue;
+      }
+      if (d.rb && this.rapierReady) {
+        const t = d.rb.translation();
+        d.x = t.x;
+        d.y = t.y;
+        d.z = t.z;
+      } else {
+        d.vy -= 9.81 * dt;
+        d.x += d.vx * dt;
+        d.y += d.vy * dt;
+        d.z += d.vz * dt;
+        if (d.y < 0.25) {
+          d.y = 0.25;
+          d.vy = Math.abs(d.vy) * 0.42;
+          d.vx *= 0.8;
+          d.vz *= 0.8;
+        }
+      }
+    }
+  }
+
+  private removeDebrisById(id: string): void {
+    const rec = this.debrisBodies.get(id);
+    if (!rec) return;
+    this.debrisBodies.delete(id);
+    if (rec.rb && this.world && this.rapierReady) {
+      try {
+        this.world.removeRigidBody(rec.rb);
+      } catch {
+        // Ignore already removed body
+      }
+    }
+  }
+
+  public getDynamicDebrisCount(): number {
+    return this.debrisBodies.size;
   }
 
   public isInitialized(): boolean {
@@ -733,7 +849,12 @@ export class JakartaPhysicsWorld {
     if (this.world && this.rapierReady) {
       return this.world.bodies.len();
     }
-    return this.vehicles.size + this.buildings.length + this.chunkStaticBodies.size;
+    return (
+      this.vehicles.size +
+      this.buildings.length +
+      this.chunkStaticBodies.size +
+      this.debrisBodies.size
+    );
   }
 
   public dispose(): void {
@@ -741,6 +862,7 @@ export class JakartaPhysicsWorld {
     this.disposed = true;
     this.bodyMap.clear();
     this.chunkStaticBodies.clear();
+    this.debrisBodies.clear();
     this.vehicles.clear();
     if (this.world) {
       try {

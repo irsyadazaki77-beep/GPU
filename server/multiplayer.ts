@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from 'node:http';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import type {
+  MultiplayerLobbyState,
   MultiplayerRoomMode,
   NetPeerSnapshot,
   ProtagonistId,
@@ -28,6 +29,7 @@ interface RoomInstance {
   roomId: string;
   mode: MultiplayerRoomMode;
   clients: Map<string, ConnectedClient>;
+  lobby: MultiplayerLobbyState;
 }
 
 const VALID_MODES: MultiplayerRoomMode[] = [
@@ -83,12 +85,23 @@ function computeRawByteLength(raw: RawData | string): number {
 }
 
 export interface ValidatedWsClientMessage {
-  type: 'ping' | 'room:switch' | 'peer:update' | 'custom_race_sync' | 'coop:event';
+  type:
+    | 'ping'
+    | 'room:switch'
+    | 'peer:update'
+    | 'custom_race_sync'
+    | 'coop:event'
+    | 'lobby:action';
   clientTime?: number;
   roomId?: string;
   mode?: MultiplayerRoomMode;
   state?: Partial<NetPeerSnapshot>;
   track?: Record<string, unknown>;
+  lobbyAction?: {
+    action: 'ready' | 'start_race' | 'finish_race' | 'heist_loot';
+    elapsedSec?: number;
+    lootDelta?: number;
+  };
   event?: {
     type:
       | 'horn'
@@ -135,7 +148,8 @@ export function validateIncomingWsFrame(
     msgType !== 'room:switch' &&
     msgType !== 'peer:update' &&
     msgType !== 'custom_race_sync' &&
-    msgType !== 'coop:event'
+    msgType !== 'coop:event' &&
+    msgType !== 'lobby:action'
   ) {
     return { ok: false, reason: 'invalid_schema' };
   }
@@ -209,6 +223,36 @@ export function validateIncomingWsFrame(
     };
   }
 
+  let validatedLobbyAction: ValidatedWsClientMessage['lobbyAction'];
+  if (msgType === 'lobby:action') {
+    const rawAction = candidate.action;
+    if (
+      rawAction !== 'ready' &&
+      rawAction !== 'start_race' &&
+      rawAction !== 'finish_race' &&
+      rawAction !== 'heist_loot'
+    ) {
+      return { ok: false, reason: 'invalid_schema' };
+    }
+    validatedLobbyAction = {
+      action: rawAction,
+      elapsedSec:
+        typeof candidate.elapsedSec === 'number' &&
+        Number.isFinite(candidate.elapsedSec) &&
+        candidate.elapsedSec >= 0 &&
+        candidate.elapsedSec <= 3600
+          ? Math.round(candidate.elapsedSec * 10) / 10
+          : undefined,
+      lootDelta:
+        typeof candidate.lootDelta === 'number' &&
+        Number.isFinite(candidate.lootDelta) &&
+        candidate.lootDelta > 0 &&
+        candidate.lootDelta <= 25_000_000
+          ? Math.round(candidate.lootDelta)
+          : undefined,
+    };
+  }
+
   return {
     ok: true,
     msg: {
@@ -231,6 +275,7 @@ export function validateIncomingWsFrame(
         candidate.track && typeof candidate.track === 'object'
           ? (candidate.track as Record<string, unknown>)
           : undefined,
+      lobbyAction: validatedLobbyAction,
       event: validatedEvent,
     },
   };
@@ -275,6 +320,15 @@ export class MultiplayerRoomHub {
         roomId: targetRoomId,
         mode: cleanMode,
         clients: new Map(),
+        lobby: {
+          roomId: targetRoomId,
+          mode: cleanMode,
+          raceStatus: 'idle',
+          countdownSec: 0,
+          readyPeerIds: [],
+          placements: [],
+          sharedHeistPotRp: 0,
+        },
       };
       this.rooms.set(targetRoomId, room);
     }
@@ -413,9 +467,75 @@ export class MultiplayerRoomHub {
     const room = this.rooms.get(roomId);
     if (!room) return;
     room.clients.delete(peerId);
+    room.lobby.readyPeerIds = room.lobby.readyPeerIds.filter((id) => id !== peerId);
     if (room.clients.size === 0) {
       this.rooms.delete(roomId);
     }
+  }
+
+  public getRoomLobby(roomId: string): MultiplayerLobbyState | null {
+    return this.rooms.get(roomId)?.lobby ?? null;
+  }
+
+  public applyLobbyAction(
+    roomId: string,
+    peerId: string,
+    action: NonNullable<ValidatedWsClientMessage['lobbyAction']>
+  ): MultiplayerLobbyState | null {
+    const room = this.rooms.get(roomId);
+    const client = room?.clients.get(peerId);
+    if (!room || !client) return null;
+
+    if (action.action === 'ready') {
+      if (room.lobby.readyPeerIds.includes(peerId)) {
+        room.lobby.readyPeerIds = room.lobby.readyPeerIds.filter((id) => id !== peerId);
+      } else {
+        room.lobby.readyPeerIds = [...room.lobby.readyPeerIds, peerId];
+      }
+    } else if (action.action === 'start_race') {
+      room.lobby.raceStatus = 'countdown';
+      room.lobby.countdownSec = 3;
+      room.lobby.placements = [];
+    } else if (action.action === 'finish_race') {
+      const alreadyPlaced = room.lobby.placements.some((p) => p.peerId === peerId);
+      if (!alreadyPlaced) {
+        room.lobby.placements = [
+          ...room.lobby.placements,
+          {
+            peerId,
+            displayName: client.state.displayName,
+            finishSec: action.elapsedSec ?? 0,
+          },
+        ].sort((a, b) => a.finishSec - b.finishSec);
+      }
+      if (
+        room.lobby.placements.length >= Math.max(1, room.lobby.readyPeerIds.length)
+      ) {
+        room.lobby.raceStatus = 'finished';
+      }
+    } else if (action.action === 'heist_loot' && action.lootDelta) {
+      room.lobby.sharedHeistPotRp = Math.min(
+        50_000_000,
+        room.lobby.sharedHeistPotRp + action.lootDelta
+      );
+    }
+
+    const payload = JSON.stringify({
+      type: 'room:lobby',
+      roomId,
+      lobby: room.lobby,
+      serverTime: Date.now(),
+    });
+    for (const c of room.clients.values()) {
+      if (c.ws && c.ws.readyState === WebSocket.OPEN) {
+        try {
+          c.ws.send(payload);
+        } catch {
+          // Ignore send errors
+        }
+      }
+    }
+    return room.lobby;
   }
 
   public getRoomPeers(roomId: string): NetPeerSnapshot[] {
@@ -482,6 +602,15 @@ export class MultiplayerRoomHub {
         this.rooms.delete(roomId);
         continue;
       }
+      if (room.lobby.raceStatus === 'countdown') {
+        room.lobby.countdownSec = Math.max(
+          0,
+          Math.round((room.lobby.countdownSec - SERVER_TICK_MS / 1000) * 100) / 100
+        );
+        if (room.lobby.countdownSec <= 0) {
+          room.lobby.raceStatus = 'racing';
+        }
+      }
       const peers = Array.from(room.clients.values()).map((c) => c.state);
       const payload = JSON.stringify({
         type: 'room:state',
@@ -489,6 +618,7 @@ export class MultiplayerRoomHub {
         mode: room.mode,
         serverTime: now,
         peers,
+        lobby: room.lobby,
       });
 
       for (const client of room.clients.values()) {
@@ -595,6 +725,7 @@ export function attachMultiplayerWebSocketServer(
         roomId: joined.roomId,
         mode: joined.mode,
         peers: hub.getRoomPeers(joined.roomId),
+        lobby: hub.getRoomLobby(joined.roomId),
         serverTime: Date.now(),
       })
     );
@@ -644,6 +775,7 @@ export function attachMultiplayerWebSocketServer(
               roomId: switched.roomId,
               mode: switched.mode,
               peers: hub.getRoomPeers(switched.roomId),
+              lobby: hub.getRoomLobby(switched.roomId),
               serverTime: Date.now(),
             })
           );
@@ -661,6 +793,10 @@ export function attachMultiplayerWebSocketServer(
 
       if (msg.type === 'coop:event' && msg.event) {
         hub.broadcastCoopEvent(currentRoomId, peerId, msg.event);
+      }
+
+      if (msg.type === 'lobby:action' && msg.lobbyAction) {
+        hub.applyLobbyAction(currentRoomId, peerId, msg.lobbyAction);
       }
     });
 

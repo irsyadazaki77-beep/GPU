@@ -7,6 +7,7 @@ import type {
   CommunityUgcTrack,
   CustomWaypointState,
   GlobalLeaderboardEntry,
+  MultiplayerLobbyState,
   PlayerProgressState,
   SpeedTrapFlashBanner,
   VigilantePatrolSession,
@@ -21,11 +22,12 @@ export interface GrandPlanSliceState {
   activeVigilante: VigilantePatrolSession | null;
   vigilanteStreak: number;
   activeRivalBoss: ActiveRivalBossState | null;
-  // Grand Plan 7.0 Social Hub & Heist 3D Security
+  // Grand Plan 7.0 & 8.0 Social Hub, Lobby Sync & Heist 3D Security
   globalLeaderboard: GlobalLeaderboardEntry[];
   communityUgcTracks: CommunityUgcTrack[];
   socialHubLoading: boolean;
   sabotagedHeistCctvIds: string[];
+  multiplayerLobby: MultiplayerLobbyState | null;
 }
 
 export function createInitialGrandPlanSliceState(initialSave?: {
@@ -45,6 +47,7 @@ export function createInitialGrandPlanSliceState(initialSave?: {
     communityUgcTracks: [],
     socialHubLoading: false,
     sabotagedHeistCctvIds: [],
+    multiplayerLobby: null,
   };
 }
 

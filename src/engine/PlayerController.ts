@@ -28,17 +28,14 @@ import {
   canDeployParachute,
   canPerformSilentTakedown,
   checkPlayerDetourProgress,
-  computeDriftCounterSteerBoost,
   computeHeadshotResolution,
   computeMrtTrainState,
   computeNearMissBonus,
   computeSlipstreamDraftBoost,
-  computeSpeedSensitiveTurnRate,
   computeStealthDetectionProfile,
   computeVehicleArmorMitigation,
   createRagdollImpulse,
   evaluateCoverAvailability,
-  evaluateFloodZoneAt,
   evaluateRoadEventImpactAt,
   evaluateStuntRampContact,
   evaluateVehicleDebrisDrop,
@@ -55,7 +52,6 @@ import {
   stepEnemyMovementPolicy,
   stepParachuteGlide,
   stepRagdollState,
-  stepVehicleLongitudinalSpeed,
 } from '../game/rules';
 import { soundEngine } from '../game/sound';
 import {
@@ -95,6 +91,7 @@ import {
   solveDroneFpvCamera,
 } from './controllers/cameraRig';
 import { evaluateDroneEmpTargets } from './controllers/droneAndTakedown';
+import { stepDrivenVehicleKinematics } from './controllers/vehiclePhysics';
 
 export interface EnemyEntity {
   id: string;
@@ -2662,101 +2659,61 @@ export class PlayerController {
         (this.keysHeld.has('Space') ||
           virtualInputRef.driftHeld ||
           gpDriftHeld);
-      const isDrifting =
-        handbrakeHeld &&
-        Math.abs(activeVehicle.speed) > 6.5 &&
-        Math.abs(moveTurn) > 0;
-      activeVehicle.isDrifting = isDrifting;
+      const climbDir =
+        (this.keysHeld.has('Space') ? 1 : 0) -
+        (this.keysHeld.has('KeyZ') ? 1 : 0);
 
-      const longStep = stepVehicleLongitudinalSpeed(
-        activeVehicle.speed,
+      const vehKin = stepDrivenVehicleKinematics({
+        x: activeVehicle.x,
+        y: activeVehicle.y,
+        z: activeVehicle.z,
+        speed: activeVehicle.speed,
+        heading: activeVehicle.heading,
+        driftAngle: activeVehicle.driftAngle,
         moveForward,
-        vSpec.acceleration * turboMult * handlingPenalty.speedMultiplier,
-        effectiveMaxSpeed,
-        handbrakeHeld,
-        activeVehicle.damage.exploded,
-        simDt
-      );
-      activeVehicle.speed = longStep.speed;
-      activeVehicle.isBraking = longStep.isBraking;
-
-      if (vSpec.isAircraft || Math.abs(activeVehicle.speed) > 0.35) {
-        const dirSign =
-          vSpec.isAircraft || activeVehicle.speed >= 0 ? 1 : -1;
-        const effectiveTurnRate = computeSpeedSensitiveTurnRate(
-          vSpec.turnRate,
-          Math.abs(activeVehicle.speed),
-          effectiveMaxSpeed,
-          isDrifting,
-          wetGripMult
-        );
-        const pullYaw =
-          !vSpec.isAircraft && Math.abs(activeVehicle.speed) > 4
-            ? handlingPenalty.steeringPull *
-              Math.min(1, Math.abs(activeVehicle.speed) / 14)
-            : 0;
-        activeVehicle.heading +=
-          (moveTurn * effectiveTurnRate + pullYaw) *
-          dirSign *
-          simDt;
-      }
-
-      // Slip angle & lateral skid motion while handbrake drifting (amplified on wet Vice-Jakarta asphalt)
-      const targetDriftAngle = isDrifting ? -moveTurn * 0.38 * wetGripMult : 0;
-      activeVehicle.driftAngle = THREE.MathUtils.damp(
-        activeVehicle.driftAngle,
-        targetDriftAngle,
-        8,
-        simDt
-      );
-      // Drift catch counter-steer boost on exiting a drift
-      const driftCatch = computeDriftCounterSteerBoost(
         moveTurn,
-        activeVehicle.driftAngle,
-        Math.abs(activeVehicle.speed)
-      );
-      if (driftCatch.boosted) {
-        activeVehicle.speed *= 1 + (driftCatch.accelerationSurge - 1) * simDt * 3.5;
+        handbrakeHeld,
+        climbDir,
+        maxSpeed: effectiveMaxSpeed,
+        acceleration: vSpec.acceleration * turboMult * handlingPenalty.speedMultiplier,
+        turnRate: vSpec.turnRate,
+        steeringPull: handlingPenalty.steeringPull,
+        isAircraft: Boolean(vSpec.isAircraft),
+        isExploded: activeVehicle.damage.exploded,
+        isAirborne: this.stuntJump.airborne,
+        wetnessFactor,
+        wetGripMult,
+        nowMs,
+        dt: simDt,
+      });
+
+      const isDrifting = vehKin.isDrifting;
+      activeVehicle.speed = vehKin.nextSpeed;
+      activeVehicle.heading = vehKin.nextHeading;
+      activeVehicle.driftAngle = vehKin.nextDriftAngle;
+      activeVehicle.isBraking = vehKin.isBraking;
+      activeVehicle.isDrifting = isDrifting;
+      if (vSpec.isAircraft) {
+        activeVehicle.y = vehKin.nextY;
       }
-      const travelAngle =
-        activeVehicle.heading - activeVehicle.driftAngle * 0.55;
 
-      const nextVX =
-        activeVehicle.x +
-        Math.sin(travelAngle) * activeVehicle.speed * simDt;
-      const nextVZ =
-        activeVehicle.z +
-        Math.cos(travelAngle) * activeVehicle.speed * simDt;
-
-      const surfaceElev = getGroundElevationAt(nextVX, nextVZ);
+      const nextVX = vehKin.nextX;
+      const nextVZ = vehKin.nextZ;
+      const surfaceElev = vehKin.surfaceElev;
       let rampPitchBoost = 0;
 
-      // Monsoon Flood Zone hydroplaning & splash physics
-      if (!vSpec.isAircraft && !this.stuntJump.airborne) {
-        const floodEval = evaluateFloodZoneAt(nextVX, nextVZ, wetnessFactor);
-        if (floodEval.inFlood && Math.abs(activeVehicle.speed) > 4.5) {
-          activeVehicle.speed *= Math.exp(-0.55 * floodEval.hydroplaneStrength * simDt);
-          const wobble = Math.sin(nowMs * 0.012) * floodEval.hydroplaneStrength * 0.45;
-          activeVehicle.heading += wobble * simDt;
-          this.floodSplashAccum += simDt;
-          if (this.floodSplashAccum >= 0.065) {
-            this.floodSplashAccum = 0;
-            const backX = activeVehicle.x - Math.sin(activeVehicle.heading) * 1.4;
-            const backZ = activeVehicle.z - Math.cos(activeVehicle.heading) * 1.4;
-            this.spawnParticles(backX, surfaceElev + 0.3, backZ, 3, 0x7dd3fc, 5.2);
-          }
+      if (vehKin.inFloodSplash) {
+        this.floodSplashAccum += simDt;
+        if (this.floodSplashAccum >= 0.065) {
+          this.floodSplashAccum = 0;
+          const backX = activeVehicle.x - Math.sin(activeVehicle.heading) * 1.4;
+          const backZ = activeVehicle.z - Math.cos(activeVehicle.heading) * 1.4;
+          this.spawnParticles(backX, surfaceElev + 0.3, backZ, 3, 0x7dd3fc, 5.2);
         }
       }
 
       if (vSpec.isAircraft) {
-        const climbDir =
-          (this.keysHeld.has('Space') ? 1 : 0) -
-          (this.keysHeld.has('KeyZ') ? 1 : 0);
-        activeVehicle.y = THREE.MathUtils.clamp(
-          activeVehicle.y + climbDir * 14 * simDt,
-          surfaceElev,
-          38
-        );
+        // Aircraft altitude updated by stepDrivenVehicleKinematics
       } else if (this.stuntJump.airborne) {
         this.stuntJump.airTime += simDt;
         this.stuntJump.vy -= 18.5 * simDt;

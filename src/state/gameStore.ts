@@ -40,6 +40,7 @@ import {
   JAKARTA_DISTRICTS,
   KiranaDistrictHackState,
   LeaderboardCategory,
+  MultiplayerLobbyState,
   NabiloGramPost,
   NabiloGramTriggerKind,
   NetCoopEvent,
@@ -483,6 +484,7 @@ export interface GameStoreSnapshot {
   communityUgcTracks: CommunityUgcTrack[];
   socialHubLoading: boolean;
   sabotagedHeistCctvIds: string[];
+  multiplayerLobby: MultiplayerLobbyState | null;
 }
 
 export function buildInitialStateForStage(
@@ -2562,6 +2564,11 @@ export const gameStore = {
         t.id === updated.id ? updated : t
       ),
     };
+    emitChange();
+  },
+
+  setMultiplayerLobbyState: (lobby: MultiplayerLobbyState | null) => {
+    state = { ...state, multiplayerLobby: lobby };
     emitChange();
   },
 };

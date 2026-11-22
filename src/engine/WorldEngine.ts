@@ -44,7 +44,10 @@ import { SimWorkerClient } from './simWorkerClient';
 import { spatialAudio } from './spatialAudio';
 import { TrafficSystem } from './TrafficSystem';
 import { WeatherLightingSystem } from './WeatherLightingSystem';
-import { HeistSecurity3DManager } from './heistSecurity3d';
+import {
+  HeistSecurity3DManager,
+  evaluateHeistLaserTripwire,
+} from './heistSecurity3d';
 import { cityAudio } from './CityAudio';
 import { proceduralTextures } from './ProceduralTextures';
 import { TireSkidmarkPool } from './TireSkidmarkPool';
@@ -79,6 +82,11 @@ export interface WorldControllerHandle {
   switchMultiplayerRoom?: (roomId: string, mode: MultiplayerRoomMode) => void;
   sendCustomRaceTrack?: (track: CustomRaceTrackSpec) => boolean;
   sendCoopEvent?: (type: NetCoopEvent['type'], detail?: string) => boolean;
+  sendLobbyAction?: (action: {
+    action: 'ready' | 'start_race' | 'finish_race' | 'heist_loot';
+    elapsedSec?: number;
+    lootDelta?: number;
+  }) => boolean;
   triggerProtagonistAbility: () => void;
   startCustomStreetRace: (track: CustomRaceTrackSpec) => void;
   cycleCameraViewMode: () => void;
@@ -186,6 +194,7 @@ export class WorldEngine {
   private lastAmbientCalloutAt = 0;
   private radioBroadcastAccum = 0;
   private speedTrapCooldowns: Record<string, number> = {};
+  private lastLaserAlarmAt = 0;
   private lightningTimer = 9;
   private lightningFlash = 0;
   private readonly envCache = new Map<WeatherMode, THREE.Texture>();
@@ -546,6 +555,7 @@ export class WorldEngine {
           detail,
         });
       },
+      sendLobbyAction: (action) => this.netSync.sendLobbyAction(action),
       triggerProtagonistAbility: () => {
         const res = gameStore.triggerActiveProtagonistAbility();
         if (!res.triggered) return;
@@ -1228,6 +1238,32 @@ export class WorldEngine {
           pState.activeHeistPlan.heistId ??
           null
       );
+      const laserCheck = evaluateHeistLaserTripwire({
+        playerX: phys.x,
+        playerY: phys.y,
+        playerZ: phys.z,
+        sabotagedIds: gameStore.getState().sabotagedHeistCctvIds,
+      });
+      if (laserCheck.tripped && nowEpochMs - this.lastLaserAlarmAt > 7000) {
+        this.lastLaserAlarmAt = nowEpochMs;
+        this.playerController.triggerFlashLight(
+          laserCheck.vaultX,
+          2.2,
+          laserCheck.vaultZ,
+          0xef4444,
+          16
+        );
+        soundEngine.playPoliceSiren();
+        this.crowdSystem.triggerPanicNear(laserCheck.vaultX, laserCheck.vaultZ, 22);
+        gameStore.updatePlayerState((prev) => ({
+          ...prev,
+          wantedLevel: Math.min(5, Math.max(2, prev.wantedLevel + 1)),
+        }));
+        gameStore.setState({
+          lastOutcomeText:
+            'ALARM LASER BRANKAS! Polisi disiagakan — lumpuhkan CCTV dengan EMP Drone [F4] dulu!',
+        });
+      }
       if (now - this.lastAmbientCalloutAt > 11000 && this.activeWorldCallouts.length < 3) {
         const ambient = this.crowdSystem.getAmbientCallout(phys.x, phys.z);
         if (ambient) {
@@ -1253,6 +1289,7 @@ export class WorldEngine {
         (bx, by, bz, explodedVeh) => {
           this.playerController.spawnShockwave(bx, by, bz, 13.5, 0xf97316, 0.52);
           this.playerController.triggerFlashLight(bx, by + 2.4, bz, 0xf97316, 16);
+          this.physicsWorld.spawnExplosionDebris(bx, by + 0.8, bz, 4);
           this.destructibleProps.applyBlastImpulse(
             bx,
             bz,

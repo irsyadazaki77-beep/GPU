@@ -292,6 +292,37 @@ test('Ephemeral WebSocket server: room join/leave, 8-player room cap overflow, 2
     assert.equal(heistSyncMsg.event?.wantedLevel, 4);
     assert.equal(heistSyncMsg.event?.detail, 'heist_bursa_scbd|75|Brankas Terbuka');
 
+    // 3b. Authoritative Multiplayer Lobby actions (ready -> start_race -> finish_race -> heist_loot)
+    const lobbyReadyPromise = waitForMessage<{
+      type: string;
+      lobby?: {
+        raceStatus: string;
+        readyPeerIds: string[];
+        sharedHeistPotRp: number;
+      };
+    }>(client2, (m) => m.type === 'room:lobby' && (m.lobby?.readyPeerIds.length ?? 0) === 1);
+    client1.send(JSON.stringify({ type: 'lobby:action', action: 'ready' }));
+    const lobbyReadyMsg = await lobbyReadyPromise;
+    assert.equal(lobbyReadyMsg.lobby?.readyPeerIds.length, 1);
+
+    const lobbyStartPromise = waitForMessage<{
+      type: string;
+      lobby?: { raceStatus: string; countdownSec: number };
+    }>(client2, (m) => m.type === 'room:lobby' && m.lobby?.raceStatus === 'countdown');
+    client1.send(JSON.stringify({ type: 'lobby:action', action: 'start_race' }));
+    const lobbyStartMsg = await lobbyStartPromise;
+    assert.equal(lobbyStartMsg.lobby?.countdownSec, 3);
+
+    const lobbyPotPromise = waitForMessage<{
+      type: string;
+      lobby?: { sharedHeistPotRp: number };
+    }>(client2, (m) => m.type === 'room:lobby' && (m.lobby?.sharedHeistPotRp ?? 0) === 1250000);
+    client1.send(
+      JSON.stringify({ type: 'lobby:action', action: 'heist_loot', lootDelta: 1250000 })
+    );
+    const lobbyPotMsg = await lobbyPotPromise;
+    assert.equal(lobbyPotMsg.lobby?.sharedHeistPotRp, 1250000);
+
     // 4. Close all sockets and verify rooms are deterministically cleaned up
     await Promise.all(
       openSockets.map(

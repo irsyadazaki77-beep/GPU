@@ -531,6 +531,10 @@ export default function App() {
         },
       }));
       controllerRef.current?.startMissionObjective(finaleMission, finaleChoice);
+      controllerRef.current?.sendLobbyAction?.({
+        action: 'heist_loot',
+        lootDelta: netTakeRp,
+      });
       const activeProto = gameStore.getState().playerState.activeProtagonist;
       void submitLeaderboardRecord({
         category: 'heist_score',
@@ -1313,6 +1317,9 @@ export default function App() {
           onSquadOrder={(ord) => controllerRef.current?.setSquadOrder(ord)}
           onCancelStreetRace={() => controllerRef.current?.cancelStreetRace()}
           onAbortTurfWar={() => controllerRef.current?.abortTurfWar()}
+          onMultiplayerLobbyAction={(action) =>
+            controllerRef.current?.sendLobbyAction?.({ action })
+          }
           onRepairVehicle={() => {
             controllerRef.current?.repairCurrentVehicle();
             gameStore.setState({

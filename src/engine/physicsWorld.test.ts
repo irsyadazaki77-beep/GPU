@@ -68,5 +68,11 @@ test('JakartaPhysicsWorld resolves pairwise vehicle impact momentum cleanly with
   assert.ok(step.playerCollisionImpact > 0);
   assert.ok(Number.isFinite(vehicles[0].x) && Number.isFinite(vehicles[0].z));
   assert.ok(vehicles[0].z < vehicles[1].z);
+
+  world.spawnExplosionDebris(5, 1.5, 5, 3);
+  assert.equal(world.getDynamicDebrisCount(), 3);
+  world.stepFixed(0.05, vehicles, 'veh_player', 0, 'siang');
+  assert.equal(world.getDynamicDebrisCount(), 3);
+
   world.dispose();
 });

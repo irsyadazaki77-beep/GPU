@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   CustomRaceTrackSpec,
   createCustomRaceTrackSpec,
@@ -35,6 +35,14 @@ export const CustomRaceUgcSection: React.FC<CustomRaceUgcSectionProps> = ({
   ]);
   const [jsonInput, setJsonInput] = useState('');
   const [ugcMessage, setUgcMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && communityTracks.length === 0) {
+      void gameStore.refreshCommunityUgcTracks();
+    }
+    // Load initial community catalog once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleAddPlayerPosCheckpoint = () => {
     const px = Math.round(engineTelemetryRef.playerX * 10) / 10;
