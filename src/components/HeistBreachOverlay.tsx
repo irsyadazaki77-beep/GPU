@@ -23,6 +23,7 @@ export const HeistBreachOverlay: React.FC<HeistBreachOverlayProps> = ({
   const heist =
     GRAND_HEISTS.find((h) => h.id === session.heistId) || GRAND_HEISTS[0];
   const isCyber = session.stage === 'cyber_signal';
+  const effectiveBonusPct = synergyBonusPct + (session.cctvSabotaged ? 15 : 0);
 
   // Cyber Signal Frequency Alignment state
   const [targetFreq, setTargetFreq] = useState<number>(62);
@@ -102,7 +103,7 @@ export const HeistBreachOverlay: React.FC<HeistBreachOverlayProps> = ({
                 window.setTimeout(() => {
                   onCompleteBreach(
                     session.heistId,
-                    1 + synergyBonusPct / 100
+                    1 + effectiveBonusPct / 100
                   );
                 }, 420);
               }
@@ -124,7 +125,7 @@ export const HeistBreachOverlay: React.FC<HeistBreachOverlayProps> = ({
     overheated,
     onCompleteBreach,
     session.heistId,
-    synergyBonusPct,
+    effectiveBonusPct,
   ]);
 
   const handleLockSignal = () => {
@@ -141,7 +142,7 @@ export const HeistBreachOverlay: React.FC<HeistBreachOverlayProps> = ({
         );
         soundEngine.playMissionFanfare();
         window.setTimeout(() => {
-          onCompleteBreach(session.heistId, 1 + synergyBonusPct / 100);
+          onCompleteBreach(session.heistId, 1 + effectiveBonusPct / 100);
         }, 420);
       } else {
         setTargetFreq(24 + ((nextLocked * 29 + 17) % 56));
@@ -175,11 +176,18 @@ export const HeistBreachOverlay: React.FC<HeistBreachOverlayProps> = ({
             <h2 className="font-display text-2xl sm:text-3xl font-extrabold italic uppercase text-[#f4f1ea] mt-0.5">
               {heist.title}
             </h2>
-            <div className="text-xs text-[#94a3b8] mt-0.5">
-              {heist.targetLocation} · Bonus Sinergi Trio +{synergyBonusPct}% · Target{' '}
-              <span className="font-mono-num text-[#22c55e] font-semibold">
-                {formatRupiah(heist.grossTakeRp)}
+            <div className="text-xs text-[#94a3b8] mt-0.5 flex flex-wrap items-center gap-1.5">
+              <span>
+                {heist.targetLocation} · Bonus +{effectiveBonusPct}% · Target{' '}
+                <span className="font-mono-num text-[#22c55e] font-semibold">
+                  {formatRupiah(heist.grossTakeRp)}
+                </span>
               </span>
+              {session.cctvSabotaged && (
+                <span className="px-1.5 py-0.5 rounded bg-[#22d3ee]/20 text-[#22d3ee] font-mono-num text-[10px] font-bold">
+                  CCTV & Laser EMP (+15%)
+                </span>
+              )}
             </div>
           </div>
           <button

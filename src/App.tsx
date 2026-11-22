@@ -92,6 +92,7 @@ const PhotoModeOverlay = React.lazy(() =>
 import { useGameKeyboardShortcuts } from './hooks/useGameKeyboardShortcuts';
 import { useGameRuntimeLoops } from './hooks/useGameRuntimeLoops';
 import { soundEngine } from './game/sound';
+import { submitLeaderboardRecord } from './game/socialHubClient';
 import { speakDialogueLine } from './game/voiceClient';
 import {
   SAVE_VERSION,
@@ -205,6 +206,10 @@ export default function App() {
       audioSettings: cur.audioVolumes,
       gameSettings: cur.gameSettings,
       completedDynamicQuests: cur.completedDynamicQuests,
+      stuntCompletedIds: cur.stuntCompletedIds,
+      speedTrapRecords: cur.speedTrapRecords,
+      sharedCoopRaces: cur.sharedCoopRaces,
+      vigilanteStreak: cur.vigilanteStreak,
       saveAt: Date.now(),
       savedAt: Date.now(),
     } as SavedGameSnapshot;
@@ -315,6 +320,10 @@ export default function App() {
       audioVolumes: latest.audioSettings,
       gameSettings: latest.gameSettings,
       completedDynamicQuests: latest.completedDynamicQuests,
+      stuntCompletedIds: latest.stuntCompletedIds || [],
+      speedTrapRecords: latest.speedTrapRecords || {},
+      sharedCoopRaces: latest.sharedCoopRaces || [],
+      vigilanteStreak: latest.vigilanteStreak ?? 0,
       activeMission: null,
       activeChoice: null,
       dialogueMission: null,
@@ -359,6 +368,16 @@ export default function App() {
         customsGarageOpen: false,
         warungModalOpen: false,
         tpsAiming: false,
+        activeHeistBreach: null,
+        activeRace: null,
+        activeTurfWar: null,
+        activeVigilante: null,
+        activeRivalBoss: null,
+        speedTrapBanner: null,
+        sabotagedHeistCctvIds: [],
+        stuntCompletedIds: [],
+        speedTrapRecords: {},
+        vigilanteStreak: 0,
         gameState: 'playing',
       });
       controllerRef.current?.resetWorldForNewRun();
@@ -512,6 +531,16 @@ export default function App() {
         },
       }));
       controllerRef.current?.startMissionObjective(finaleMission, finaleChoice);
+      const activeProto = gameStore.getState().playerState.activeProtagonist;
+      void submitLeaderboardRecord({
+        category: 'heist_score',
+        targetId: heist.id,
+        targetName: heist.title,
+        playerName: PROTAGONIST_PROFILES[activeProto].name,
+        protagonistId: activeProto,
+        scoreValue: netTakeRp,
+        metricLabel: formatRupiah(netTakeRp),
+      });
       soundEngine.playMissionFanfare();
       triggerCinematicShot(
         'heist',

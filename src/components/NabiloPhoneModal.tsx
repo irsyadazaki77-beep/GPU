@@ -52,6 +52,7 @@ import {
 } from '../state/gameStore';
 import { soundEngine } from '../game/sound';
 import { CustomRaceUgcSection } from './phone/CustomRaceUgcSection';
+import { GlobalLeaderboardCard } from './phone/GlobalLeaderboardCard';
 import { PhoneSahamApp } from './phone/PhoneSahamApp';
 
 interface NabiloPhoneModalProps {
@@ -1646,6 +1647,9 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                   Target: {empireSummary.nextTierGoal}
                 </div>
               </div>
+
+              {/* 1B. Leaderboard Global Jakarta (ETLE / Balap Liar / Grand Heist) */}
+              <GlobalLeaderboardCard />
 
               {/* 2. Tantangan Harian Jakarta */}
               <div className="flex flex-col gap-2">

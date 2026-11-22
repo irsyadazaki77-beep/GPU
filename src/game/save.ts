@@ -1,5 +1,6 @@
 import {
   AudioChannelVolumes,
+  CustomRaceTrackSpec,
   GameSettings,
   GraphicsQualityTier,
   OriginArchetype,
@@ -52,6 +53,10 @@ export interface SavedGameSnapshot {
   audioSettings: AudioChannelVolumes;
   gameSettings: GameSettings;
   completedDynamicQuests: string[];
+  stuntCompletedIds?: string[];
+  speedTrapRecords?: Record<string, number>;
+  sharedCoopRaces?: CustomRaceTrackSpec[];
+  vigilanteStreak?: number;
   savedAt: number;
 }
 
@@ -253,6 +258,49 @@ export function migrateSavedGame(raw: unknown): SavedGameSnapshot | null {
     ? parsed.completedDynamicQuests.filter((q): q is string => typeof q === 'string')
     : [];
 
+  const stuntCompletedIds = Array.isArray(parsed.stuntCompletedIds)
+    ? parsed.stuntCompletedIds
+        .filter((s): s is string => typeof s === 'string' && s.length > 0 && s.length <= 64)
+        .slice(0, 32)
+    : [];
+
+  const speedTrapRecords: Record<string, number> = {};
+  if (
+    parsed.speedTrapRecords &&
+    typeof parsed.speedTrapRecords === 'object' &&
+    !Array.isArray(parsed.speedTrapRecords)
+  ) {
+    for (const [k, v] of Object.entries(parsed.speedTrapRecords).slice(0, 32)) {
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 999) {
+        speedTrapRecords[k.slice(0, 64)] = Math.round(v);
+      }
+    }
+  }
+
+  const sharedCoopRaces: CustomRaceTrackSpec[] = Array.isArray(
+    parsed.sharedCoopRaces
+  )
+    ? parsed.sharedCoopRaces
+        .filter(
+          (t): t is CustomRaceTrackSpec =>
+            Boolean(t) &&
+            typeof t === 'object' &&
+            typeof t.id === 'string' &&
+            typeof t.name === 'string' &&
+            Array.isArray(t.checkpoints) &&
+            t.checkpoints.length >= 2 &&
+            t.checkpoints.length <= 12
+        )
+        .slice(0, 16)
+    : [];
+
+  const vigilanteStreak =
+    typeof parsed.vigilanteStreak === 'number' &&
+    Number.isFinite(parsed.vigilanteStreak) &&
+    parsed.vigilanteStreak >= 0
+      ? Math.min(999, Math.floor(parsed.vigilanteStreak))
+      : 0;
+
   return {
     version: SAVE_VERSION,
     origin,
@@ -263,6 +311,10 @@ export function migrateSavedGame(raw: unknown): SavedGameSnapshot | null {
     audioSettings,
     gameSettings,
     completedDynamicQuests,
+    stuntCompletedIds,
+    speedTrapRecords,
+    sharedCoopRaces,
+    vigilanteStreak,
     savedAt: typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now(),
   };
 }

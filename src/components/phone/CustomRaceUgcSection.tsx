@@ -23,6 +23,8 @@ export const CustomRaceUgcSection: React.FC<CustomRaceUgcSectionProps> = ({
 }) => {
   const savedTracks = useGameStore((s) => s.playerState.customRaceTracks || []);
   const sharedCoopRaces = useGameStore((s) => s.sharedCoopRaces);
+  const communityTracks = useGameStore((s) => s.communityUgcTracks);
+  const socialHubLoading = useGameStore((s) => s.socialHubLoading);
   const [showBuilder, setShowBuilder] = useState(false);
   const [trackName, setTrackName] = useState('Sirkuit Malam Sudirman');
   const [checkpoints, setCheckpoints] = useState<[number, number][]>([
@@ -89,6 +91,20 @@ export const CustomRaceUgcSection: React.FC<CustomRaceUgcSectionProps> = ({
         ? `Sirkuit "${track.name}" dibagikan ke seluruh pemain di room Co-Op!`
         : 'WebSocket Co-Op belum tersambung — simpan lokal tetap aktif.'
     );
+  };
+
+  const handlePublishServer = async (track: CustomRaceTrackSpec) => {
+    const res = await gameStore.publishTrackToCommunity(track);
+    setUgcMessage(
+      res
+        ? `Sirkuit "${track.name}" dipublikasikan ke Server Komunitas Jakarta!`
+        : 'Gagal menghubungi server komunitas.'
+    );
+  };
+
+  const handleFetchCommunity = async () => {
+    const list = await gameStore.refreshCommunityUgcTracks();
+    setUgcMessage(`Dimuat ${list.length} sirkuit komunitas dari server.`);
   };
 
   const allTracks = [...savedTracks, ...sharedCoopRaces];
@@ -198,13 +214,20 @@ export const CustomRaceUgcSection: React.FC<CustomRaceUgcSectionProps> = ({
                   Balap
                 </button>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => handleShareTrack(track)}
                   className="px-2 py-0.5 rounded bg-[#a855f7]/25 text-[#d8b4fe] font-mono-num text-[10px] font-semibold cursor-pointer"
                 >
                   Sync Co-Op
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handlePublishServer(track)}
+                  className="px-2 py-0.5 rounded bg-[#22c55e]/20 text-[#4ade80] font-mono-num text-[10px] font-semibold cursor-pointer"
+                >
+                  Terbitkan Online
                 </button>
                 <button
                   type="button"
@@ -218,6 +241,59 @@ export const CustomRaceUgcSection: React.FC<CustomRaceUgcSectionProps> = ({
           ))}
         </div>
       )}
+
+      {/* Community Server UGC Tracks Browser */}
+      <div className="pt-2 border-t border-white/10 flex flex-col gap-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-bold uppercase font-mono-num text-[#22c55e]">
+            Katalog Komunitas Online ({communityTracks.length})
+          </span>
+          <button
+            type="button"
+            onClick={() => void handleFetchCommunity()}
+            className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] font-mono-num text-[#cbd5e1] cursor-pointer"
+          >
+            {socialHubLoading ? 'Memuat...' : 'Muat Komunitas'}
+          </button>
+        </div>
+        {communityTracks.slice(0, 5).map((item) => (
+          <div
+            key={item.id}
+            className="p-2 rounded-lg bg-[#0c1424] border border-[#22c55e]/20 flex items-center justify-between gap-2"
+          >
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-[#f4f1ea] truncate">
+                {item.track.name}
+              </div>
+              <div className="text-[10px] font-mono-num text-[#94a3b8]">
+                Oleh {item.track.authorName} · ♥ {item.likes} · ▶ {item.plays}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => void gameStore.likeCommunityTrack(item.id)}
+                className="px-1.5 py-1 rounded bg-white/10 hover:bg-[#f43f5e]/30 text-[10px] text-[#fda4af] font-mono-num cursor-pointer"
+                title="Sukai Sirkuit"
+              >
+                ♥
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  gameStore.addCustomRaceTrack(item.track);
+                  void gameStore.markCommunityTrackPlayed(item.id);
+                  onStartCustomRace(item.track);
+                  onClosePhone();
+                }}
+                className="px-2 py-1 rounded bg-[#22c55e] text-[#090c12] font-mono-num text-[10px] font-extrabold cursor-pointer"
+              >
+                Main
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

@@ -129,6 +129,25 @@ test('Multi-slot management (Slots 1-3) and JSON export/import preserve full Sav
       touchControlsMode: 'auto',
     },
     completedDynamicQuests: ['dq_glodok_99'],
+    stuntCompletedIds: ['ramp_monas_1'],
+    speedTrapRecords: { etle_sudirman_hi: 162 },
+    sharedCoopRaces: [
+      {
+        id: 'ugc_coop_test_1',
+        name: 'Tes Sirkuit Co-Op',
+        authorName: 'Nabilo',
+        checkpoints: [
+          [0, -20],
+          [25, -20],
+          [25, 20],
+        ],
+        isLoop: true,
+        entryFeeRp: 0,
+        rewardRp: 85000,
+        createdAt: 1720000000000,
+      },
+    ],
+    vigilanteStreak: 4,
     savedAt: 1720000000000,
   };
 
@@ -150,6 +169,10 @@ test('Multi-slot management (Slots 1-3) and JSON export/import preserve full Sav
   assert.equal(imported.playerState.rupiah, 2750000);
   assert.equal(imported.gameSettings.graphicsTier, 'ultra');
   assert.deepEqual(imported.completedDynamicQuests, ['dq_glodok_99']);
+  assert.deepEqual(imported.stuntCompletedIds, ['ramp_monas_1']);
+  assert.equal(imported.speedTrapRecords?.etle_sudirman_hi, 162);
+  assert.equal(imported.sharedCoopRaces?.length, 1);
+  assert.equal(imported.vigilanteStreak, 4);
 
   const token1 = getOrCreatePlayerToken();
   const token2 = getOrCreatePlayerToken();

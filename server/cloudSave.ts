@@ -357,6 +357,63 @@ export function validateStrictSaveSchemaV3(
     };
   }
 
+  if (
+    candidate.stuntCompletedIds !== undefined &&
+    !isBoundedStringArray(candidate.stuntCompletedIds, 32)
+  ) {
+    return {
+      valid: false,
+      error: 'stuntCompletedIds must be a bounded string array (max 32 items)',
+    };
+  }
+
+  if (candidate.speedTrapRecords !== undefined) {
+    if (
+      !candidate.speedTrapRecords ||
+      typeof candidate.speedTrapRecords !== 'object' ||
+      Array.isArray(candidate.speedTrapRecords) ||
+      Object.keys(candidate.speedTrapRecords).length > 32
+    ) {
+      return {
+        valid: false,
+        error: 'speedTrapRecords must be a bounded key-value map (max 32 traps)',
+      };
+    }
+    for (const val of Object.values(
+      candidate.speedTrapRecords as Record<string, unknown>
+    )) {
+      if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || val > 999) {
+        return {
+          valid: false,
+          error: 'speedTrapRecords values must be finite speeds between 0 and 999',
+        };
+      }
+    }
+  }
+
+  if (
+    candidate.sharedCoopRaces !== undefined &&
+    (!Array.isArray(candidate.sharedCoopRaces) || candidate.sharedCoopRaces.length > 16)
+  ) {
+    return {
+      valid: false,
+      error: 'sharedCoopRaces must be a bounded array (max 16 tracks)',
+    };
+  }
+
+  if (
+    candidate.vigilanteStreak !== undefined &&
+    (typeof candidate.vigilanteStreak !== 'number' ||
+      !Number.isFinite(candidate.vigilanteStreak) ||
+      candidate.vigilanteStreak < 0 ||
+      candidate.vigilanteStreak > 999)
+  ) {
+    return {
+      valid: false,
+      error: 'vigilanteStreak must be a finite number between 0 and 999',
+    };
+  }
+
   const migrated = migrateSavedGame(rawPayload);
   if (!migrated) {
     return { valid: false, error: 'Failed to normalize Save Schema v3 payload' };

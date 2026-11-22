@@ -23,6 +23,17 @@ test('San Nabilo Open-World E2E Smoke: health/readyz probes, WebGL canvas boot, 
   expect(readyBody.status).toBe('ready');
   expect(readyBody.checks.sqlite).toBe('ok');
 
+  // Grand Plan 7.0 Social Hub REST API checks
+  const lbRes = await request.get('/api/leaderboard?category=etle_speed');
+  expect(lbRes.status()).toBe(200);
+  const lbJson = (await lbRes.json()) as { entries: unknown[] };
+  expect(Array.isArray(lbJson.entries)).toBe(true);
+
+  const ugcRes = await request.get('/api/ugc/tracks');
+  expect(ugcRes.status()).toBe(200);
+  const ugcJson = (await ugcRes.json()) as { tracks: unknown[] };
+  expect(Array.isArray(ugcJson.tracks)).toBe(true);
+
   // 2. Track uncaught page errors and fatal console errors
   const pageErrors: string[] = [];
   const fatalConsoleErrors: string[] = [];
@@ -82,6 +93,9 @@ test('San Nabilo Open-World E2E Smoke: health/readyz probes, WebGL canvas boot, 
   await phoneDialog.waitFor({ state: 'visible', timeout: 5_000 });
   const imperiumBtn = phoneDialog.getByRole('button', { name: 'Imperium' });
   await imperiumBtn.click({ force: true });
+
+  const leaderboardCard = page.locator('[data-testid="global-leaderboard-card"]');
+  await leaderboardCard.waitFor({ state: 'visible', timeout: 5_000 });
 
   const ugcToggleBtn = page.locator('[data-testid="toggle-ugc-race-builder-btn"]');
   await ugcToggleBtn.waitFor({ state: 'visible', timeout: 5_000 });

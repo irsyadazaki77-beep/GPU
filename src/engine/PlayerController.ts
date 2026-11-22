@@ -29,7 +29,6 @@ import {
   canPerformSilentTakedown,
   checkPlayerDetourProgress,
   computeDriftCounterSteerBoost,
-  computeDroneEmpRadius,
   computeHeadshotResolution,
   computeMrtTrainState,
   computeNearMissBonus,
@@ -49,7 +48,6 @@ import {
   getPlayerStaminaSpeedMultiplier,
   getVehicleHandlingPenalty,
   isPlayerNearMrtStation,
-  resolveCameraWallPullIn,
   resolveCircleAABBCollision,
   resolveCoopPassengerOffset,
   scoreStuntJump,
@@ -92,6 +90,11 @@ import {
   computeStaggeredCrewPosition,
   exponentialDampFactor,
 } from './visualOverhaulMath';
+import {
+  solveChaseCameraRig,
+  solveDroneFpvCamera,
+} from './controllers/cameraRig';
+import { evaluateDroneEmpTargets } from './controllers/droneAndTakedown';
 
 export interface EnemyEntity {
   id: string;
@@ -3323,25 +3326,39 @@ export class PlayerController {
           this.droneReconPose.empCooldownSec <= 0
         ) {
           this.droneReconPose.empCooldownSec = 6.0;
-          const empR = computeDroneEmpRadius(pState.droneLevel);
+          const empTarget = evaluateDroneEmpTargets({
+            droneX: this.droneReconPose.x,
+            droneZ: this.droneReconPose.z,
+            droneLevel: pState.droneLevel,
+            activeHeistId:
+              storeState.activeHeistBreach?.heistId ??
+              storeState.playerState.activeHeistPlan.heistId ??
+              null,
+            enemies: this.enemies,
+          });
+          const empR = empTarget.empRadius;
           this.spawnShockwave(this.droneReconPose.x, 0.3, this.droneReconPose.z, empR, 0x22d3ee, 0.52);
           this.triggerFlashLight(this.droneReconPose.x, this.droneReconPose.y, this.droneReconPose.z, 0x22d3ee, 14);
           this.traffic.applyEmpPulseAt(this.droneReconPose.x, this.droneReconPose.z, empR, null);
+          const stunnedSet = new Set(empTarget.stunnedEnemyIds);
           let stunned = 0;
           for (const en of this.enemies) {
-            if (en.state !== 'alive') continue;
-            if (Math.hypot(en.x - this.droneReconPose.x, en.z - this.droneReconPose.z) <= empR) {
-              en.tagged = true;
-              en.staggerTimer = 3.5;
-              en.staggerType = 'head';
-              en.hp -= 28;
-              stunned++;
-              if (en.hp <= 0) this.markEnemyKo(en, activeChoice);
-            }
+            if (!stunnedSet.has(en.id) || en.state !== 'alive') continue;
+            en.tagged = true;
+            en.staggerTimer = 3.5;
+            en.staggerType = 'head';
+            en.hp -= 28;
+            stunned++;
+            if (en.hp <= 0) this.markEnemyKo(en, activeChoice);
+          }
+          if (empTarget.sabotagedHeistId) {
+            gameStore.sabotageHeistCctv(empTarget.sabotagedHeistId);
           }
           soundEngine.playTone(480, 0.25, 'sawtooth', 0.2, 0.45);
           gameStore.setState({
-            lastOutcomeText: `PULSA EMP RAJAWALI-X! ${stunned} musuh ter-tag & lumpuh sementara!`,
+            lastOutcomeText: empTarget.sabotagedHeistId
+              ? `PULSA EMP RAJAWALI-X! CCTV Brankas dilumpuhkan (+15%) & ${stunned} musuh stun!`
+              : `PULSA EMP RAJAWALI-X! ${stunned} musuh ter-tag & lumpuh sementara!`,
           });
         }
         gameStore.setDroneReconState(true, this.droneReconPose.empCooldownSec <= 0);
@@ -4498,20 +4515,11 @@ export class PlayerController {
       camera.position.z = THREE.MathUtils.damp(camera.position.z, targetCamZ, 8.5, dt);
       camera.lookAt(vx, lookY, vz);
     } else if (this.droneReconActive) {
-      // Grand Plan 6.0: Rajawali-X Drone FPV Tactical Recon Camera
+      // Grand Plan 6.0 & 7.0: Rajawali-X Drone FPV Tactical Recon Camera
       this.playerRig.group.visible = true;
-      const fwdX = Math.sin(this.droneReconPose.yaw);
-      const fwdZ = Math.cos(this.droneReconPose.yaw);
-      camera.position.set(
-        this.droneReconPose.x - fwdX * 0.4,
-        this.droneReconPose.y - 0.15,
-        this.droneReconPose.z - fwdZ * 0.4
-      );
-      this._v2.set(
-        this.droneReconPose.x + fwdX * 18,
-        Math.max(0, this.droneReconPose.y - 6.5),
-        this.droneReconPose.z + fwdZ * 18
-      );
+      const fpv = solveDroneFpvCamera(this.droneReconPose);
+      camera.position.set(fpv.eye.x, fpv.eye.y, fpv.eye.z);
+      this._v2.set(fpv.lookAt.x, fpv.lookAt.y, fpv.lookAt.z);
       camera.lookAt(this._v2);
     } else if (this.stuntJump.airborne && activeVehicle) {
       // Dramatic Stunt Jump Slow-Mo Side Camera
@@ -4588,74 +4596,42 @@ export class PlayerController {
         this.camYaw += diff * (1 - Math.exp(-3.4 * dt));
       }
 
-      const isCinematic = camMode === 'cinematic';
-      const cineSway = isCinematic ? Math.sin(nowMs * 0.00055) * 0.42 : 0;
-      const effectiveYaw = this.camYaw + cineSway;
-      const baseElevY = activeVehicle ? activeVehicle.y : this.playerPhys.y;
-      const orbitFwdX = Math.sin(effectiveYaw);
-      const orbitFwdZ = Math.cos(effectiveYaw);
-      const orbitRightX = -Math.cos(effectiveYaw);
-      const orbitRightZ = Math.sin(effectiveYaw);
-
-      const gForceCamOffset =
-        isDriving && activeVehicle
-          ? moveForward > 0.4
-            ? 0.75
-            : activeVehicle.isBraking
-            ? -0.55
-            : 0
-          : 0;
-      const camDist =
-        (isTpsAim
-          ? 4.4
-          : isCinematic
-          ? (isDriving ? 14.2 : 11.4) + speedRatio * 1.6
-          : isDriving
-          ? 12.2 + speedRatio * 1.4
-          : 9.8) + gForceCamOffset;
-      const effectivePitch = isCinematic ? 0.16 : this.camPitch;
-      const horizDist = camDist * Math.cos(effectivePitch);
-      const vertOffset = camDist * Math.sin(effectivePitch);
-
-      let desiredX = this.playerPhys.x - orbitFwdX * horizDist;
-      let desiredZ = this.playerPhys.z - orbitFwdZ * horizDist;
-      let desiredY = baseElevY + (isTpsAim ? 1.55 : isCinematic ? 1.35 : 1.75) + vertOffset;
-
-      if (isTpsAim) {
-        desiredX += orbitRightX * 1.1;
-        desiredZ += orbitRightZ * 1.1;
-      }
-
-      const pulledCam = resolveCameraWallPullIn(
-        this.playerPhys.x,
-        this.playerPhys.z,
-        desiredX,
-        desiredY,
-        desiredZ,
-        this.buildingGrid
-      );
+      const solvedRig = solveChaseCameraRig({
+        playerX: this.playerPhys.x,
+        playerZ: this.playerPhys.z,
+        baseElevY: activeVehicle ? activeVehicle.y : this.playerPhys.y,
+        camYaw: this.camYaw,
+        camPitch: this.camPitch,
+        camMode,
+        isDriving,
+        isTpsAim,
+        isBraking: Boolean(activeVehicle?.isBraking),
+        moveForward,
+        speedRatio,
+        nowMs,
+        dt,
+        buildingGrid: this.buildingGrid,
+      });
 
       const snapNow =
         this.cameraNeedsSnap ||
-        Math.abs(camera.position.y - pulledCam.y) > 25;
-      const dampFactor = snapNow
-        ? 1
-        : exponentialDampFactor(isTpsAim ? 14 : isCinematic ? 5.5 : 8.8, dt);
+        Math.abs(camera.position.y - solvedRig.desiredPos.y) > 25;
+      const dampFactor = snapNow ? 1 : solvedRig.dampFactor;
       this.cameraNeedsSnap = false;
 
       camera.position.x = THREE.MathUtils.lerp(
         camera.position.x,
-        pulledCam.x,
+        solvedRig.desiredPos.x,
         dampFactor
       );
       camera.position.y = THREE.MathUtils.lerp(
         camera.position.y,
-        pulledCam.y,
+        solvedRig.desiredPos.y,
         dampFactor
       );
       camera.position.z = THREE.MathUtils.lerp(
         camera.position.z,
-        pulledCam.z,
+        solvedRig.desiredPos.z,
         dampFactor
       );
 
@@ -4680,19 +4656,16 @@ export class PlayerController {
         this.cameraTrauma = Math.max(0, this.cameraTrauma - dt * 2.2);
       }
 
-      const lookDist = isTpsAim ? 14 : isDriving ? 6.2 + speedRatio * 2.4 : 5.2;
-      const lookPitchShift = (0.28 - this.camPitch) * (isTpsAim ? 9.5 : 4.5);
       this._v2.set(
-        this.playerPhys.x + orbitFwdX * lookDist,
-        baseElevY + (isTpsAim ? 1.7 : 2.15) + lookPitchShift,
-        this.playerPhys.z + orbitFwdZ * lookDist
+        solvedRig.lookTarget.x,
+        solvedRig.lookTarget.y,
+        solvedRig.lookTarget.z
       );
       if (snapNow || !this.camLookInitialized) {
         this._camLookTarget.copy(this._v2);
         this.camLookInitialized = true;
       } else {
-        const lookDamp = exponentialDampFactor(isTpsAim ? 18 : 11.5, dt);
-        this._camLookTarget.lerp(this._v2, lookDamp);
+        this._camLookTarget.lerp(this._v2, solvedRig.lookDampFactor);
       }
       camera.lookAt(this._camLookTarget);
       if (isDriving && activeVehicle && camMode !== 'cinematic') {

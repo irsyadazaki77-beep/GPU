@@ -1075,6 +1075,7 @@ export interface HeistBreachSession {
   progress: number;
   heat: number;
   lockedBands: number;
+  cctvSabotaged?: boolean;
 }
 
 /* ==========================================================================
@@ -1307,8 +1308,28 @@ export interface ActiveRivalBossState {
   defeated: boolean;
 }
 
+export type LeaderboardCategory =
+  | 'etle_speed'
+  | 'street_race'
+  | 'heist_score';
 
+export interface GlobalLeaderboardEntry {
+  id: string;
+  category: LeaderboardCategory;
+  targetId: string;
+  targetName: string;
+  playerName: string;
+  protagonistId: ProtagonistId;
+  scoreValue: number;
+  metricLabel: string;
+  updatedAt: number;
+}
 
-
-
+export interface CommunityUgcTrack {
+  id: string;
+  track: CustomRaceTrackSpec;
+  likes: number;
+  plays: number;
+  publishedAt: number;
+}
 

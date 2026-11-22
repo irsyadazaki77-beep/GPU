@@ -107,3 +107,49 @@ export async function speakDialogueLine(
     return 'fallback';
   }
 }
+
+let lastRadioVoiceAtMs = 0;
+
+/**
+ * Ambient Indonesian DJ radio voiceover via Web Speech API.
+ * Skips quietly if NPC dialogue audio is active or triggered too frequently.
+ */
+export function speakRadioDjLine(
+  headline: string,
+  djLine: string,
+  enabled: boolean,
+  radioVolume: number
+): boolean {
+  if (!enabled || radioVolume <= 0.05) return false;
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    return false;
+  }
+  if (activeAudioEl && !activeAudioEl.paused) {
+    return false;
+  }
+  const now = Date.now();
+  if (now - lastRadioVoiceAtMs < 14_000) {
+    return false;
+  }
+  if (window.speechSynthesis.speaking) {
+    return false;
+  }
+
+  lastRadioVoiceAtMs = now;
+  const script = `${headline}. ${djLine}`.trim().slice(0, 180);
+  try {
+    const utter = new SpeechSynthesisUtterance(script);
+    utter.lang = 'id-ID';
+    utter.rate = 1.08;
+    utter.pitch = 1.03;
+    utter.volume = Math.max(0.05, Math.min(0.65, radioVolume * 0.55));
+    const voices = window.speechSynthesis.getVoices();
+    const idVoice = voices.find((v) => v.lang.toLowerCase().startsWith('id'));
+    if (idVoice) utter.voice = idVoice;
+    window.speechSynthesis.speak(utter);
+    return true;
+  } catch {
+    return false;
+  }
+}
+

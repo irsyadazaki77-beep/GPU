@@ -44,6 +44,7 @@ import { SimWorkerClient } from './simWorkerClient';
 import { spatialAudio } from './spatialAudio';
 import { TrafficSystem } from './TrafficSystem';
 import { WeatherLightingSystem } from './WeatherLightingSystem';
+import { HeistSecurity3DManager } from './heistSecurity3d';
 import { cityAudio } from './CityAudio';
 import { proceduralTextures } from './ProceduralTextures';
 import { TireSkidmarkPool } from './TireSkidmarkPool';
@@ -151,6 +152,7 @@ export class WorldEngine {
   private readonly netSync: MultiplayerClientSync;
   private readonly simWorker: SimWorkerClient;
   private readonly postProcessing: PostProcessingPipeline;
+  private readonly heistSecurity3d: HeistSecurity3DManager;
   private readonly playerController: PlayerController;
   private readonly resizeObserver: ResizeObserver;
 
@@ -258,6 +260,7 @@ export class WorldEngine {
       this.cityRenderer.buildingGrid
     );
     this.tireSkidmarks = new TireSkidmarkPool(this.scene);
+    this.heistSecurity3d = new HeistSecurity3DManager(this.scene);
     this.physicsWorld = new JakartaPhysicsWorld(
       undefined,
       this.cityRenderer.buildingGrid
@@ -1215,6 +1218,15 @@ export class WorldEngine {
         phys.z,
         playerSpeed,
         Boolean(activeVeh)
+      );
+      this.heistSecurity3d.step(
+        now * 0.001,
+        phys.x,
+        phys.z,
+        gameStore.getState().sabotagedHeistCctvIds,
+        gameStore.getState().activeHeistBreach?.heistId ??
+          pState.activeHeistPlan.heistId ??
+          null
       );
       if (now - this.lastAmbientCalloutAt > 11000 && this.activeWorldCallouts.length < 3) {
         const ambient = this.crowdSystem.getAmbientCallout(phys.x, phys.z);

@@ -5,8 +5,39 @@ import { sanitizeDialogueInput } from './npcDialogue';
 const GEMINI_TTS_MODEL = 'gemini-3.8-flash-lite-tts';
 const MAX_TEXT_LENGTH = 260;
 export const MAX_VOICE_CACHE_SIZE = 48;
+const VOICE_RATE_LIMIT_WINDOW_MS = 10_000;
+const VOICE_RATE_LIMIT_MAX_REQUESTS = 10;
 
 const voiceLruCache = new Map<string, NpcVoiceResponse>();
+const voiceRateBuckets = new Map<string, number[]>();
+
+export function checkNpcVoiceRateLimit(
+  clientKey: string = 'default',
+  nowMs: number = Date.now()
+): { allowed: boolean; remaining: number; retryAfterMs: number } {
+  const key = clientKey.trim() || 'default';
+  const prev = voiceRateBuckets.get(key) || [];
+  const active = prev.filter((ts) => nowMs - ts < VOICE_RATE_LIMIT_WINDOW_MS);
+
+  if (active.length >= VOICE_RATE_LIMIT_MAX_REQUESTS) {
+    const oldest = active[0] ?? nowMs;
+    const retryAfterMs = Math.max(100, VOICE_RATE_LIMIT_WINDOW_MS - (nowMs - oldest));
+    voiceRateBuckets.set(key, active);
+    return { allowed: false, remaining: 0, retryAfterMs };
+  }
+
+  active.push(nowMs);
+  voiceRateBuckets.set(key, active);
+  return {
+    allowed: true,
+    remaining: Math.max(0, VOICE_RATE_LIMIT_MAX_REQUESTS - active.length),
+    retryAfterMs: 0,
+  };
+}
+
+export function resetNpcVoiceRateLimiter(): void {
+  voiceRateBuckets.clear();
+}
 
 function fnv1aHash(str: string): string {
   let h = 2166136261;
@@ -76,22 +107,22 @@ function hasUsableApiKey(apiKey: string | undefined): apiKey is string {
 export function resolveJakartaNpcVoiceName(speakerName: string): string {
   const lower = speakerName.toLowerCase();
   if (
-    lower.includes('kirana') ||
-    lower.includes('sari') ||
-    lower.includes('ibu') ||
-    lower.includes('dewi') ||
-    lower.includes('ratna') ||
-    lower.includes('karin')
-  ) {
-    return 'Kore';
-  }
-  if (
     lower.includes('komisaris') ||
     lower.includes('bos') ||
     lower.includes('hendro') ||
     lower.includes('panglima')
   ) {
     return 'Charon';
+  }
+  if (
+    lower.includes('kirana') ||
+    /\bsari\b/.test(lower) ||
+    /\bibu\b/.test(lower) ||
+    lower.includes('dewi') ||
+    lower.includes('ratna') ||
+    lower.includes('karin')
+  ) {
+    return 'Kore';
   }
   if (
     lower.includes('raka') ||

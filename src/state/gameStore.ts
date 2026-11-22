@@ -15,13 +15,13 @@ import {
   buildDynamicRadioBroadcast,
   computeSurgeFareMultiplier,
   createActiveQuestState,
-  createVigilantePatrolSession,
   stepQuestStageProgress,
   AudioChannelVolumes,
   COMBAT_COMBO_WINDOW_MS,
   CameraViewMode,
   CashLedgerEntry,
   CombatHitFeedbackEvent,
+  CommunityUgcTrack,
   CustomWaypointState,
   CutsceneOverlayState,
   CustomRaceTrackSpec,
@@ -33,11 +33,13 @@ import {
   GameSettings,
   GameState,
   GarageCameraPreset,
+  GlobalLeaderboardEntry,
   GraphicsQualityTier,
   HeistBreachSession,
   HeistId,
   JAKARTA_DISTRICTS,
   KiranaDistrictHackState,
+  LeaderboardCategory,
   NabiloGramPost,
   NabiloGramTriggerKind,
   NetCoopEvent,
@@ -112,6 +114,21 @@ import {
 } from '../game/save';
 import { soundEngine } from '../game/sound';
 import { cityAudio } from '../engine/CityAudio';
+import {
+  fetchCommunityUgcTracks,
+  fetchGlobalLeaderboard,
+  likeCommunityUgcTrack,
+  publishCommunityUgcTrack,
+  recordCommunityUgcPlay,
+  submitLeaderboardRecord,
+} from '../game/socialHubClient';
+import { speakRadioDjLine } from '../game/voiceClient';
+import {
+  createInitialGrandPlanSliceState,
+  reduceCompleteVigilante,
+  reduceSpeedTrapTrigger,
+  reduceStartVigilante,
+} from './slices/grandPlanSlice';
 
 export const STREET_BOUNTIES: StreetBountySpec[] = [
   {
@@ -453,7 +470,7 @@ export interface GameStoreSnapshot {
   nearbyMrtStationName: string | null;
   ridingMrt: boolean;
   coopHeistSync: CoopHeistSyncState;
-  // Grand Plan 6.0 State
+  // Grand Plan 6.0 & 7.0 State
   droneReconActive: boolean;
   droneEmpReady: boolean;
   slipstreamActive: boolean;
@@ -462,6 +479,10 @@ export interface GameStoreSnapshot {
   activeVigilante: VigilantePatrolSession | null;
   vigilanteStreak: number;
   activeRivalBoss: ActiveRivalBossState | null;
+  globalLeaderboard: GlobalLeaderboardEntry[];
+  communityUgcTracks: CommunityUgcTrack[];
+  socialHubLoading: boolean;
+  sabotagedHeistCctvIds: string[];
 }
 
 export function buildInitialStateForStage(
@@ -639,7 +660,7 @@ let state: GameStoreSnapshot = {
   squadOrder: 'follow',
   squadCallout: null,
   activeRace: null,
-  stuntCompletedIds: [],
+  stuntCompletedIds: initialSave?.stuntCompletedIds || [],
   lastStuntBanner: null,
   activeTurfWar: null,
   dailyChallenges: createDailyChallengesForDate(),
@@ -647,7 +668,7 @@ let state: GameStoreSnapshot = {
   kiranaHackState: createInitialKiranaHackState(),
   trioAbilityBuffUntilMs: 0,
   inFloodZone: false,
-  sharedCoopRaces: [],
+  sharedCoopRaces: initialSave?.sharedCoopRaces || [],
   lastCoopEventToast: null,
   combatCombo: null,
   nearMissBanner: null,
@@ -680,14 +701,7 @@ let state: GameStoreSnapshot = {
     crewRoles: {},
     updatedAtMs: 0,
   },
-  droneReconActive: false,
-  droneEmpReady: true,
-  slipstreamActive: false,
-  speedTrapRecords: {},
-  speedTrapBanner: null,
-  activeVigilante: null,
-  vigilanteStreak: 0,
-  activeRivalBoss: null,
+  ...createInitialGrandPlanSliceState(initialSave),
 };
 
 const listeners = new Set<() => void>();
@@ -850,6 +864,10 @@ export const gameStore = {
       activeSaveSlot: slotId,
       savedGame: loaded,
       completedDynamicQuests: loaded?.completedDynamicQuests || [],
+      stuntCompletedIds: loaded?.stuntCompletedIds || [],
+      speedTrapRecords: loaded?.speedTrapRecords || {},
+      sharedCoopRaces: loaded?.sharedCoopRaces || [],
+      vigilanteStreak: loaded?.vigilanteStreak ?? 0,
     };
     emitChange();
   },
@@ -1615,6 +1633,7 @@ export const gameStore = {
         heat: 18,
         lockedBands: 0,
         active: true,
+        cctvSabotaged: state.sabotagedHeistCctvIds.includes(heistId),
       },
     };
     emitChange();
@@ -1760,6 +1779,21 @@ export const gameStore = {
       }`,
     };
     emitChange();
+
+    if (place === 1) {
+      const activeProto = state.playerState.activeProtagonist;
+      const elapsedSec = Math.max(5, Math.round(race.elapsedSec * 10) / 10);
+      const speedScore = Math.max(100, Math.round(50_000 / elapsedSec));
+      void submitLeaderboardRecord({
+        category: 'street_race',
+        targetId: race.raceId,
+        targetName: race.raceName,
+        playerName: PROTAGONIST_PROFILES[activeProto].name,
+        protagonistId: activeProto,
+        scoreValue: speedScore,
+        metricLabel: `${elapsedSec.toFixed(1)}s (Juara 1)`,
+      });
+    }
   },
 
   cancelStreetRace: () => {
@@ -2290,6 +2324,14 @@ export const gameStore = {
     });
     state = { ...state, liveRadioBroadcast: msg };
     emitChange();
+    if (msg) {
+      speakRadioDjLine(
+        msg.headline,
+        msg.djLine,
+        state.gameSettings.voiceActingEnabled,
+        state.audioVolumes.radio * state.audioVolumes.master
+      );
+    }
     return msg;
   },
 
@@ -2360,27 +2402,17 @@ export const gameStore = {
   },
 
   triggerSpeedTrapFlash: (banner: SpeedTrapFlashBanner) => {
-    const prevBest = state.speedTrapRecords[banner.trapId] ?? 0;
-    const nextBest = Math.max(prevBest, banner.speedKmh);
-    const nextScore = state.playerState.score + Math.round(banner.speedKmh * 2);
+    const reduced = reduceSpeedTrapTrigger(state, banner);
     state = {
       ...state,
-      speedTrapRecords: {
-        ...state.speedTrapRecords,
-        [banner.trapId]: nextBest,
-      },
-      speedTrapBanner: banner,
-      playerState: {
-        ...state.playerState,
-        rupiah: state.playerState.rupiah + banner.rewardRp,
-        wantedLevel: banner.wantedTriggered
-          ? Math.max(1, state.playerState.wantedLevel)
-          : state.playerState.wantedLevel,
-        score: nextScore,
-        bestScore: Math.max(state.playerState.bestScore, nextScore),
-      },
+      speedTrapRecords: reduced.speedTrapRecords,
+      speedTrapBanner: reduced.speedTrapBanner,
+      playerState: reduced.playerState,
     };
     emitChange();
+    if (reduced.leaderboardPayload) {
+      void submitLeaderboardRecord(reduced.leaderboardPayload);
+    }
   },
 
   clearExpiredSpeedTrapBanner: (nowMs: number = Date.now()) => {
@@ -2391,21 +2423,16 @@ export const gameStore = {
   },
 
   startVigilantePatrol: () => {
-    const session = createVigilantePatrolSession(state.vigilanteStreak);
+    const reduced = reduceStartVigilante(state.vigilanteStreak);
     soundEngine.playPoliceSiren();
     state = {
       ...state,
-      activeVigilante: session,
-      customWaypoint: {
-        x: session.targetX,
-        z: session.targetZ,
-        label: `Buronan: ${session.targetName}`,
-        category: 'custom',
-      },
-      lastOutcomeText: `Patroli Patwal Aktif: Kejar ${session.targetName} di ${session.districtName}!`,
+      activeVigilante: reduced.activeVigilante,
+      customWaypoint: reduced.customWaypoint,
+      lastOutcomeText: reduced.lastOutcomeText,
     };
     emitChange();
-    return session;
+    return reduced.activeVigilante;
   },
 
   updateVigilantePatrol: (patch: Partial<VigilantePatrolSession>) => {
@@ -2420,24 +2447,19 @@ export const gameStore = {
   completeVigilantePatrol: () => {
     const vig = state.activeVigilante;
     if (!vig) return;
+    const reduced = reduceCompleteVigilante(
+      vig,
+      state.vigilanteStreak,
+      state.playerState
+    );
     soundEngine.playMissionFanfare();
-    const nextScore = state.playerState.score + 450;
     state = {
       ...state,
-      activeVigilante: null,
-      vigilanteStreak: state.vigilanteStreak + 1,
-      customWaypoint: null,
-      playerState: {
-        ...state.playerState,
-        rupiah: state.playerState.rupiah + vig.rewardRp,
-        reputation: {
-          ...state.playerState.reputation,
-          rakyat: state.playerState.reputation.rakyat + 6,
-        },
-        score: nextScore,
-        bestScore: Math.max(state.playerState.bestScore, nextScore),
-      },
-      lastOutcomeText: `PATROLI TUNTAS! ${vig.targetName} dilumpuhkan (+Rp ${vig.rewardRp.toLocaleString('id-ID')})`,
+      activeVigilante: reduced.activeVigilante,
+      vigilanteStreak: reduced.vigilanteStreak,
+      customWaypoint: reduced.customWaypoint,
+      playerState: reduced.playerState,
+      lastOutcomeText: reduced.lastOutcomeText,
     };
     emitChange();
   },
@@ -2454,6 +2476,91 @@ export const gameStore = {
       activeVigilante: null,
       customWaypoint: null,
       lastOutcomeText: 'Patroli Patwal dihentikan.',
+    };
+    emitChange();
+  },
+
+  // Grand Plan 7.0: 3D Heist Security Sabotage & Persistent Social Hub
+  sabotageHeistCctv: (heistId: HeistId) => {
+    if (state.sabotagedHeistCctvIds.includes(heistId)) return;
+    const nextSabotaged = [...state.sabotagedHeistCctvIds, heistId];
+    const nextBreach =
+      state.activeHeistBreach && state.activeHeistBreach.heistId === heistId
+        ? { ...state.activeHeistBreach, cctvSabotaged: true }
+        : state.activeHeistBreach;
+    soundEngine.playPickup();
+    state = {
+      ...state,
+      sabotagedHeistCctvIds: nextSabotaged,
+      activeHeistBreach: nextBreach,
+      lastOutcomeText:
+        'CCTV & Laser Brankas dilumpuhkan oleh EMP Rajawali-X! (+15% Bonus Pembobolan)',
+    };
+    emitChange();
+  },
+
+  refreshGlobalLeaderboard: async (category?: LeaderboardCategory) => {
+    state = { ...state, socialHubLoading: true };
+    emitChange();
+    const entries = await fetchGlobalLeaderboard(category, 20);
+    state = {
+      ...state,
+      globalLeaderboard: entries,
+      socialHubLoading: false,
+    };
+    emitChange();
+    return entries;
+  },
+
+  refreshCommunityUgcTracks: async () => {
+    state = { ...state, socialHubLoading: true };
+    emitChange();
+    const tracks = await fetchCommunityUgcTracks(24);
+    state = {
+      ...state,
+      communityUgcTracks: tracks,
+      socialHubLoading: false,
+    };
+    emitChange();
+    return tracks;
+  },
+
+  publishTrackToCommunity: async (track: CustomRaceTrackSpec) => {
+    const published = await publishCommunityUgcTrack(track);
+    if (!published) return null;
+    state = {
+      ...state,
+      communityUgcTracks: [
+        published,
+        ...state.communityUgcTracks.filter((t) => t.id !== published.id),
+      ].slice(0, 30),
+      lastOutcomeText: `Sirkuit "${track.name}" diterbitkan ke Server Komunitas Jakarta!`,
+    };
+    emitChange();
+    return published;
+  },
+
+  likeCommunityTrack: async (trackId: string) => {
+    const updated = await likeCommunityUgcTrack(trackId);
+    if (!updated) return null;
+    state = {
+      ...state,
+      communityUgcTracks: state.communityUgcTracks.map((t) =>
+        t.id === updated.id ? updated : t
+      ),
+    };
+    emitChange();
+    return updated;
+  },
+
+  markCommunityTrackPlayed: async (trackId: string) => {
+    const updated = await recordCommunityUgcPlay(trackId);
+    if (!updated) return;
+    state = {
+      ...state,
+      communityUgcTracks: state.communityUgcTracks.map((t) =>
+        t.id === updated.id ? updated : t
+      ),
     };
     emitChange();
   },

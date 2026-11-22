@@ -21,7 +21,17 @@ import {
   checkNpcDialogueRateLimit,
   generateNpcDialogue,
 } from './server/npcDialogue';
-import { generateNpcVoice } from './server/npcVoice';
+import {
+  checkNpcVoiceRateLimit,
+  generateNpcVoice,
+} from './server/npcVoice';
+import {
+  type SocialHubStore,
+  checkSocialHubRateLimit,
+  getDefaultSocialHubStore,
+  validateLeaderboardSubmit,
+  validateUgcTrackPayload,
+} from './server/socialHub';
 import {
   checkViralRateLimit,
   generateViralSocialPost,
@@ -56,12 +66,14 @@ function isValidVoiceBody(body: unknown): body is NpcVoiceRequest {
 
 export interface CreateAppOptions {
   cloudSaveStore?: CloudSaveStore;
+  socialHubStore?: SocialHubStore;
   distDir?: string;
 }
 
 export function createApiApp(options?: CreateAppOptions): Express {
   const app = express();
   const saveStore = options?.cloudSaveStore ?? getDefaultCloudSaveStore();
+  const socialHub = options?.socialHubStore ?? getDefaultSocialHubStore();
   const distDir = options?.distDir ?? path.resolve(process.cwd(), 'dist');
 
   app.use(express.json({ limit: '64kb' }));
@@ -123,6 +135,16 @@ export function createApiApp(options?: CreateAppOptions): Express {
   app.post('/api/npc/voice', async (req, res) => {
     if (!isValidVoiceBody(req.body)) {
       res.status(400).json({ error: 'Invalid NPC voice payload' });
+      return;
+    }
+
+    const clientKey = req.ip || 'anonymous';
+    const rate = checkNpcVoiceRateLimit(clientKey);
+    if (!rate.allowed) {
+      res.status(429).json({
+        error: 'Rate limit exceeded',
+        retryAfterMs: rate.retryAfterMs,
+      });
       return;
     }
 
@@ -207,6 +229,97 @@ export function createApiApp(options?: CreateAppOptions): Express {
       return;
     }
     res.json({ status: 'ok', slotId, savedAt: saved.savedAt, snapshot: saved });
+  });
+
+  // Grand Plan 7.0: Persistent SQLite Global Leaderboard & Community UGC Race Hub
+  app.get('/api/leaderboard', (req, res) => {
+    const rawCat = typeof req.query.category === 'string' ? req.query.category : undefined;
+    const category =
+      rawCat === 'etle_speed' ||
+      rawCat === 'street_race' ||
+      rawCat === 'heist_score'
+        ? rawCat
+        : undefined;
+    const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 15));
+    res.json({ entries: socialHub.getLeaderboard(category, limit) });
+  });
+
+  app.post('/api/leaderboard/submit', (req, res) => {
+    const clientKey = req.ip || 'anonymous';
+    const rate = checkSocialHubRateLimit(clientKey);
+    if (!rate.allowed) {
+      res.status(429).json({
+        error: 'Rate limit exceeded',
+        retryAfterMs: rate.retryAfterMs,
+      });
+      return;
+    }
+
+    const validation = validateLeaderboardSubmit(req.body);
+    if (!validation.valid) {
+      res.status(400).json({ error: validation.error });
+      return;
+    }
+
+    const playerToken =
+      validatePlayerToken(req.header('x-player-token')) ||
+      `anon_${(req.ip || 'local').replace(/[^a-zA-Z0-9_-]/g, '')}`;
+    const entry = socialHub.submitLeaderboard(validation.data, playerToken);
+    res.json({ status: 'ok', entry });
+  });
+
+  app.get('/api/ugc/tracks', (req, res) => {
+    const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 24));
+    res.json({ tracks: socialHub.listUgcTracks(limit) });
+  });
+
+  app.post('/api/ugc/tracks', (req, res) => {
+    const clientKey = req.ip || 'anonymous';
+    const rate = checkSocialHubRateLimit(clientKey);
+    if (!rate.allowed) {
+      res.status(429).json({
+        error: 'Rate limit exceeded',
+        retryAfterMs: rate.retryAfterMs,
+      });
+      return;
+    }
+
+    const validation = validateUgcTrackPayload(req.body);
+    if (!validation.valid) {
+      res.status(400).json({ error: validation.error });
+      return;
+    }
+
+    const saved = socialHub.publishUgcTrack(validation.track);
+    res.json({ status: 'ok', track: saved });
+  });
+
+  app.post('/api/ugc/tracks/:trackId/like', (req, res) => {
+    const clientKey = req.ip || 'anonymous';
+    const rate = checkSocialHubRateLimit(clientKey);
+    if (!rate.allowed) {
+      res.status(429).json({
+        error: 'Rate limit exceeded',
+        retryAfterMs: rate.retryAfterMs,
+      });
+      return;
+    }
+
+    const updated = socialHub.likeUgcTrack(req.params.trackId);
+    if (!updated) {
+      res.status(404).json({ error: 'Track UGC tidak ditemukan' });
+      return;
+    }
+    res.json({ status: 'ok', track: updated });
+  });
+
+  app.post('/api/ugc/tracks/:trackId/play', (req, res) => {
+    const updated = socialHub.recordUgcPlay(req.params.trackId);
+    if (!updated) {
+      res.status(404).json({ error: 'Track UGC tidak ditemukan' });
+      return;
+    }
+    res.json({ status: 'ok', track: updated });
   });
 
   return app;
