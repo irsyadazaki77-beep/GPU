@@ -674,6 +674,27 @@ export class CrowdSystem {
     }
   }
 
+  public spawnCarjackedDriver(
+    carX: number,
+    carZ: number,
+    carHeading: number
+  ): void {
+    if (this.agents.length === 0) return;
+    // Repurpose the next recycled pedestrian slot as the ejected vehicle driver
+    const idx = this.recycleCursor % this.agents.length;
+    this.recycleCursor = (this.recycleCursor + 1) % this.agents.length;
+    const agent = this.agents[idx];
+    const sideX = Math.cos(carHeading);
+    const sideZ = -Math.sin(carHeading);
+    agent.x = carX - sideX * 2.1;
+    agent.z = carZ - sideZ * 2.1;
+    agent.state = 'FLEEING';
+    agent.panicTimer = 5.5;
+    agent.panicVx = -sideX * 5.2;
+    agent.panicVz = -sideZ * 5.2;
+    triggerCrowdFleeImpulse(this.agents, carX, carZ, 12);
+  }
+
   public dispose(): void {
     this.shadowMesh.geometry.dispose();
     (this.shadowMesh.material as THREE.Material).dispose();

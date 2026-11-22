@@ -881,7 +881,14 @@ export type MultiplayerRoomMode = 'free_roam' | 'street_race' | 'coop_heist';
 export type MultiplayerConnectionState = 'connected' | 'reconnecting' | 'offline';
 
 export interface NetCoopEvent {
-  type: 'horn' | 'weapon_fire' | 'explosion' | 'wanted_alert' | 'passenger_ping';
+  type:
+    | 'horn'
+    | 'weapon_fire'
+    | 'explosion'
+    | 'wanted_alert'
+    | 'passenger_ping'
+    | 'heist_sync'
+    | 'wanted_sync';
   peerId: string;
   displayName: string;
   x: number;
@@ -903,6 +910,9 @@ export interface NetPeerSnapshot {
   speed: number;
   vehicleType: VehicleType | null;
   wantedLevel?: number;
+  ridingPeerId?: string | null;
+  isCrouching?: boolean;
+  isParachuting?: boolean;
   updatedAt: number;
 }
 
@@ -1205,6 +1215,46 @@ export interface DailyChallengesState {
   dateKey: string;
   streakDays: number;
   items: DailyChallengeItem[];
+}
+
+export type AcousticZoneId =
+  | 'open_street'
+  | 'underpass_toll'
+  | 'interior_room'
+  | 'harbor_water';
+
+export interface RadioBroadcastMessage {
+  id: string;
+  stationId: RadioStationId;
+  headline: string;
+  djLine: string;
+  urgency: 'normal' | 'breaking' | 'police_dispatch';
+  timestampMs: number;
+}
+
+export interface ParachuteState {
+  deployed: boolean;
+  altitudeAboveGround: number;
+  glideSpeed: number;
+  descentRate: number;
+  canDeploy: boolean;
+}
+
+export interface StealthStatusState {
+  crouching: boolean;
+  inCover: boolean;
+  suppressedWeapon: boolean;
+  detectionRadiusMultiplier: number;
+  silentTakedownReady: boolean;
+}
+
+export interface CoopHeistSyncState {
+  heistId: HeistId | null;
+  stageLabel: string;
+  progressPct: number;
+  sharedWantedLevel: number;
+  crewRoles: Record<string, ProtagonistId>;
+  updatedAtMs: number;
 }
 
 

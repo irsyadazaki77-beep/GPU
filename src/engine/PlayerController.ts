@@ -20,39 +20,55 @@ import {
   WARUNG_STALL_LOCATIONS,
   WEAPON_MAGAZINE_SIZES,
   WEAPON_RELOAD_SEC,
+  RagdollMotionState,
+  VehicleDebrisPartKind,
   applyCoverDamageMitigation,
+  canDeployParachute,
+  canPerformSilentTakedown,
   checkPlayerDetourProgress,
   computeDriftCounterSteerBoost,
   computeHeadshotResolution,
+  computeMrtTrainState,
   computeNearMissBonus,
   computeSpeedSensitiveTurnRate,
+  computeStealthDetectionProfile,
   computeVehicleArmorMitigation,
+  createRagdollImpulse,
   evaluateCoverAvailability,
   evaluateFloodZoneAt,
   evaluateRoadEventImpactAt,
   evaluateStuntRampContact,
+  evaluateVehicleDebrisDrop,
   getActiveWingmanIds,
   getEffectiveWeaponSpec,
   getGroundElevationAt,
   getPlayerStaminaSpeedMultiplier,
   getVehicleHandlingPenalty,
+  isPlayerNearMrtStation,
   resolveCameraWallPullIn,
   resolveCircleAABBCollision,
+  resolveCoopPassengerOffset,
   scoreStuntJump,
   stepEnemyMovementPolicy,
+  stepParachuteGlide,
+  stepRagdollState,
   stepVehicleLongitudinalSpeed,
 } from '../game/rules';
 import { soundEngine } from '../game/sound';
 import {
   INTERIOR_ROOM_CENTERS,
   animateCharacterRig,
+  applyCharacterRagdollPose,
   buildCharacterRig,
   buildCombatDroneMesh,
+  buildParachuteCanopyMesh,
+  buildVehicleDebrisPieceMesh,
   syncCharacterWeaponVisual,
 } from '../game/world/geometryBuilders';
 import type {
   CombatHitFeedbackEvent,
   TrafficSignalPhase,
+  VehicleType,
   WeaponId,
 } from '../game/types';
 import {
@@ -91,6 +107,21 @@ export interface EnemyEntity {
   phaseTimer: number;
   staggerTimer?: number;
   staggerType?: 'head' | 'chest' | 'leg';
+  ragdoll?: RagdollMotionState;
+  alerted?: boolean;
+}
+
+export interface VehicleDebrisEntity {
+  mesh: THREE.Mesh;
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  spinX: number;
+  spinZ: number;
+  ttl: number;
 }
 
 export interface PlayerControllerCallbacks {
@@ -123,6 +154,21 @@ export interface PlayerControllerCallbacks {
     range: number
   ) => { x: number; y: number; z: number } | null;
   onExplosionShockwaveProps?: (blastX: number, blastZ: number, radius: number) => void;
+  onCarjackTrafficVehicle?: (x: number, z: number, heading: number) => void;
+  onQueryCoopPeerVehicle?: (px: number, pz: number) => {
+    peerId: string;
+    displayName: string;
+    vehicleName: string;
+  } | null;
+  onGetCoopPeerPose?: (peerId: string) => {
+    x: number;
+    y: number;
+    z: number;
+    heading: number;
+    speed: number;
+    vehicleType: VehicleType | null;
+    displayName: string;
+  } | null;
 }
 
 export class PlayerController {
@@ -223,6 +269,14 @@ export class PlayerController {
   private floodSplashAccum = 0;
   private coverNormalX = 0;
   private coverNormalZ = 1;
+  // Grand Plan 5.0: Parachute, Stealth Crouch, Vehicle Debris, Co-Op Passenger & MRT Ride
+  private readonly parachuteMesh: THREE.Group;
+  private parachuteDeployed = false;
+  private stealthCrouching = false;
+  private ridingPeerId: string | null = null;
+  private ridingMrt = false;
+  private mrtOffsetZ = 0;
+  private readonly debrisPieces: VehicleDebrisEntity[] = [];
   private readonly turfWarEnemyIds = new Set<string>();
   private captainEnemyId: string | null = null;
   private readonly stuntJump = {
@@ -435,6 +489,8 @@ export class PlayerController {
 
     // 3. Player + Idle Trio Protagonists
     this.playerRig = buildCharacterRig('player');
+    this.parachuteMesh = buildParachuteCanopyMesh();
+    this.playerRig.group.add(this.parachuteMesh);
     scene.add(this.playerRig.group);
 
     this.idleProtagonistRigs = {
@@ -855,12 +911,14 @@ export class PlayerController {
   }
 
   public toggleCover(): void {
-    if (this.playerPhys.drivingVehicleId) {
+    if (this.playerPhys.drivingVehicleId || this.ridingPeerId) {
+      this.stealthCrouching = false;
       gameStore.setCoverState(false, 'none');
       return;
     }
     const store = gameStore.getState();
-    if (store.inCover) {
+    if (store.inCover || this.stealthCrouching) {
+      this.stealthCrouching = false;
       gameStore.setCoverState(false, 'none');
       soundEngine.playTone(190, 0.06, 'sine', 0.08);
       return;
@@ -871,19 +929,77 @@ export class PlayerController {
       CITY_BUILDINGS,
       this.traffic.vehicles
     );
-    const kind = avail.canTakeCover ? avail.coverKind : 'barrier';
-    this.coverNormalX = avail.normalX;
-    this.coverNormalZ = avail.normalZ;
-    gameStore.setCoverState(true, kind);
-    soundEngine.playTone(260, 0.08, 'triangle', 0.11, 0.85);
-    this.spawnParticles(
+    if (avail.canTakeCover) {
+      this.coverNormalX = avail.normalX;
+      this.coverNormalZ = avail.normalZ;
+      this.stealthCrouching = true;
+      gameStore.setCoverState(true, avail.coverKind);
+      soundEngine.playTone(260, 0.08, 'triangle', 0.11, 0.85);
+      this.spawnParticles(
+        this.playerPhys.x,
+        this.playerPhys.y + 0.5,
+        this.playerPhys.z,
+        6,
+        0x94a3b8,
+        3.5
+      );
+    } else {
+      // Open-ground Stealth Crouch mode
+      this.stealthCrouching = true;
+      soundEngine.playTone(170, 0.06, 'sine', 0.07, 0.78);
+    }
+  }
+
+  public toggleCoopPassengerOrMrt(): boolean {
+    if (this.ridingPeerId) {
+      this.ridingPeerId = null;
+      this.playerRig.group.visible = true;
+      soundEngine.playVehicleDoor();
+      gameStore.setCoopPassengerUi(null, null);
+      return true;
+    }
+    if (this.ridingMrt) {
+      this.ridingMrt = false;
+      const mrt = computeMrtTrainState(performance.now() * 0.001);
+      const st = isPlayerNearMrtStation(this.playerPhys.x, this.playerPhys.z, 18);
+      this.playerPhys.x = mrt.x + 2.8;
+      this.playerPhys.z = st ? st.z : mrt.z;
+      this.playerPhys.y = getGroundElevationAt(this.playerPhys.x, this.playerPhys.z);
+      soundEngine.playPickup();
+      gameStore.setMrtRideUi(false, null);
+      return true;
+    }
+    const nearPeer = this.callbacks.onQueryCoopPeerVehicle?.(
       this.playerPhys.x,
-      this.playerPhys.y + 0.5,
-      this.playerPhys.z,
-      6,
-      0x94a3b8,
-      3.5
+      this.playerPhys.z
     );
+    if (nearPeer) {
+      this.ridingPeerId = nearPeer.peerId;
+      this.stealthCrouching = false;
+      gameStore.setCoverState(false, 'none');
+      soundEngine.playVehicleDoor();
+      gameStore.setCoopPassengerUi(nearPeer.peerId, nearPeer.vehicleName);
+      gameStore.setState({
+        lastOutcomeText: `Nebeng di ${nearPeer.vehicleName} bersama ${nearPeer.displayName}! [Klik] Tembak 360°`,
+      });
+      return true;
+    }
+    const nearMrtSt = isPlayerNearMrtStation(this.playerPhys.x, this.playerPhys.z, 7.5);
+    if (nearMrtSt) {
+      this.ridingMrt = true;
+      this.mrtOffsetZ = 0;
+      const mrt = computeMrtTrainState(performance.now() * 0.001);
+      this.playerPhys.x = mrt.x;
+      this.playerPhys.y = mrt.roofY;
+      this.playerPhys.z = mrt.z;
+      soundEngine.playPickup();
+      gameStore.setMrtRideUi(true, nearMrtSt.name);
+      gameStore.setState({
+        lastOutcomeText: `Naik MRT Ratangga dari ${nearMrtSt.name}! Tekan [G] untuk turun.`,
+      });
+      return true;
+    }
+    return false;
   }
 
   public triggerHorn(): void {
@@ -909,19 +1025,21 @@ export class PlayerController {
       );
       this.playerPhys.drivingVehicleId = null;
       if (v) {
-        const wasHighSpeedBail =
-          !VEHICLE_SPECS[v.type].isAircraft && Math.abs(v.speed) > 10;
+        const isAir = Boolean(VEHICLE_SPECS[v.type].isAircraft);
+        const wasHighSpeedBail = !isAir && Math.abs(v.speed) > 10;
         const gY = getGroundElevationAt(v.x, v.z);
-        v.y = gY;
-        v.mesh.position.y = gY;
+        const bailHeight = isAir ? Math.max(gY, v.y) : gY;
+        if (!isAir) {
+          v.y = gY;
+          v.mesh.position.y = gY;
+        }
         v.mesh.rotation.z = 0;
         v.isBraking = false;
         this.playerPhys.x = v.x + Math.cos(v.heading) * 2.5;
         this.playerPhys.z = v.z - Math.sin(v.heading) * 2.5;
-        this.playerPhys.y = getGroundElevationAt(
-          this.playerPhys.x,
-          this.playerPhys.z
-        );
+        this.playerPhys.y = bailHeight;
+        this.playerPhys.vy = isAir && bailHeight - gY > 2.5 ? -1.5 : 0;
+        this.parachuteDeployed = false;
         if (wasHighSpeedBail) {
           // GTA high-speed bail-out: tumble roll sideways while car coasts forward with momentum
           this.playerPhys.combatRollTimer = 0.55;
@@ -955,9 +1073,14 @@ export class PlayerController {
       gameStore.setCoverState(false, 'none');
       soundEngine.playVehicleDoor();
       if (wasOccupiedTraffic) {
+        this.callbacks.onCarjackTrafficVehicle?.(
+          nearest.x,
+          nearest.z,
+          nearest.heading
+        );
         this.callbacks.onWeaponNoise?.(nearest.x, nearest.z, 18, false);
         gameStore.setState({
-          lastOutcomeText: `Pembajakan ${VEHICLE_SPECS[nearest.type].name}! Warga sekitar panik melapor!`,
+          lastOutcomeText: `Pembajakan ${VEHICLE_SPECS[nearest.type].name}! Pengemudi kabur panik!`,
         });
       }
     }
@@ -1142,6 +1265,49 @@ export class PlayerController {
     if (isDriveBy && wSpec.isMelee) return;
     if (this.playerPhys.attackCooldown > 0 || this.reloadTimer > 0) return;
 
+    const activeChoice = this.callbacks.getActiveChoice();
+    const hasSuppressor =
+      Boolean(wSpec.silent) ||
+      Boolean(pState.weaponAttachments?.[wSpec.id]?.includes('suppressor'));
+
+    // Check Silent Takedown from behind when crouching / melee on foot
+    if (!isDriveBy && (this.stealthCrouching || wSpec.isMelee)) {
+      for (const en of this.enemies) {
+        if (en.state !== 'alive') continue;
+        const canTakedown = canPerformSilentTakedown({
+          playerX: this.playerPhys.x,
+          playerZ: this.playerPhys.z,
+          enemyX: en.x,
+          enemyZ: en.z,
+          enemyFacing: en.facing,
+          enemyAlerted: Boolean(en.alerted),
+          isStealthOrMelee: this.stealthCrouching || wSpec.isMelee,
+        });
+        if (canTakedown) {
+          this.playerPhys.attackCooldown = 0.48;
+          this.playerRig.leftArm.rotation.x = -Math.PI * 0.68;
+          this.playerRig.rightArm.rotation.x = -Math.PI * 0.68;
+          soundEngine.playSilentTakedown();
+          en.hp = 0;
+          en.vx = Math.sin(this.playerPhys.facing) * 6.5;
+          en.vz = Math.cos(this.playerPhys.facing) * 6.5;
+          this.spawnParticles(en.x, 1.25, en.z, 10, 0x10b981, 6);
+          this.callbacks.onCombatHitFeedback?.({
+            id: Math.floor(performance.now() * 1000) + 333,
+            damage: en.maxHp,
+            isCrit: true,
+            isHeadshot: false,
+            isKo: true,
+            label: 'SILENT TAKEDOWN!',
+            screenX: 50,
+            screenY: 34,
+          });
+          this.markEnemyKo(en, activeChoice, false, false);
+          return;
+        }
+      }
+    }
+
     if (!wSpec.isMelee) {
       const magSize = WEAPON_MAGAZINE_SIZES[wSpec.id] || 12;
       const curClip = this.clipAmmo[wSpec.id] ?? magSize;
@@ -1176,7 +1342,7 @@ export class PlayerController {
       1.0,
       this.crosshairSpread + (wSpec.isMelee ? 0.1 : 0.25)
     );
-    soundEngine.playShoot(wSpec.id);
+    soundEngine.playShoot(wSpec.id, hasSuppressor);
     if (!wSpec.isMelee) {
       const recoilPitch =
         wSpec.id === 'mercon' || wSpec.id === 'gatotkaca' ? 0.026 : 0.013;
@@ -1200,16 +1366,22 @@ export class PlayerController {
       this.muzzleFlashLight.color.setHex(
         wSpec.id === 'pasopati' || wSpec.id === 'gatotkaca'
           ? 0x38bdf8
-          : wSpec.silent
+          : hasSuppressor
           ? 0x10b981
           : 0xfbbf24
       );
-      this.muzzleFlashLight.intensity = wSpec.silent ? 2.5 : 6.5;
+      this.muzzleFlashLight.intensity = hasSuppressor ? 2.2 : 6.5;
       this.muzzleLightTimer = 0.065;
+      const stealthProf = computeStealthDetectionProfile({
+        crouching: this.stealthCrouching,
+        inCover: gameStore.getState().inCover,
+        hasSuppressor,
+        isNightOrRain: false,
+      });
       this.callbacks.onWeaponNoise?.(
         this.playerPhys.x,
         this.playerPhys.z,
-        wSpec.splashRadius > 0 ? 28 : wSpec.silent ? 6.5 : 20,
+        wSpec.splashRadius > 0 ? 28 : stealthProf.gunshotNoiseRadius,
         wSpec.splashRadius > 0
       );
     }
@@ -1224,7 +1396,6 @@ export class PlayerController {
     );
 
     let hitAny = false;
-    const activeChoice = this.callbacks.getActiveChoice();
 
     if (wSpec.splashRadius > 0) {
       let blastX = this.playerPhys.x + fwdX * 14;
@@ -1484,13 +1655,56 @@ export class PlayerController {
     }
   }
 
+  private spawnVehicleDebris(
+    x: number,
+    y: number,
+    z: number,
+    colorHex: number,
+    kinds: VehicleDebrisPartKind[]
+  ): void {
+    for (const kind of kinds) {
+      if (this.debrisPieces.length >= 28) {
+        const oldest = this.debrisPieces.shift()!;
+        this.scene.remove(oldest.mesh);
+        oldest.mesh.geometry.dispose();
+        (oldest.mesh.material as THREE.Material).dispose();
+      }
+      const mesh = buildVehicleDebrisPieceMesh(kind, colorHex);
+      mesh.position.set(x, y + 0.7, z);
+      this.scene.add(mesh);
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 4.5 + Math.random() * 8.5;
+      this.debrisPieces.push({
+        mesh,
+        x,
+        y: y + 0.7,
+        z,
+        vx: Math.cos(ang) * spd,
+        vy: 4.5 + Math.random() * 6.5,
+        vz: Math.sin(ang) * spd,
+        spinX: (Math.random() - 0.5) * 11,
+        spinZ: (Math.random() - 0.5) * 11,
+        ttl: 4.2,
+      });
+    }
+  }
+
   private markEnemyKo(
     en: EnemyEntity,
     activeChoice: StoryChoiceOption | null,
-    bySquad: boolean = false
+    bySquad: boolean = false,
+    isExplosion: boolean = false
   ): void {
     en.state = 'ko';
-    en.koTimer = 0.42;
+    en.koTimer = 1.65;
+    const dirX = en.x - this.playerPhys.x || en.vx;
+    const dirZ = en.z - this.playerPhys.z || en.vz;
+    en.ragdoll = createRagdollImpulse({
+      dirX,
+      dirZ,
+      force: isExplosion ? 18 : Math.max(6.5, Math.hypot(en.vx, en.vz)),
+      isExplosion,
+    });
     this.hitstopTimer = 0.055;
     this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.45);
     soundEngine.playHit(true);
@@ -1857,6 +2071,10 @@ export class PlayerController {
     signalPhase: TrafficSignalPhase;
     isDrifting: boolean;
     turnInput: number;
+    isCrouching: boolean;
+    isParachuting: boolean;
+    ridingPeerId: string | null;
+    ridingMrt: boolean;
   } {
     this.damagePulse = Math.max(0, this.damagePulse - dt * 2.2);
     this.crosshairSpread = Math.max(0, this.crosshairSpread - dt * 1.65);
@@ -2026,7 +2244,7 @@ export class PlayerController {
     if (this.keysJustPressed.has('KeyG')) {
       if (nearbyInterior || pState.currentInterior !== 'exterior') {
         this.callbacks.onEnterOrExitInterior(nearbyInterior);
-      } else {
+      } else if (!this.toggleCoopPassengerOrMrt()) {
         this.toggleEnterExitVehicle();
       }
     }
@@ -2088,6 +2306,20 @@ export class PlayerController {
         this.triggerPlayerAttack();
       }
     } else if (
+      this.keysJustPressed.has('Space') &&
+      canDeployParachute({
+        playerY: this.playerPhys.y,
+        groundY: getGroundElevationAt(this.playerPhys.x, this.playerPhys.z),
+        drivingVehicleId: this.playerPhys.drivingVehicleId,
+        alreadyDeployed: this.parachuteDeployed,
+        ridingMrt: this.ridingMrt,
+      })
+    ) {
+      this.parachuteDeployed = true;
+      this.stealthCrouching = false;
+      this.parachuteMesh.visible = true;
+      soundEngine.playParachuteOpen();
+    } else if (
       this.keysJustPressed.has('Space') ||
       this.mouseJustClicked ||
       autoFireHeld ||
@@ -2096,8 +2328,11 @@ export class PlayerController {
       gpFireHeld
     ) {
       virtualInputRef.fireTap = false;
-      if (!this.playerPhys.drivingVehicleId && !isPhotoMode) {
-        this.triggerPlayerAttack(false);
+      if (
+        (!this.playerPhys.drivingVehicleId || Boolean(this.ridingPeerId)) &&
+        !isPhotoMode
+      ) {
+        this.triggerPlayerAttack(Boolean(this.ridingPeerId));
       } else if (
         this.playerPhys.drivingVehicleId &&
         !isPhotoMode &&
@@ -2518,16 +2753,44 @@ export class PlayerController {
 
             const impactSpeed = Math.abs(activeVehicle.speed);
             if (impactSpeed > 4.5) {
-              this.traffic.applyVehicleImpact(
+              const dmgResA = this.traffic.applyVehicleImpact(
                 activeVehicle,
                 impactSpeed * 0.52,
                 activeVehicle.speed >= 0 ? 'front' : 'rear'
               );
-              this.traffic.applyVehicleImpact(
+              const dmgResB = this.traffic.applyVehicleImpact(
                 other,
                 impactSpeed * 0.72,
                 'left'
               );
+              const dropA = evaluateVehicleDebrisDrop(
+                activeVehicle.damage,
+                impactSpeed * 0.75,
+                dmgResA.justCaughtFire
+              );
+              if (dropA.length > 0) {
+                this.spawnVehicleDebris(
+                  activeVehicle.x,
+                  activeVehicle.y,
+                  activeVehicle.z,
+                  vSpec.colorHex,
+                  dropA
+                );
+              }
+              const dropB = evaluateVehicleDebrisDrop(
+                other.damage,
+                impactSpeed * 0.85,
+                dmgResB.justCaughtFire
+              );
+              if (dropB.length > 0) {
+                this.spawnVehicleDebris(
+                  other.x,
+                  other.y,
+                  other.z,
+                  otherSpec.colorHex,
+                  dropB
+                );
+              }
             }
             if (impactSpeed > 6) {
               activeVehicle.speed *= 0.58;
@@ -2746,6 +3009,69 @@ export class PlayerController {
       }
     } else if (simDt > 0) {
       soundEngine.updateDriftAudio(0, false);
+      if (this.ridingPeerId) {
+        const peerPose = this.callbacks.onGetCoopPeerPose?.(this.ridingPeerId);
+        if (!peerPose || !peerPose.vehicleType) {
+          this.ridingPeerId = null;
+          gameStore.setCoopPassengerUi(null, null);
+        } else {
+          const seatPos = resolveCoopPassengerOffset({
+            x: peerPose.x,
+            y: peerPose.y,
+            z: peerPose.z,
+            heading: peerPose.heading,
+            vehicleType: peerPose.vehicleType,
+          });
+          this.playerPhys.x = seatPos.x;
+          this.playerPhys.y = seatPos.y;
+          this.playerPhys.z = seatPos.z;
+          this.playerPhys.facing = peerPose.heading;
+          this.playerPhys.vx = 0;
+          this.playerPhys.vz = 0;
+          this.parachuteDeployed = false;
+          this.parachuteMesh.visible = false;
+          this.playerRig.group.position.set(seatPos.x, seatPos.y, seatPos.z);
+          this.playerRig.group.rotation.y = this.camYaw;
+          this.playerRig.group.scale.y = 0.84;
+          animateCharacterRig(this.playerRig, {
+            elapsedTime: nowMs * 0.001,
+            walkDist: 0,
+            isMoving: false,
+            isAiming: isTpsAim || this.leftMouseHeld,
+            isCrouching: true,
+            dt: simDt,
+          });
+        }
+      } else if (this.ridingMrt) {
+        const mrt = computeMrtTrainState(nowMs * 0.001);
+        this.mrtOffsetZ = THREE.MathUtils.clamp(
+          this.mrtOffsetZ + moveForward * 4.5 * simDt,
+          -8.5,
+          8.5
+        );
+        this.playerPhys.x = mrt.x;
+        this.playerPhys.y = mrt.roofY;
+        this.playerPhys.z = mrt.z + this.mrtOffsetZ;
+        this.playerPhys.vx = 0;
+        this.playerPhys.vz = mrt.vz;
+        this.parachuteDeployed = false;
+        this.parachuteMesh.visible = false;
+        this.playerRig.group.position.set(
+          this.playerPhys.x,
+          this.playerPhys.y,
+          this.playerPhys.z
+        );
+        this.playerRig.group.rotation.y = this.playerPhys.facing;
+        animateCharacterRig(this.playerRig, {
+          elapsedTime: nowMs * 0.001,
+          walkDist: this.playerPhys.walkDist,
+          isMoving: Math.abs(moveForward) > 0.1,
+          isAiming: isTpsAim,
+          isCrouching: this.stealthCrouching,
+          dt: simDt,
+        });
+      }
+      if (!this.ridingPeerId && !this.ridingMrt) {
       if (this.savedExteriorPos) {
         this.playerPhys.x = this.savedExteriorPos.x;
         this.playerPhys.z = this.savedExteriorPos.z;
@@ -2765,9 +3091,13 @@ export class PlayerController {
       const rollBoost = this.playerPhys.combatRollTimer > 0 ? 1.85 : 1.0;
       const inCover = storeState.inCover;
       if (inCover && ((sprinting && (moveForward !== 0 || moveTurn !== 0)) || this.playerPhys.combatRollTimer > 0)) {
+        this.stealthCrouching = false;
         gameStore.setCoverState(false, 'none');
       }
-      const coverSpeedMult = inCover ? 0.56 : 1.0;
+      if (this.stealthCrouching && sprinting && (moveForward !== 0 || moveTurn !== 0)) {
+        this.stealthCrouching = false;
+      }
+      const coverSpeedMult = inCover ? 0.56 : this.stealthCrouching ? 0.62 : 1.0;
       const roleSpec = HEIST_PROTAGONIST_ROLES[pState.activeProtagonist];
       const rakaSurgeMult =
         pState.activeProtagonist === 'raka' &&
@@ -2787,6 +3117,61 @@ export class PlayerController {
       const mag = Math.hypot(inputX, inputZ);
       const isFirstPerson = storeState.cameraViewMode === 'first_person';
 
+      if (this.parachuteDeployed) {
+        const gY = getGroundElevationAt(this.playerPhys.x, this.playerPhys.z);
+        const glide = stepParachuteGlide({
+          x: this.playerPhys.x,
+          y: this.playerPhys.y,
+          z: this.playerPhys.z,
+          heading: this.playerPhys.facing,
+          vy: this.playerPhys.vy,
+          groundY: gY,
+          forwardInput: moveForward,
+          turnInput: moveTurn,
+          brakeInput: this.keysHeld.has('KeyS') || this.keysHeld.has('ArrowDown'),
+          dt: simDt,
+        });
+        const colPara = resolveCircleAABBCollision(
+          glide.x,
+          glide.z,
+          0.75,
+          undefined,
+          this.buildingGrid
+        );
+        this.playerPhys.x = colPara.x;
+        this.playerPhys.z = colPara.z;
+        this.playerPhys.y = glide.y;
+        this.playerPhys.vy = glide.vy;
+        this.playerPhys.facing = glide.heading;
+        this.parachuteMesh.visible = !glide.landed;
+        if (glide.landed) {
+          this.parachuteDeployed = false;
+          this.playerPhys.combatRollTimer = 0.25;
+          soundEngine.playPickup();
+          this.spawnParticles(colPara.x, gY + 0.3, colPara.z, 10, 0xe2e8f0, 5);
+        }
+        gameStore.setParachuteState({
+          deployed: this.parachuteDeployed,
+          altitudeAboveGround: Math.max(0, this.playerPhys.y - gY),
+          glideSpeed: glide.glideSpeed,
+          descentRate: Math.abs(glide.vy),
+          canDeploy: false,
+        });
+        this.playerRig.group.position.set(
+          this.playerPhys.x,
+          this.playerPhys.y,
+          this.playerPhys.z
+        );
+        this.playerRig.group.rotation.y = this.playerPhys.facing;
+        animateCharacterRig(this.playerRig, {
+          elapsedTime: nowMs * 0.001,
+          walkDist: 0,
+          isMoving: false,
+          isAiming: false,
+          isCrouching: false,
+          dt: simDt,
+        });
+      } else {
       if (mag > 0.01) {
         const nx = inputX / mag;
         const nz = inputZ / mag;
@@ -2839,7 +3224,30 @@ export class PlayerController {
             );
       this.playerPhys.x = col.x;
       this.playerPhys.z = col.z;
-      this.playerPhys.y = elevY;
+      if (this.playerPhys.y > elevY + 0.2) {
+        this.playerPhys.vy -= 18.5 * simDt;
+        this.playerPhys.y = Math.max(elevY, this.playerPhys.y + this.playerPhys.vy * simDt);
+        if (this.playerPhys.y <= elevY + 0.05) {
+          if (this.playerPhys.vy < -14) {
+            this.callbacks.onPlayerDamage(Math.round(Math.abs(this.playerPhys.vy) * 1.4));
+            soundEngine.playHit(true);
+          }
+          this.playerPhys.y = elevY;
+          this.playerPhys.vy = 0;
+        }
+      } else {
+        this.playerPhys.y = elevY;
+        this.playerPhys.vy = 0;
+      }
+      this.parachuteMesh.visible = false;
+      const agl = Math.max(0, this.playerPhys.y - elevY);
+      gameStore.setParachuteState({
+        deployed: false,
+        altitudeAboveGround: agl,
+        glideSpeed: 0,
+        descentRate: Math.abs(this.playerPhys.vy),
+        canDeploy: agl >= 6.5,
+      });
 
       const stepDist =
         Math.hypot(this.playerPhys.vx, this.playerPhys.vz) * simDt;
@@ -2849,12 +3257,15 @@ export class PlayerController {
         walkDist: this.playerPhys.walkDist,
         isMoving: mag > 0.01,
         isAiming: isTpsAim,
+        isCrouching: this.stealthCrouching,
         phaseOffset: 0,
         dt: simDt,
       });
 
       const targetScaleY =
-        storeState.inCover && this.playerPhys.attackCooldown <= 0.08 ? 0.8 : 1.0;
+        (storeState.inCover || this.stealthCrouching) && this.playerPhys.attackCooldown <= 0.08
+          ? 0.8
+          : 1.0;
       this.playerRig.group.scale.y = THREE.MathUtils.damp(
         this.playerRig.group.scale.y,
         targetScaleY,
@@ -2867,6 +3278,8 @@ export class PlayerController {
         this.playerPhys.z
       );
       this.playerRig.group.rotation.y = this.playerPhys.facing;
+      }
+      }
     }
 
     if (this.playerPhys.attackCooldown > 0) {
@@ -3288,6 +3701,83 @@ export class PlayerController {
       }
     }
 
+    // Step flying vehicle debris pieces
+    for (let di = this.debrisPieces.length - 1; di >= 0; di--) {
+      const deb = this.debrisPieces[di];
+      deb.ttl -= dt;
+      deb.vy -= 22 * dt;
+      deb.x += deb.vx * dt;
+      deb.y += deb.vy * dt;
+      deb.z += deb.vz * dt;
+      const gDeb = getGroundElevationAt(deb.x, deb.z);
+      if (deb.y <= gDeb + 0.12) {
+        deb.y = gDeb + 0.12;
+        if (Math.abs(deb.vy) > 2.2) {
+          deb.vy = -deb.vy * 0.35;
+          deb.vx *= 0.6;
+          deb.vz *= 0.6;
+        } else {
+          deb.vy = 0;
+          deb.vx *= Math.exp(-6 * dt);
+          deb.vz *= Math.exp(-6 * dt);
+          deb.spinX = 0;
+          deb.spinZ = 0;
+        }
+      }
+      deb.mesh.position.set(deb.x, deb.y, deb.z);
+      deb.mesh.rotation.x += deb.spinX * dt;
+      deb.mesh.rotation.z += deb.spinZ * dt;
+      if (deb.ttl <= 0) {
+        this.scene.remove(deb.mesh);
+        deb.mesh.geometry.dispose();
+        (deb.mesh.material as THREE.Material).dispose();
+        this.debrisPieces.splice(di, 1);
+      }
+    }
+
+    // Stealth profile & Silent Takedown readiness check
+    const activeWepSpec = getEffectiveWeaponSpec(pState.activeWeapon, pState);
+    const hasEquippedSuppressor =
+      Boolean(activeWepSpec.silent) ||
+      Boolean(pState.weaponAttachments?.[activeWepSpec.id]?.includes('suppressor'));
+    const stealthProf = computeStealthDetectionProfile({
+      crouching: this.stealthCrouching,
+      inCover: storeState.inCover,
+      hasSuppressor: hasEquippedSuppressor,
+      isNightOrRain:
+        storeState.weatherMode === 'malam' || storeState.weatherMode === 'hujan',
+    });
+    let silentReady = false;
+    if (!this.playerPhys.drivingVehicleId && !this.ridingPeerId && (this.stealthCrouching || activeWepSpec.isMelee)) {
+      for (const en of this.enemies) {
+        if (en.state !== 'alive') continue;
+        if (
+          canPerformSilentTakedown({
+            playerX: this.playerPhys.x,
+            playerZ: this.playerPhys.z,
+            enemyX: en.x,
+            enemyZ: en.z,
+            enemyFacing: en.facing,
+            enemyAlerted: Boolean(en.alerted),
+            isStealthOrMelee: this.stealthCrouching || activeWepSpec.isMelee,
+          })
+        ) {
+          silentReady = true;
+          break;
+        }
+      }
+    }
+    gameStore.setStealthStatus(
+      {
+        crouching: this.stealthCrouching,
+        inCover: storeState.inCover,
+        suppressedWeapon: hasEquippedSuppressor,
+        detectionRadiusMultiplier: stealthProf.detectionRadiusMultiplier,
+        silentTakedownReady: silentReady,
+      },
+      silentReady
+    );
+
     // Enemy AI Loop
     let activeAttackers = 0;
     const MAX_CONCURRENT_ATTACKERS = 3;
@@ -3297,12 +3787,34 @@ export class PlayerController {
       const en = this.enemies[i];
       if (en.state === 'ko') {
         en.koTimer -= dt;
-        en.rig.group.rotation.x = THREE.MathUtils.damp(
-          en.rig.group.rotation.x,
-          -Math.PI / 2,
-          10,
-          dt
-        );
+        if (en.ragdoll && en.ragdoll.active) {
+          const ragStep = stepRagdollState(en.ragdoll, dt);
+          en.ragdoll = ragStep.next;
+          const safeRag = resolveCircleAABBCollision(
+            en.x + ragStep.dx,
+            en.z + ragStep.dz,
+            0.65,
+            undefined,
+            this.buildingGrid
+          );
+          en.x = safeRag.x;
+          en.z = safeRag.z;
+          const ragGround = getGroundElevationAt(en.x, en.z);
+          en.rig.group.position.set(en.x, ragGround + en.ragdoll.yOffset, en.z);
+          applyCharacterRagdollPose(
+            en.rig,
+            en.ragdoll.angleX,
+            en.ragdoll.angleZ,
+            en.ragdoll.yOffset * 0.25
+          );
+        } else {
+          en.rig.group.rotation.x = THREE.MathUtils.damp(
+            en.rig.group.rotation.x,
+            -Math.PI / 2,
+            10,
+            dt
+          );
+        }
         if (en.koTimer <= 0) {
           this.scene.remove(en.rig.group);
           this.enemies.splice(i, 1);
@@ -3373,7 +3885,11 @@ export class PlayerController {
 
       const effectiveEnemySpeed = isStaggered ? spec.speed * 0.35 : spec.speed;
 
-      if (en.windupTimer <= 0 && distToPlayer < 48) {
+      const detectRange = en.alerted
+        ? 48
+        : 48 * stealthProf.detectionRadiusMultiplier;
+      if (en.windupTimer <= 0 && distToPlayer < detectRange) {
+        en.alerted = true;
         const moveRes = stepEnemyMovementPolicy(
           en.policy,
           en.x,
@@ -3787,7 +4303,9 @@ export class PlayerController {
             ? Math.sin(this.playerPhys.walkDist * 4.4) * 0.045
             : 0;
         const eyeY =
-          this.playerPhys.y + (storeState.inCover ? 1.12 : 1.62) + walkBob;
+          this.playerPhys.y +
+          (storeState.inCover || this.stealthCrouching ? 1.12 : 1.62) +
+          walkBob;
         camera.position.set(
           this.playerPhys.x + orbitFwdX * 0.12,
           eyeY,
@@ -3950,6 +4468,10 @@ export class PlayerController {
       signalPhase,
       isDrifting: Boolean(activeVehicle?.isDrifting),
       turnInput: moveTurn,
+      isCrouching: this.stealthCrouching,
+      isParachuting: this.parachuteDeployed,
+      ridingPeerId: this.ridingPeerId,
+      ridingMrt: this.ridingMrt,
     };
   }
 
@@ -3986,6 +4508,12 @@ export class PlayerController {
   }
 
   public dispose(): void {
+    for (const deb of this.debrisPieces) {
+      this.scene.remove(deb.mesh);
+      deb.mesh.geometry.dispose();
+      (deb.mesh.material as THREE.Material).dispose();
+    }
+    this.debrisPieces.length = 0;
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onWindowBlur);

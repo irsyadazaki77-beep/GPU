@@ -1,4 +1,5 @@
 import { soundEngine, type AudioChannel } from '../game/sound';
+import { computeDopplerPitchMultiplier } from '../game/rules';
 
 export interface SpatialEmitter3D {
   x: number;
@@ -155,16 +156,64 @@ class SpatialAudioEngine {
     });
   }
 
-  public playPoliceSiren3D(x: number, y: number, z: number, highPhase: boolean): void {
+  public playPoliceSiren3D(
+    x: number,
+    y: number,
+    z: number,
+    highPhase: boolean,
+    vx: number = 0,
+    vz: number = 0
+  ): void {
+    const doppler = computeDopplerPitchMultiplier({
+      sourceX: x,
+      sourceY: y,
+      sourceZ: z,
+      sourceVx: vx,
+      sourceVy: 0,
+      sourceVz: vz,
+      listenerX: this.listenerPose.x,
+      listenerY: this.listenerPose.y,
+      listenerZ: this.listenerPose.z,
+    });
     this.play3DSound({
       source: { x, y, z },
-      freq: highPhase ? 880 : 620,
+      freq: (highPhase ? 880 : 620) * doppler,
       duration: 0.2,
       type: 'sine',
       volume: 0.085,
       pitchSlide: highPhase ? 0.78 : 1.28,
       refDistance: 10,
       maxDistance: 80,
+    });
+  }
+
+  public playDopplerPass3D(
+    x: number,
+    y: number,
+    z: number,
+    vx: number,
+    vz: number
+  ): void {
+    const doppler = computeDopplerPitchMultiplier({
+      sourceX: x,
+      sourceY: y,
+      sourceZ: z,
+      sourceVx: vx,
+      sourceVy: 0,
+      sourceVz: vz,
+      listenerX: this.listenerPose.x,
+      listenerY: this.listenerPose.y,
+      listenerZ: this.listenerPose.z,
+    });
+    this.play3DSound({
+      source: { x, y, z },
+      freq: 145 * doppler,
+      duration: 0.28,
+      type: 'sawtooth',
+      volume: 0.055,
+      pitchSlide: 0.88,
+      refDistance: 8,
+      maxDistance: 58,
     });
   }
 }

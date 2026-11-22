@@ -90,7 +90,14 @@ export interface ValidatedWsClientMessage {
   state?: Partial<NetPeerSnapshot>;
   track?: Record<string, unknown>;
   event?: {
-    type: 'horn' | 'weapon_fire' | 'explosion' | 'wanted_alert' | 'passenger_ping';
+    type:
+      | 'horn'
+      | 'weapon_fire'
+      | 'explosion'
+      | 'wanted_alert'
+      | 'passenger_ping'
+      | 'heist_sync'
+      | 'wanted_sync';
     x: number;
     y: number;
     z: number;
@@ -169,7 +176,15 @@ export function validateIncomingWsFrame(
   let validatedEvent: ValidatedWsClientMessage['event'];
   if (msgType === 'coop:event') {
     const ev = candidate.event as Record<string, unknown> | undefined;
-    const validEvTypes = ['horn', 'weapon_fire', 'explosion', 'wanted_alert', 'passenger_ping'];
+    const validEvTypes = [
+      'horn',
+      'weapon_fire',
+      'explosion',
+      'wanted_alert',
+      'passenger_ping',
+      'heist_sync',
+      'wanted_sync',
+    ];
     if (
       !ev ||
       typeof ev !== 'object' ||
@@ -372,6 +387,22 @@ export class MultiplayerRoomHub {
           ? Math.max(-40, Math.min(70, patch.speed))
           : prev.speed,
       vehicleType: nextVehicleType,
+      wantedLevel:
+        typeof patch.wantedLevel === 'number' && Number.isFinite(patch.wantedLevel)
+          ? Math.max(0, Math.min(5, Math.floor(patch.wantedLevel)))
+          : prev.wantedLevel,
+      ridingPeerId:
+        patch.ridingPeerId === null
+          ? null
+          : typeof patch.ridingPeerId === 'string' && patch.ridingPeerId.length <= 48
+            ? patch.ridingPeerId
+            : prev.ridingPeerId,
+      isCrouching:
+        typeof patch.isCrouching === 'boolean' ? patch.isCrouching : prev.isCrouching,
+      isParachuting:
+        typeof patch.isParachuting === 'boolean'
+          ? patch.isParachuting
+          : prev.isParachuting,
       updatedAt: nowMs,
     };
 

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { proceduralTextures } from '../../engine/ProceduralTextures';
 import type { Point2D } from '../../engine/visualOverhaulMath';
 import { ENTERABLE_INTERIORS } from '../heists';
+import { computeMrtTrainState } from '../grandPlan5Systems';
 import type { TrafficSignalPhase, WeatherMode } from '../types';
 import { isNearBuilding, isOnRoadway } from './spatial';
 import { SidewalkRect, createGantrySignTexture } from './textures';
@@ -643,6 +644,23 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   }
   group.add(mrtTrainGroup);
 
+  // Elevated MRT Station Boarding Beacons (Dukuh Atas z=-68 & Blok M z=68)
+  const stationRingMat = new THREE.MeshBasicMaterial({
+    color: 0x38bdf8,
+    transparent: true,
+    opacity: 0.72,
+    side: THREE.DoubleSide,
+  });
+  for (const stZ of [-68, 68]) {
+    const stationRing = new THREE.Mesh(
+      new THREE.RingGeometry(1.4, 2.05, 24),
+      stationRingMat
+    );
+    stationRing.rotation.x = -Math.PI / 2;
+    stationRing.position.set(mrtTrackX, 0.09, stZ);
+    group.add(stationRing);
+  }
+
   const setWeatherTransition = (
     nightFactor: number,
     _wetnessFactor: number,
@@ -655,10 +673,9 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     shelterTrimMat.emissiveIntensity = 0.15 + Math.min(1, n * 1.5) * 0.3;
     mrtWinMat.emissiveIntensity = 0.14 + n * 0.48;
 
-    // Smooth shuttle motion for MRT Ratangga train along Sudirman viaduct (-72..72) with station dwell
-    const cycle = (elapsedTime * 0.18) % (Math.PI * 2);
-    const zPos = Math.sin(cycle) * 68;
-    mrtTrainGroup.position.z = zPos;
+    // Smooth shuttle motion for MRT Ratangga train along Sudirman viaduct (-68..68)
+    const mrtState = computeMrtTrainState(elapsedTime);
+    mrtTrainGroup.position.z = mrtState.z;
   };
 
   const setTrafficSignalPhase = (phase: TrafficSignalPhase) => {
@@ -1112,6 +1129,15 @@ export function buildInteriorPortalsAndStage(): {
   );
   weaponLocker.position.set(6.5, 1.8, -9.5);
   safehouseRoom.add(weaponLocker);
+
+  // Interactive 3D Workstation Marker inside Safehouse (Rest Bed + Stash Ring)
+  const safehousePad = new THREE.Mesh(
+    new THREE.RingGeometry(1.1, 1.55, 24),
+    new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide, transparent: true, opacity: 0.72 })
+  );
+  safehousePad.rotation.x = -Math.PI / 2;
+  safehousePad.position.set(-4.0, 0.06, -5.5);
+  safehouseRoom.add(safehousePad);
 
   // Rooms 6–8: Faction HQs (jalanan x=120, sindikat x=-120, rakyat x=160)
   for (const [cx, hex] of [

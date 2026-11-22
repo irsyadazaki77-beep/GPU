@@ -693,6 +693,77 @@ export function applyVehicleCustomizationToMesh(
       underglowMat.opacity = 0.0;
     }
   }
+
+  // Visual 3D Spoiler (when Nitro enabled) & Armored Bullbar (when armorPlatingLevel >= 1)
+  let spoilerGroup = mesh.getObjectByName('customsSpoiler') as THREE.Group | undefined;
+  if (customs.nitroEnabled && !spoilerGroup) {
+    spoilerGroup = new THREE.Group();
+    spoilerGroup.name = 'customsSpoiler';
+    const carbonMat = new THREE.MeshStandardMaterial({
+      color: 0x0f172a,
+      roughness: 0.32,
+      metalness: 0.72,
+    });
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(1.58, 0.07, 0.32), carbonMat);
+    wing.position.set(0, 1.18, -1.85);
+    wing.rotation.x = -0.14;
+    const strutL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.24, 0.14), carbonMat);
+    strutL.position.set(-0.48, 1.05, -1.82);
+    const strutR = strutL.clone();
+    strutR.position.x = 0.48;
+    spoilerGroup.add(wing, strutL, strutR);
+    mesh.add(spoilerGroup);
+  }
+  if (spoilerGroup) {
+    spoilerGroup.visible = Boolean(customs.nitroEnabled);
+  }
+
+  let bullbarGroup = mesh.getObjectByName('customsBullbar') as THREE.Group | undefined;
+  if (customs.armorPlatingLevel >= 1 && !bullbarGroup) {
+    bullbarGroup = new THREE.Group();
+    bullbarGroup.name = 'customsBullbar';
+    const steelMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      roughness: 0.35,
+      metalness: 0.85,
+    });
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.68, 0.22, 0.16), steelMat);
+    bar.position.set(0, 0.44, 2.15);
+    const skirtL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.16, 2.45), steelMat);
+    skirtL.position.set(-0.96, 0.32, 0);
+    const skirtR = skirtL.clone();
+    skirtR.position.x = 0.96;
+    bullbarGroup.add(bar, skirtL, skirtR);
+    mesh.add(bullbarGroup);
+  }
+  if (bullbarGroup) {
+    bullbarGroup.visible = customs.armorPlatingLevel >= 1;
+  }
+}
+
+export function buildVehicleDebrisPieceMesh(
+  kind: 'bumper' | 'door' | 'hood' | 'wheel',
+  bodyColorHex: number = 0x334155
+): THREE.Mesh {
+  const mat = new THREE.MeshStandardMaterial({
+    color: kind === 'wheel' ? 0x111827 : bodyColorHex,
+    roughness: kind === 'wheel' ? 0.85 : 0.38,
+    metalness: kind === 'wheel' ? 0.15 : 0.62,
+  });
+  let geo: THREE.BufferGeometry;
+  if (kind === 'wheel') {
+    geo = new THREE.CylinderGeometry(0.32, 0.32, 0.22, 10);
+    geo.rotateZ(Math.PI / 2);
+  } else if (kind === 'door') {
+    geo = new THREE.BoxGeometry(0.12, 0.65, 1.05);
+  } else if (kind === 'hood') {
+    geo = new THREE.BoxGeometry(1.35, 0.1, 1.15);
+  } else {
+    geo = new THREE.BoxGeometry(1.55, 0.22, 0.24);
+  }
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  return mesh;
 }
 
 export function buildPolicePursuitHeliWithSpotlight(): THREE.Group {

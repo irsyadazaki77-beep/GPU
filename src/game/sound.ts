@@ -1,4 +1,5 @@
 import {
+  AcousticZoneId,
   AmbientCueId,
   AmbientSoundscapeProfile,
   AudioChannelVolumes,
@@ -118,6 +119,73 @@ class SoundEngine {
   private driftGain: GainNode | null = null;
   private driftRunning: boolean = false;
   private inVehicleCabin: boolean = false;
+
+  private reverbInputGain: GainNode | null = null;
+  private reverbDelay: DelayNode | null = null;
+  private reverbFeedbackGain: GainNode | null = null;
+  private reverbFilter: BiquadFilterNode | null = null;
+  private reverbWetGain: GainNode | null = null;
+  private currentAcousticZone: AcousticZoneId = 'open_street';
+  private acousticWetTarget: number = 0.08;
+
+  private ensureReverbBus(ctx: AudioContext): GainNode | null {
+    if (this.reverbInputGain && this.reverbWetGain) {
+      return this.reverbInputGain;
+    }
+    try {
+      const now = ctx.currentTime;
+      const input = ctx.createGain();
+      const delay = ctx.createDelay(0.6);
+      const feedback = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      const wet = ctx.createGain();
+
+      delay.delayTime.setValueAtTime(0.11, now);
+      feedback.gain.setValueAtTime(0.32, now);
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1400, now);
+      wet.gain.setValueAtTime(this.acousticWetTarget, now);
+
+      input.connect(delay);
+      delay.connect(filter);
+      filter.connect(feedback);
+      feedback.connect(delay);
+      filter.connect(wet);
+      wet.connect(ctx.destination);
+
+      this.reverbInputGain = input;
+      this.reverbDelay = delay;
+      this.reverbFeedbackGain = feedback;
+      this.reverbFilter = filter;
+      this.reverbWetGain = wet;
+      return input;
+    } catch {
+      return null;
+    }
+  }
+
+  public setAcousticZone(
+    zone: AcousticZoneId,
+    wetMix: number,
+    decayMs: number
+  ): void {
+    if (this.currentAcousticZone === zone) return;
+    this.currentAcousticZone = zone;
+    this.acousticWetTarget = Math.max(0.02, Math.min(0.6, wetMix));
+    if (!this.ctx || !this.reverbWetGain || !this.reverbDelay || !this.reverbFeedbackGain) {
+      return;
+    }
+    const now = this.ctx.currentTime;
+    const delaySec = Math.max(0.04, Math.min(0.28, decayMs / 1800));
+    const fb = Math.max(0.14, Math.min(0.54, wetMix * 1.1));
+    this.reverbDelay.delayTime.setTargetAtTime(delaySec, now, 0.15);
+    this.reverbFeedbackGain.gain.setTargetAtTime(fb, now, 0.15);
+    this.reverbWetGain.gain.setTargetAtTime(this.acousticWetTarget, now, 0.15);
+  }
+
+  public getAcousticZone(): AcousticZoneId {
+    return this.currentAcousticZone;
+  }
 
   public getChannelVolumes(): AudioChannelVolumes {
     return { ...this.channelVolumes };
@@ -680,6 +748,10 @@ class SoundEngine {
 
       osc.connect(gain);
       gain.connect(ctx.destination);
+      if (channel === 'sfx') {
+        const revBus = this.ensureReverbBus(ctx);
+        if (revBus) gain.connect(revBus);
+      }
       osc.start(now);
       osc.stop(now + duration);
     } catch {
@@ -696,6 +768,21 @@ class SoundEngine {
     }, 150);
   }
 
+  public playRadioStaticBurst() {
+    this.playTone(1420, 0.055, 'sawtooth', 0.032, 0.42, 'radio');
+    setTimeout(() => this.playTone(980, 0.06, 'triangle', 0.025, 1.35, 'radio'), 45);
+  }
+
+  public playParachuteOpen() {
+    this.playTone(145, 0.24, 'triangle', 0.19, 1.75, 'sfx');
+    setTimeout(() => this.playTone(310, 0.16, 'sine', 0.11, 0.72, 'sfx'), 70);
+  }
+
+  public playSilentTakedown() {
+    this.playTone(115, 0.14, 'sine', 0.16, 0.42, 'sfx');
+    setTimeout(() => this.playTone(84, 0.18, 'triangle', 0.13, 0.5, 'sfx'), 55);
+  }
+
   public playShoot(
     weapon:
       | 'fist'
@@ -704,8 +791,13 @@ class SoundEngine {
       | 'rifle'
       | 'mercon'
       | 'pasopati'
-      | 'gatotkaca'
+      | 'gatotkaca',
+    suppressed: boolean = false
   ) {
+    if (suppressed && (weapon === 'pistol' || weapon === 'rifle')) {
+      this.playTone(weapon === 'pistol' ? 520 : 610, 0.065, 'triangle', 0.08, 0.32, 'sfx');
+      return;
+    }
     if (weapon === 'fist') {
       this.playTone(130, 0.09, 'triangle', 0.15, 0.5, 'sfx');
     } else if (weapon === 'golok') {
@@ -949,6 +1041,10 @@ class SoundEngine {
         osc.connect(gain);
         gain.connect(panner);
         panner.connect(ctx.destination);
+        if (channel === 'sfx') {
+          const revBus = this.ensureReverbBus(ctx);
+          if (revBus) panner.connect(revBus);
+        }
       } else {
         osc.connect(gain);
         gain.connect(ctx.destination);
@@ -1003,6 +1099,10 @@ class SoundEngine {
         osc.connect(gain);
         gain.connect(panner);
         panner.connect(ctx.destination);
+        if (channel === 'sfx') {
+          const revBus = this.ensureReverbBus(ctx);
+          if (revBus) panner.connect(revBus);
+        }
       } else {
         osc.connect(gain);
         gain.connect(ctx.destination);

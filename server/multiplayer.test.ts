@@ -270,6 +270,28 @@ test('Ephemeral WebSocket server: room join/leave, 8-player room cap overflow, 2
     const coopEventMsg = await coopEventPromise;
     assert.equal(coopEventMsg.event?.x, 12);
 
+    // 3c. Verify Grand Plan 5.0 heist_sync + peer crouch/parachute/passenger relay
+    const heistSyncPromise = waitForMessage<{
+      type: string;
+      event?: { type?: string; detail?: string; wantedLevel?: number };
+    }>(client2, (m) => m.type === 'coop:event' && m.event?.type === 'heist_sync');
+    client1.send(
+      JSON.stringify({
+        type: 'coop:event',
+        event: {
+          type: 'heist_sync',
+          x: 0,
+          y: 0,
+          z: 0,
+          wantedLevel: 4,
+          detail: 'heist_bursa_scbd|75|Brankas Terbuka',
+        },
+      })
+    );
+    const heistSyncMsg = await heistSyncPromise;
+    assert.equal(heistSyncMsg.event?.wantedLevel, 4);
+    assert.equal(heistSyncMsg.event?.detail, 'heist_bursa_scbd|75|Brankas Terbuka');
+
     // 4. Close all sockets and verify rooms are deterministically cleaned up
     await Promise.all(
       openSockets.map(

@@ -1106,11 +1106,15 @@ export class TrafficSystem {
         this.sirenLight.color.setHex(sirenRedPhase ? 0xef4444 : 0x3b82f6);
         this.sirenLight.intensity = 4.2;
         if (Math.floor(nowMs / 320) !== Math.floor((nowMs - simDt * 1000) / 320)) {
+          const polVx = Math.sin(nearestPolice.heading) * nearestPolice.speed;
+          const polVz = Math.cos(nearestPolice.heading) * nearestPolice.speed;
           spatialAudio.playPoliceSiren3D(
             nearestPolice.x,
             nearestPolice.y,
             nearestPolice.z,
-            sirenRedPhase
+            sirenRedPhase,
+            polVx,
+            polVz
           );
         }
       } else {

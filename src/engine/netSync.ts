@@ -1,11 +1,14 @@
 import * as THREE from 'three';
 import {
   PROTAGONIST_PROFILES,
+  VEHICLE_SPECS,
   createCustomRaceTrackSpec,
   getGroundElevationAt,
+  reduceCoopHeistRoomState,
 } from '../game/rules';
 import type {
   CustomRaceTrackSpec,
+  HeistId,
   MultiplayerConnectionState,
   MultiplayerRoomMode,
   NetCoopEvent,
@@ -14,8 +17,10 @@ import type {
   VehicleType,
 } from '../game/types';
 import {
+  animateCharacterRig,
   buildCharacterRig,
   buildIndonesianVehicleMesh,
+  buildParachuteCanopyMesh,
 } from '../game/world/geometryBuilders';
 import { gameStore } from '../state/gameStore';
 import { spatialAudio } from './spatialAudio';
@@ -83,10 +88,12 @@ interface RemotePeerRenderSlot {
   pose: InterpolatedPeerPose;
   rootGroup: THREE.Group;
   charRig: ReturnType<typeof buildCharacterRig>;
+  parachuteMesh: THREE.Group;
   vehicleGroup: THREE.Group | null;
   vehicleType: VehicleType | null;
   markerRing: THREE.Mesh;
   nameSprite: THREE.Sprite | null;
+  walkDist: number;
 }
 
 function createPeerNameplateSprite(label: string, colorHex: string): THREE.Sprite | null {
@@ -243,6 +250,21 @@ export class MultiplayerClientSync {
               spatialAudio.playOjolHorn3D(ev.x, ev.y, ev.z);
             } else if (ev.type === 'weapon_fire' || ev.type === 'explosion') {
               spatialAudio.playPoliceSiren3D(ev.x, ev.y, ev.z, true);
+            } else if (ev.type === 'heist_sync') {
+              const parts = (ev.detail || '').split('|');
+              const heistId = (parts[0] || null) as HeistId | null;
+              const pct = Number(parts[1] || 0);
+              const stageLabel = parts[2] || 'Sinkronisasi Heist Kru';
+              gameStore.ingestCoopHeistSync({
+                heistId,
+                progressPct: Number.isFinite(pct) ? pct : 0,
+                stageLabel,
+                sharedWantedLevel: ev.wantedLevel ?? undefined,
+              });
+            } else if (ev.type === 'wanted_sync' && typeof ev.wantedLevel === 'number') {
+              gameStore.ingestCoopHeistSync({
+                sharedWantedLevel: ev.wantedLevel,
+              });
             }
             gameStore.pushCoopEventToast(ev);
             return;
@@ -349,6 +371,8 @@ export class MultiplayerClientSync {
         const rootGroup = new THREE.Group();
         const charRig = buildCharacterRig('crew');
         rootGroup.add(charRig.group);
+        const parachuteMesh = buildParachuteCanopyMesh();
+        rootGroup.add(parachuteMesh);
 
         const ringGeo = new THREE.RingGeometry(0.85, 1.15, 20);
         ringGeo.rotateX(-Math.PI / 2);
@@ -381,10 +405,12 @@ export class MultiplayerClientSync {
           pose: { x: p.x, y: p.y, z: p.z, heading: p.heading },
           rootGroup,
           charRig,
+          parachuteMesh,
           vehicleGroup: null,
           vehicleType: null,
           markerRing,
           nameSprite,
+          walkDist: 0,
         });
       }
     }
@@ -397,6 +423,66 @@ export class MultiplayerClientSync {
     }
   }
 
+  public getNearestRemoteVehiclePeer(
+    px: number,
+    pz: number,
+    maxDist: number = 5.8
+  ): {
+    peerId: string;
+    displayName: string;
+    vehicleType: VehicleType;
+    vehicleName: string;
+    x: number;
+    y: number;
+    z: number;
+    heading: number;
+    speed: number;
+  } | null {
+    let best: ReturnType<MultiplayerClientSync['getNearestRemoteVehiclePeer']> = null;
+    let bestDist = maxDist;
+    for (const slot of this.peerSlots.values()) {
+      if (!slot.target.vehicleType) continue;
+      const d = Math.hypot(slot.pose.x - px, slot.pose.z - pz);
+      if (d < bestDist) {
+        bestDist = d;
+        best = {
+          peerId: slot.peerId,
+          displayName: slot.target.displayName,
+          vehicleType: slot.target.vehicleType,
+          vehicleName: VEHICLE_SPECS[slot.target.vehicleType]?.name || slot.target.vehicleType,
+          x: slot.pose.x,
+          y: slot.pose.y,
+          z: slot.pose.z,
+          heading: slot.pose.heading,
+          speed: slot.target.speed,
+        };
+      }
+    }
+    return best;
+  }
+
+  public getRemotePeerPose(peerId: string): {
+    x: number;
+    y: number;
+    z: number;
+    heading: number;
+    speed: number;
+    vehicleType: VehicleType | null;
+    displayName: string;
+  } | null {
+    const slot = this.peerSlots.get(peerId);
+    if (!slot) return null;
+    return {
+      x: slot.pose.x,
+      y: slot.pose.y,
+      z: slot.pose.z,
+      heading: slot.pose.heading,
+      speed: slot.target.speed,
+      vehicleType: slot.target.vehicleType,
+      displayName: slot.target.displayName,
+    };
+  }
+
   public step(
     dt: number,
     localState: {
@@ -407,6 +493,10 @@ export class MultiplayerClientSync {
       heading: number;
       speed: number;
       vehicleType: VehicleType | null;
+      wantedLevel?: number;
+      ridingPeerId?: string | null;
+      isCrouching?: boolean;
+      isParachuting?: boolean;
     }
   ): void {
     if (this.disposed) return;
@@ -485,6 +575,38 @@ export class MultiplayerClientSync {
       }
 
       slot.charRig.group.visible = !slot.vehicleType;
+      slot.parachuteMesh.visible = !slot.vehicleType && Boolean(slot.target.isParachuting);
+      if (!slot.vehicleType) {
+        const isMoving = Math.abs(slot.target.speed) > 0.35;
+        if (isMoving) slot.walkDist += Math.abs(slot.target.speed) * dt * 0.55;
+        animateCharacterRig(slot.charRig, {
+          elapsedTime: performance.now() * 0.001,
+          walkDist: slot.walkDist,
+          isMoving,
+          isCrouching: Boolean(slot.target.isCrouching),
+          dt,
+        });
+      }
+    }
+
+    // Periodically refresh Co-Op crew roles & shared wanted level in store
+    if (this.peerSlots.size > 0) {
+      const storeState = gameStore.getState();
+      const peerSnaps = Array.from(this.peerSlots.values()).map((s) => s.target);
+      const reduced = reduceCoopHeistRoomState(
+        storeState.coopHeistSync,
+        peerSnaps,
+        this.localPeerId || 'local',
+        localState.protagonist,
+        localState.wantedLevel ?? storeState.playerState.wantedLevel
+      );
+      if (
+        reduced.sharedWantedLevel !== storeState.coopHeistSync.sharedWantedLevel ||
+        Object.keys(reduced.crewRoles).length !==
+          Object.keys(storeState.coopHeistSync.crewRoles).length
+      ) {
+        gameStore.ingestCoopHeistSync(reduced);
+      }
     }
   }
 

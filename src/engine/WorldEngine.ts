@@ -20,7 +20,9 @@ import {
   advanceTurfWarWave,
   clampDt,
   computePlayerRacePosition,
+  isPlayerNearMrtStation,
   isPlayerWithinStreetEvent,
+  resolveAcousticZone,
   resolveDistrictAtPosition,
 } from '../game/rules';
 import { soundEngine } from '../game/sound';
@@ -174,6 +176,7 @@ export class WorldEngine {
   private lastChunkX = 9999;
   private lastChunkZ = 9999;
   private lastAmbientCalloutAt = 0;
+  private radioBroadcastAccum = 0;
 
   constructor(container: HTMLElement, initialProps: WorldEngineProps) {
     this.container = container;
@@ -440,6 +443,13 @@ export class WorldEngine {
             this._camRight.z
           );
         },
+        onCarjackTrafficVehicle: (cx, cz, ch) => {
+          this.crowdSystem.spawnCarjackedDriver(cx, cz, ch);
+        },
+        onQueryCoopPeerVehicle: (px, pz) =>
+          this.netSync.getNearestRemoteVehiclePeer(px, pz),
+        onGetCoopPeerPose: (peerId) =>
+          this.netSync.getRemotePeerPose(peerId),
       }
     );
 
@@ -964,7 +974,32 @@ export class WorldEngine {
         heading: activeVeh ? activeVeh.heading : phys.facing,
         speed: activeVeh ? activeVeh.speed : 0,
         vehicleType: activeVeh ? activeVeh.type : null,
+        wantedLevel: pState.wantedLevel,
+        ridingPeerId: stepRes.ridingPeerId,
+        isCrouching: stepRes.isCrouching,
+        isParachuting: stepRes.isParachuting,
       });
+
+      // Acoustic Zone Reverb (under Semanggi overpass / interior / harbor / open street)
+      const acZone = resolveAcousticZone({
+        x: phys.x,
+        y: phys.y,
+        z: phys.z,
+        currentInterior: pState.currentInterior,
+      });
+      soundEngine.setAcousticZone(acZone.zone, acZone.reverbWet, acZone.reverbDecayMs);
+      gameStore.setAcousticZone(acZone.zone);
+
+      // Dynamic Live Radio Jakarta Broadcast Ticker (when inside vehicle with radio on)
+      if (activeVeh && pState.radioStation !== 'off') {
+        this.radioBroadcastAccum += dt;
+        if (this.radioBroadcastAccum >= 12.5) {
+          this.radioBroadcastAccum = 0;
+          gameStore.triggerLiveRadioBroadcast(Math.floor(now * 0.001));
+        }
+      } else {
+        this.radioBroadcastAccum = 9.5;
+      }
 
       this._camRight.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
       const vehSpec = activeVeh ? VEHICLE_SPECS[activeVeh.type] : null;
@@ -1324,6 +1359,21 @@ export class WorldEngine {
         const nearbyVehType = stepRes.activeVehicle
           ? null
           : this.trafficSystem.getNearbyVehicleType(phys.x, phys.z);
+
+        // Co-Op Peer Vehicle Passenger & MRT Station proximity prompts
+        const nearPeerVeh =
+          !stepRes.activeVehicle && !stepRes.ridingPeerId
+            ? this.netSync.getNearestRemoteVehiclePeer(phys.x, phys.z)
+            : null;
+        gameStore.setCoopPassengerUi(
+          stepRes.ridingPeerId,
+          nearPeerVeh ? `${nearPeerVeh.vehicleName} (${nearPeerVeh.displayName})` : null
+        );
+        const nearMrtSt =
+          !stepRes.activeVehicle && !stepRes.ridingMrt
+            ? isPlayerNearMrtStation(phys.x, phys.z, 7.5)
+            : null;
+        gameStore.setMrtRideUi(stepRes.ridingMrt, nearMrtSt?.name ?? null);
 
         const skySwitch = this.playerController.skySwitch;
         const stageProgress = skySwitch.elapsed / skySwitch.duration;

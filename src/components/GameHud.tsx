@@ -219,6 +219,15 @@ export const GameHud: React.FC<GameHudProps> = ({
   const combatCombo = useGameStore((s) => s.combatCombo);
   const nearMissBanner = useGameStore((s) => s.nearMissBanner);
   const activeQuestState = useGameStore((s) => s.activeQuestState);
+  const stealthStatus = useGameStore((s) => s.stealthStatus);
+  const silentTakedownPrompt = useGameStore((s) => s.silentTakedownPrompt);
+  const parachuteState = useGameStore((s) => s.parachuteState);
+  const acousticZone = useGameStore((s) => s.acousticZone);
+  const liveRadioBroadcast = useGameStore((s) => s.liveRadioBroadcast);
+  const ridingPeerId = useGameStore((s) => s.ridingPeerId);
+  const nearbyPeerVehicleName = useGameStore((s) => s.nearbyPeerVehicleName);
+  const nearbyMrtStationName = useGameStore((s) => s.nearbyMrtStationName);
+  const ridingMrt = useGameStore((s) => s.ridingMrt);
   const activeRoadEvent = worldClockEventState.activeEvent;
 
   const claimableChallengesCount = dailyChallenges.items.filter(
@@ -354,8 +363,49 @@ export const GameHud: React.FC<GameHudProps> = ({
   const currentDash = maxDash * rpmRatio;
 
   // Determine single highest-priority contextual prompt for bottom-center
-  const primaryPrompt =
-    nearbyInterior || playerState.currentInterior !== 'exterior'
+  const primaryPrompt = parachuteState.canDeploy
+    ? {
+        keycap: 'SPACE',
+        label: `Buka Parasut (${Math.round(parachuteState.altitudeAboveGround)}m AGL)`,
+        accent: '#ef4444',
+        onClick: () => {},
+      }
+    : silentTakedownPrompt
+    ? {
+        keycap: 'KLIK',
+        label: 'Silent Takedown (Tanpa Suara)',
+        accent: '#10b981',
+        onClick: () => {},
+      }
+    : ridingPeerId
+    ? {
+        keycap: 'G',
+        label: 'Turun dari Kendaraan Teman Co-Op',
+        accent: '#38bdf8',
+        onClick: onToggleVehicle,
+      }
+    : nearbyPeerVehicleName
+    ? {
+        keycap: 'G',
+        label: `Nebeng ${nearbyPeerVehicleName}`,
+        accent: '#38bdf8',
+        onClick: onToggleVehicle,
+      }
+    : ridingMrt
+    ? {
+        keycap: 'G',
+        label: 'Turun dari MRT Ratangga',
+        accent: '#38bdf8',
+        onClick: () => {},
+      }
+    : nearbyMrtStationName
+    ? {
+        keycap: 'G',
+        label: `Naik MRT (${nearbyMrtStationName})`,
+        accent: '#38bdf8',
+        onClick: () => {},
+      }
+    : nearbyInterior || playerState.currentInterior !== 'exterior'
       ? {
           keycap: 'G',
           label:
@@ -942,6 +992,56 @@ export const GameHud: React.FC<GameHudProps> = ({
                   {policeTactical.radioCallout}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Grand Plan 5.0: Stealth / Parachute / Acoustic Reverb / Live Radio Badges */}
+          {(stealthStatus.crouching || stealthStatus.suppressedWeapon) && !drivingVehicle && (
+            <div
+              data-testid="stealth-hud-badge"
+              className="aaa-glass-subtle rounded-lg px-2.5 py-1 border-l-2 border-l-[#10b981] text-[11px] font-mono-num text-[#6ee7b7] flex items-center gap-2"
+            >
+              <span>{stealthStatus.crouching ? 'MODUS SENYAP' : 'SENJATA BERPEREDAM'}</span>
+              <span className="text-[#94a3b8]">
+                Deteksi {Math.round(stealthStatus.detectionRadiusMultiplier * 100)}%
+              </span>
+            </div>
+          )}
+
+          {parachuteState.deployed && (
+            <div
+              data-testid="parachute-hud-badge"
+              className="aaa-glass-subtle rounded-lg px-2.5 py-1 border-l-2 border-l-[#ef4444] text-[11px] font-mono-num text-[#fca5a5] flex items-center gap-2"
+            >
+              <span>PARASUT AKTIF</span>
+              <span>ALT {Math.round(parachuteState.altitudeAboveGround)}m</span>
+              <span>{Math.round(parachuteState.glideSpeed * 3.2)} km/j</span>
+            </div>
+          )}
+
+          {(acousticZone === 'underpass_toll' || acousticZone === 'interior_room') && (
+            <div className="text-[10px] font-mono-num text-[#38bdf8]/90 px-1 hud-stroke-sm">
+              Akustik: {acousticZone === 'underpass_toll' ? 'Gema Kolong Tol' : 'Ruang Tertutup'}
+            </div>
+          )}
+
+          {drivingVehicle && liveRadioBroadcast && playerState.radioStation !== 'off' && (
+            <div
+              data-testid="live-radio-ticker"
+              className={`aaa-glass-subtle rounded-lg px-3 py-1.5 w-72 border-l-2 shadow-lg animate-aaa-up ${
+                liveRadioBroadcast.urgency === 'police_dispatch'
+                  ? 'border-l-[#ef4444]'
+                  : liveRadioBroadcast.urgency === 'breaking'
+                  ? 'border-l-[#f59e0b]'
+                  : 'border-l-[#38bdf8]'
+              }`}
+            >
+              <div className="text-[10px] font-mono-num font-bold uppercase tracking-wider text-[#facc15]">
+                {liveRadioBroadcast.headline}
+              </div>
+              <div className="text-[11px] text-[#e2e8f0] leading-snug line-clamp-2 mt-0.5">
+                {liveRadioBroadcast.djLine}
+              </div>
             </div>
           )}
         </div>

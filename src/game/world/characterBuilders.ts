@@ -24,6 +24,7 @@ export interface CharacterAnimationInput {
   walkDist: number;
   isMoving: boolean;
   isAiming?: boolean;
+  isCrouching?: boolean;
   phaseOffset?: number;
   dt: number;
 }
@@ -41,14 +42,27 @@ export function animateCharacterRig(
     walkDist,
     isMoving,
     isAiming = false,
+    isCrouching = false,
     phaseOffset = 0,
     dt,
   } = input;
   const t = elapsedTime + phaseOffset;
 
-  // 1. Subtle idle chest breathing on torsoGroup
+  // 1. Subtle idle chest breathing on torsoGroup (plus crouch lowering)
   const breath = Math.sin(t * 2.35);
-  rig.torsoGroup.position.y = breath * 0.014;
+  const crouchDrop = isCrouching ? -0.34 : 0;
+  rig.torsoGroup.position.y = THREE.MathUtils.damp(
+    rig.torsoGroup.position.y,
+    crouchDrop + breath * 0.014,
+    12,
+    dt
+  );
+  rig.torsoGroup.rotation.x = THREE.MathUtils.damp(
+    rig.torsoGroup.rotation.x,
+    isCrouching ? 0.24 : 0,
+    12,
+    dt
+  );
   rig.torsoGroup.scale.set(1 + breath * 0.012, 1 + breath * 0.01, 1);
 
   // 2. Natural idle head look-around & subtle cadence nod while walking
@@ -710,4 +724,66 @@ export function syncCharacterWeaponVisual(
     gunMat.metalness = isGilded ? 0.92 : 0.72;
     gunMat.roughness = isGilded ? 0.18 : 0.35;
   }
+}
+
+export function buildParachuteCanopyMesh(): THREE.Group {
+  const group = new THREE.Group();
+  const canopyMat = new THREE.MeshStandardMaterial({
+    color: 0xdc2626,
+    roughness: 0.65,
+    metalness: 0.08,
+    side: THREE.DoubleSide,
+  });
+  const stripeMat = new THREE.MeshStandardMaterial({
+    color: 0xf8fafc,
+    roughness: 0.65,
+    metalness: 0.08,
+    side: THREE.DoubleSide,
+  });
+  const cordMat = new THREE.MeshBasicMaterial({ color: 0xe2e8f0 });
+
+  const domeGeo = new THREE.SphereGeometry(2.15, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.45);
+  domeGeo.scale(1.25, 0.72, 0.95);
+  const dome = new THREE.Mesh(domeGeo, canopyMat);
+  dome.position.y = 2.65;
+  dome.castShadow = true;
+  group.add(dome);
+
+  const stripeGeo = new THREE.BoxGeometry(0.62, 0.08, 3.15);
+  const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+  stripe.position.set(0, 3.85, 0);
+  group.add(stripe);
+
+  const cordOffsets: [number, number][] = [
+    [-1.4, -0.95],
+    [1.4, -0.95],
+    [-1.4, 0.95],
+    [1.4, 0.95],
+  ];
+  for (const [cx, cz] of cordOffsets) {
+    const cordGeo = new THREE.CylinderGeometry(0.015, 0.015, 2.45, 5);
+    const cord = new THREE.Mesh(cordGeo, cordMat);
+    cord.position.set(cx * 0.55, 1.8, cz * 0.55);
+    cord.rotation.z = -cx * 0.24;
+    cord.rotation.x = cz * 0.24;
+    group.add(cord);
+  }
+
+  group.visible = false;
+  return group;
+}
+
+export function applyCharacterRagdollPose(
+  rig: CharacterRigHandle,
+  angleX: number,
+  angleZ: number,
+  yOffset: number
+): void {
+  rig.group.rotation.x = angleX;
+  rig.group.rotation.z = angleZ;
+  rig.torsoGroup.position.y = yOffset;
+  rig.leftArm.rotation.x = -0.85;
+  rig.rightArm.rotation.x = -0.55;
+  rig.leftLeg.rotation.x = 0.35;
+  rig.rightLeg.rotation.x = -0.4;
 }

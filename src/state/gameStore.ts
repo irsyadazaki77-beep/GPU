@@ -1,9 +1,15 @@
 import { useSyncExternalStore } from 'react';
 import {
+  AcousticZoneId,
   ActiveStreetContractState,
   ActiveStreetRaceSession,
   ActiveTurfWarSession,
   ActiveQuestState,
+  CoopHeistSyncState,
+  ParachuteState,
+  RadioBroadcastMessage,
+  StealthStatusState,
+  buildDynamicRadioBroadcast,
   createActiveQuestState,
   stepQuestStageProgress,
   AudioChannelVolumes,
@@ -431,6 +437,17 @@ export interface GameStoreSnapshot {
     lastKoMs: number;
   } | null;
   nearMissBanner: { text: string; rewardRp: number; stamp: number } | null;
+  // Grand Plan 5.0 State
+  stealthStatus: StealthStatusState;
+  silentTakedownPrompt: boolean;
+  parachuteState: ParachuteState;
+  acousticZone: AcousticZoneId;
+  liveRadioBroadcast: RadioBroadcastMessage | null;
+  ridingPeerId: string | null;
+  nearbyPeerVehicleName: string | null;
+  nearbyMrtStationName: string | null;
+  ridingMrt: boolean;
+  coopHeistSync: CoopHeistSyncState;
 }
 
 export function buildInitialStateForStage(
@@ -620,6 +637,35 @@ let state: GameStoreSnapshot = {
   lastCoopEventToast: null,
   combatCombo: null,
   nearMissBanner: null,
+  stealthStatus: {
+    crouching: false,
+    inCover: false,
+    suppressedWeapon: false,
+    detectionRadiusMultiplier: 1,
+    silentTakedownReady: false,
+  },
+  silentTakedownPrompt: false,
+  parachuteState: {
+    deployed: false,
+    altitudeAboveGround: 0,
+    glideSpeed: 0,
+    descentRate: 0,
+    canDeploy: false,
+  },
+  acousticZone: 'open_street',
+  liveRadioBroadcast: null,
+  ridingPeerId: null,
+  nearbyPeerVehicleName: null,
+  nearbyMrtStationName: null,
+  ridingMrt: false,
+  coopHeistSync: {
+    heistId: null,
+    stageLabel: 'Siaga Co-Op Jakarta',
+    progressPct: 0,
+    sharedWantedLevel: 0,
+    crewRoles: {},
+    updatedAtMs: 0,
+  },
 };
 
 const listeners = new Set<() => void>();
@@ -749,13 +795,22 @@ export const gameStore = {
     );
     const nextSpec =
       RADIO_STATIONS[(currIdx + 1) % RADIO_STATIONS.length] || RADIO_STATIONS[0];
-    soundEngine.playPickup();
+    soundEngine.playRadioStaticBurst();
     if (nextSpec.id !== 'off') {
       soundEngine.playRadioBeat(nextSpec.id, 0);
     }
+    const broadcast = buildDynamicRadioBroadcast({
+      stationId: nextSpec.id,
+      wantedLevel: state.playerState.wantedLevel,
+      districtName: state.district.name,
+      weatherMode: state.weatherMode,
+      activeHeistId: state.activeHeistBreach?.heistId ?? null,
+      tickSeed: Math.floor(Date.now() / 1000),
+    });
     state = {
       ...state,
       lastOutcomeText: `Radio FM: ${nextSpec.name} (${nextSpec.freq})`,
+      liveRadioBroadcast: broadcast,
       playerState: {
         ...state.playerState,
         radioStation: nextSpec.id,
@@ -1966,6 +2021,8 @@ export const gameStore = {
       explosion: `Ledakan besar dipicu oleh ${evt.displayName}!`,
       wanted_alert: `${evt.displayName} memicu kejaran Polisi ★${evt.wantedLevel || 1}!`,
       passenger_ping: `${evt.displayName} mengajak mabar satu mobil/lokasi!`,
+      heist_sync: `${evt.displayName} memperbarui progres Co-Op Heist!`,
+      wanted_sync: `Siaga Co-Op: Level Buronan Kru ★${evt.wantedLevel || 1}!`,
     };
     state = {
       ...state,
@@ -2124,6 +2181,117 @@ export const gameStore = {
       activeMission: null,
       activeChoice: null,
       activeQuestState: null,
+    };
+    emitChange();
+  },
+
+  setStealthStatus: (next: Partial<StealthStatusState>, silentTakedownPrompt?: boolean) => {
+    const merged = { ...state.stealthStatus, ...next };
+    const nextPrompt =
+      silentTakedownPrompt !== undefined
+        ? silentTakedownPrompt
+        : state.silentTakedownPrompt;
+    if (
+      merged.crouching === state.stealthStatus.crouching &&
+      merged.inCover === state.stealthStatus.inCover &&
+      merged.suppressedWeapon === state.stealthStatus.suppressedWeapon &&
+      merged.detectionRadiusMultiplier === state.stealthStatus.detectionRadiusMultiplier &&
+      merged.silentTakedownReady === state.stealthStatus.silentTakedownReady &&
+      nextPrompt === state.silentTakedownPrompt
+    ) {
+      return;
+    }
+    state = {
+      ...state,
+      stealthStatus: merged,
+      silentTakedownPrompt: nextPrompt,
+    };
+    emitChange();
+  },
+
+  setParachuteState: (next: ParachuteState) => {
+    if (
+      next.deployed === state.parachuteState.deployed &&
+      next.canDeploy === state.parachuteState.canDeploy &&
+      Math.abs(next.altitudeAboveGround - state.parachuteState.altitudeAboveGround) < 0.8 &&
+      Math.abs(next.glideSpeed - state.parachuteState.glideSpeed) < 0.6
+    ) {
+      return;
+    }
+    state = { ...state, parachuteState: next };
+    emitChange();
+  },
+
+  setAcousticZone: (zone: AcousticZoneId) => {
+    if (state.acousticZone === zone) return;
+    state = { ...state, acousticZone: zone };
+    emitChange();
+  },
+
+  triggerLiveRadioBroadcast: (tickSeed: number = Math.floor(Date.now() / 1000)) => {
+    const station = state.playerState.radioStation;
+    if (station === 'off') {
+      if (state.liveRadioBroadcast) {
+        state = { ...state, liveRadioBroadcast: null };
+        emitChange();
+      }
+      return null;
+    }
+    const msg = buildDynamicRadioBroadcast({
+      stationId: station,
+      wantedLevel: state.playerState.wantedLevel,
+      districtName: state.district.name,
+      weatherMode: state.weatherMode,
+      activeHeistId: state.activeHeistBreach?.heistId ?? null,
+      lastOutcomeText: state.lastOutcomeText ?? undefined,
+      tickSeed,
+    });
+    state = { ...state, liveRadioBroadcast: msg };
+    emitChange();
+    return msg;
+  },
+
+  setCoopPassengerUi: (
+    ridingPeerId: string | null,
+    nearbyPeerVehicleName: string | null
+  ) => {
+    if (
+      state.ridingPeerId === ridingPeerId &&
+      state.nearbyPeerVehicleName === nearbyPeerVehicleName
+    ) {
+      return;
+    }
+    state = {
+      ...state,
+      ridingPeerId,
+      nearbyPeerVehicleName,
+    };
+    emitChange();
+  },
+
+  setMrtRideUi: (ridingMrt: boolean, nearbyMrtStationName: string | null) => {
+    if (
+      state.ridingMrt === ridingMrt &&
+      state.nearbyMrtStationName === nearbyMrtStationName
+    ) {
+      return;
+    }
+    state = {
+      ...state,
+      ridingMrt,
+      nearbyMrtStationName,
+    };
+    emitChange();
+  },
+
+  ingestCoopHeistSync: (patch: Partial<CoopHeistSyncState>) => {
+    state = {
+      ...state,
+      coopHeistSync: {
+        ...state.coopHeistSync,
+        ...patch,
+        updatedAtMs: Date.now(),
+      },
     };
     emitChange();
   },
