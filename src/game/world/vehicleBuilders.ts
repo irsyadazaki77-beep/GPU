@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import {
   VEHICLE_CUSTOM_PAINTS,
   VEHICLE_SPECS,
@@ -297,21 +298,21 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
     group.add(body);
 
     const winBand = new THREE.Mesh(
-      new THREE.BoxGeometry(1.8, 0.48, 3.15),
+      new RoundedBoxGeometry(1.8, 0.48, 3.15, 2, 0.05),
       glassMat
     );
     winBand.position.set(0, 1.32, 0.04);
     group.add(winBand);
 
     const roofRack = new THREE.Mesh(
-      new THREE.BoxGeometry(1.42, 0.12, 2.4),
+      new RoundedBoxGeometry(1.42, 0.12, 2.4, 2, 0.03),
       trimMat
     );
     roofRack.position.set(0, 1.78, -0.15);
     group.add(roofRack);
 
     const frontGrille = new THREE.Mesh(
-      new THREE.BoxGeometry(1.1, 0.28, 0.08),
+      new RoundedBoxGeometry(1.1, 0.28, 0.08, 2, 0.02),
       darkGrilleMat
     );
     frontGrille.position.set(0, 0.66, 1.88);
@@ -326,7 +327,7 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
     }
     for (const sx of [-0.62, 0.62]) {
       const hl = new THREE.Mesh(
-        new THREE.BoxGeometry(0.26, 0.16, 0.1),
+        new RoundedBoxGeometry(0.26, 0.16, 0.1, 2, 0.03),
         headlightMat
       );
       hl.position.set(sx, 0.68, 1.88);
@@ -364,21 +365,21 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
     group.add(canopy);
 
     const roofCap = new THREE.Mesh(
-      new THREE.BoxGeometry(1.36, 0.06, 0.92),
+      new RoundedBoxGeometry(1.36, 0.08, 0.92, 2, 0.03),
       bodyMat
     );
     roofCap.position.set(0, 1.17, -0.14);
     group.add(roofCap);
 
     const frontSplitter = new THREE.Mesh(
-      new THREE.BoxGeometry(1.98, 0.16, 0.14),
+      new RoundedBoxGeometry(1.98, 0.16, 0.14, 2, 0.03),
       darkGrilleMat
     );
     frontSplitter.position.set(0, 0.34, 2.26);
     group.add(frontSplitter);
 
     const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.42, 0.05, 3.8),
+      new RoundedBoxGeometry(0.42, 0.05, 3.8, 2, 0.015),
       trimMat
     );
     stripe.position.set(0, 0.84, 0.12);
@@ -386,14 +387,14 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
 
     for (const sx of [-0.68, 0.68]) {
       const strut = new THREE.Mesh(
-        new THREE.BoxGeometry(0.08, 0.36, 0.26),
+        new RoundedBoxGeometry(0.08, 0.36, 0.26, 2, 0.02),
         trimMat
       );
       strut.position.set(sx, 0.94, -1.96);
       group.add(strut);
     }
     const gtWing = new THREE.Mesh(
-      new THREE.BoxGeometry(2.1, 0.08, 0.42),
+      new RoundedBoxGeometry(2.1, 0.08, 0.42, 2, 0.03),
       trimMat
     );
     gtWing.position.set(0, 1.14, -2.04);
@@ -409,14 +410,14 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
 
     for (const sx of [-0.72, 0.72]) {
       const hl = new THREE.Mesh(
-        new THREE.BoxGeometry(0.44, 0.1, 0.12),
+        new RoundedBoxGeometry(0.44, 0.1, 0.12, 2, 0.03),
         headlightMat
       );
       hl.position.set(sx, 0.52, 2.26);
       group.add(hl);
     }
     const rearBar = new THREE.Mesh(
-      new THREE.BoxGeometry(1.9, 0.12, 0.1),
+      new RoundedBoxGeometry(1.9, 0.12, 0.1, 2, 0.03),
       taillightMat
     );
     rearBar.position.set(0, 0.62, -2.26);
@@ -507,7 +508,7 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
     group.add(cabin);
 
     const roofCap = new THREE.Mesh(
-      new THREE.BoxGeometry(1.44, 0.07, 1.12),
+      new RoundedBoxGeometry(1.44, 0.08, 1.12, 2, 0.03),
       bodyMat
     );
     roofCap.position.set(0, 1.45, -0.23);
@@ -515,14 +516,14 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
     group.add(roofCap);
 
     const frontGrille = new THREE.Mesh(
-      new THREE.BoxGeometry(0.92, 0.22, 0.08),
+      new RoundedBoxGeometry(0.92, 0.22, 0.08, 2, 0.025),
       darkGrilleMat
     );
     frontGrille.position.set(0, 0.58, 2.08);
     group.add(frontGrille);
 
     const lowerDam = new THREE.Mesh(
-      new THREE.BoxGeometry(1.56, 0.12, 0.08),
+      new RoundedBoxGeometry(1.56, 0.12, 0.08, 2, 0.02),
       darkGrilleMat
     );
     lowerDam.position.set(0, 0.36, 2.07);
@@ -530,7 +531,7 @@ export function buildIndonesianVehicleMesh(type: VehicleType): THREE.Group {
 
     for (const sx of [-0.94, 0.94]) {
       const mirror = new THREE.Mesh(
-        new THREE.BoxGeometry(0.18, 0.1, 0.14),
+        new RoundedBoxGeometry(0.18, 0.1, 0.14, 2, 0.03),
         bodyMat
       );
       mirror.position.set(sx, 1.04, 0.56);

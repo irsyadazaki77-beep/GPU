@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { EnemyBehaviorPolicy, WeaponId } from '../types';
 import { createContactShadowDisc } from './cityBuilders';
 
@@ -360,7 +361,7 @@ export function buildCharacterRig(
   const torsoGroup = new THREE.Group();
   group.add(torsoGroup);
 
-  const torsoGeo = new THREE.BoxGeometry(0.46, 0.62, 0.28);
+  const torsoGeo = new RoundedBoxGeometry(0.46, 0.62, 0.28, 3, 0.085);
   const bodyMesh = new THREE.Mesh(torsoGeo, jacketMat);
   bodyMesh.position.set(0, 1.11, 0);
   bodyMesh.castShadow = true;
@@ -386,21 +387,21 @@ export function buildCharacterRig(
   }
 
   const innerShirt = new THREE.Mesh(
-    new THREE.BoxGeometry(0.15, 0.54, 0.298),
+    new RoundedBoxGeometry(0.15, 0.54, 0.298, 2, 0.03),
     darkGearMat
   );
   innerShirt.position.set(0, 1.12, 0);
   torsoGroup.add(innerShirt);
 
   const belt = new THREE.Mesh(
-    new THREE.BoxGeometry(0.48, 0.085, 0.305),
+    new RoundedBoxGeometry(0.48, 0.085, 0.305, 2, 0.028),
     darkGearMat
   );
   belt.position.set(0, 0.79, 0);
   torsoGroup.add(belt);
 
   const buckle = new THREE.Mesh(
-    new THREE.BoxGeometry(0.095, 0.075, 0.315),
+    new RoundedBoxGeometry(0.095, 0.075, 0.315, 2, 0.02),
     accentMat
   );
   buckle.position.set(0, 0.79, 0);
@@ -409,7 +410,7 @@ export function buildCharacterRig(
   if (role === 'player' || role === 'crew') {
     // Sleek urban sling pack across back & chest strap
     const slingPack = new THREE.Mesh(
-      new THREE.BoxGeometry(0.32, 0.4, 0.12),
+      new RoundedBoxGeometry(0.32, 0.4, 0.12, 3, 0.04),
       darkGearMat
     );
     slingPack.position.set(0, 1.13, -0.18);
@@ -418,7 +419,7 @@ export function buildCharacterRig(
   }
 
   const backpack = new THREE.Mesh(
-    new THREE.BoxGeometry(0.32, 0.4, 0.13),
+    new RoundedBoxGeometry(0.32, 0.4, 0.13, 3, 0.045),
     darkGearMat
   );
   backpack.position.set(0, 1.14, -0.185);
@@ -426,7 +427,7 @@ export function buildCharacterRig(
 
   // Articulated neck + head group for idle look-around & expressive facial features
   const neck = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.072, 0.088, 0.16, 8),
+    new THREE.CylinderGeometry(0.072, 0.088, 0.16, 10),
     skinMat
   );
   neck.position.set(0, 1.52, 0);
@@ -436,7 +437,7 @@ export function buildCharacterRig(
   headGroup.position.set(0, 1.69, 0);
   torsoGroup.add(headGroup);
 
-  const headGeo = new THREE.SphereGeometry(0.188, 14, 12);
+  const headGeo = new THREE.SphereGeometry(0.188, 16, 14);
   headGeo.scale(0.92, 1.07, 0.96);
   const head = new THREE.Mesh(headGeo, skinMat);
   head.castShadow = true;
@@ -444,14 +445,14 @@ export function buildCharacterRig(
 
   // Subtle nose bridge & ears for recognizable human head silhouette
   const nose = new THREE.Mesh(
-    new THREE.BoxGeometry(0.036, 0.055, 0.05),
+    new THREE.CapsuleGeometry(0.016, 0.028, 4, 6),
     skinMat
   );
   nose.position.set(0, -0.01, 0.175);
   headGroup.add(nose);
 
   for (const ex of [-0.17, 0.17]) {
-    const ear = new THREE.Mesh(new THREE.SphereGeometry(0.038, 6, 6), skinMat);
+    const ear = new THREE.Mesh(new THREE.SphereGeometry(0.038, 8, 8), skinMat);
     ear.scale.set(0.6, 1.15, 0.85);
     ear.position.set(ex, 0.0, 0.01);
     headGroup.add(ear);
@@ -460,23 +461,25 @@ export function buildCharacterRig(
   // Facial details: eyes + brows + role-appropriate sunglasses / visor / tactical mask
   for (const ex of [-0.062, 0.062]) {
     const eyeW = new THREE.Mesh(
-      new THREE.BoxGeometry(0.044, 0.026, 0.02),
+      new THREE.SphereGeometry(0.022, 8, 6),
       eyeWhiteMat
     );
+    eyeW.scale.set(1.1, 0.72, 0.45);
     eyeW.position.set(ex, 0.03, 0.168);
     headGroup.add(eyeW);
 
     const pupil = new THREE.Mesh(
-      new THREE.BoxGeometry(0.022, 0.024, 0.024),
+      new THREE.SphereGeometry(0.012, 8, 6),
       pupilMat
     );
-    pupil.position.set(ex, 0.03, 0.173);
+    pupil.position.set(ex, 0.03, 0.176);
     headGroup.add(pupil);
 
     const brow = new THREE.Mesh(
-      new THREE.BoxGeometry(0.054, 0.014, 0.022),
+      new THREE.CapsuleGeometry(0.007, 0.038, 4, 6),
       darkGearMat
     );
+    brow.rotation.z = Math.PI / 2;
     brow.position.set(ex, 0.062, 0.17);
     headGroup.add(brow);
   }
@@ -484,15 +487,16 @@ export function buildCharacterRig(
   // Stylish Jakarta aviator shades / tactical visor for player, crew & enforcers
   if (role !== 'civilian') {
     const frameBridge = new THREE.Mesh(
-      new THREE.BoxGeometry(0.27, 0.018, 0.05),
+      new THREE.CylinderGeometry(0.008, 0.008, 0.26, 8),
       darkGearMat
     );
+    frameBridge.rotation.z = Math.PI / 2;
     frameBridge.position.set(0, 0.046, 0.168);
     headGroup.add(frameBridge);
 
     for (const gx of [-0.068, 0.068]) {
       const lens = new THREE.Mesh(
-        new THREE.BoxGeometry(0.095, 0.052, 0.032),
+        new RoundedBoxGeometry(0.095, 0.052, 0.032, 2, 0.012),
         visorLensMat
       );
       lens.position.set(gx, 0.028, 0.174);
@@ -503,7 +507,7 @@ export function buildCharacterRig(
   // Lower-face streetwear bandana/mask for crew & rushers
   if (role === 'rusher' || role === 'charger_enforcer') {
     const mask = new THREE.Mesh(
-      new THREE.BoxGeometry(0.22, 0.088, 0.12),
+      new RoundedBoxGeometry(0.22, 0.088, 0.12, 2, 0.035),
       darkGearMat
     );
     mask.position.set(0, -0.065, 0.125);
@@ -511,17 +515,17 @@ export function buildCharacterRig(
   }
 
   const hairBack = new THREE.Mesh(
-    new THREE.SphereGeometry(0.194, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.65),
+    new THREE.SphereGeometry(0.194, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.65),
     darkGearMat
   );
   hairBack.position.set(0, 0.015, -0.02);
   headGroup.add(hairBack);
 
-  // Cap + visor brim
+  // Cap + curved visor brim
   const capGeo = new THREE.SphereGeometry(
     0.2,
-    12,
-    8,
+    14,
+    10,
     0,
     Math.PI * 2,
     0,
@@ -532,10 +536,10 @@ export function buildCharacterRig(
   headGroup.add(cap);
 
   const brim = new THREE.Mesh(
-    new THREE.BoxGeometry(0.25, 0.028, 0.17),
+    new THREE.CylinderGeometry(0.16, 0.17, 0.024, 14, 1, false, -Math.PI * 0.42, Math.PI * 0.84),
     accentMat
   );
-  brim.position.set(0, 0.082, 0.145);
+  brim.position.set(0, 0.082, 0.12);
   brim.rotation.x = 0.14;
   headGroup.add(brim);
 

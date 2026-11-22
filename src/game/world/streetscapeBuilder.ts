@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { proceduralTextures } from '../../engine/ProceduralTextures';
 import type { Point2D } from '../../engine/visualOverhaulMath';
 import { ENTERABLE_INTERIORS } from '../heists';
@@ -52,7 +53,7 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   ) => {
     if (isNearBuilding(cx, cz, 1.8)) return;
     const slab = new THREE.Mesh(
-      new THREE.BoxGeometry(w, 0.14, d),
+      new RoundedBoxGeometry(w, 0.14, d, 2, 0.06),
       sidewalkMat
     );
     slab.position.set(cx, 0.07, cz);
@@ -265,7 +266,7 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     { x: -84, z: 104, w: 0.75, d: 22 },
     { x: 84, z: 104, w: 0.75, d: 22 },
   ];
-  const medianBoxGeo = new THREE.BoxGeometry(1, 1, 1);
+  const medianBoxGeo = new RoundedBoxGeometry(1, 1, 1, 3, 0.16);
   const medianCurbInst = new THREE.InstancedMesh(
     medianBoxGeo,
     planterCurbMat,

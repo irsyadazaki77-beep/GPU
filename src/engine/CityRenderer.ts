@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import {
   BuildingFootprint,
   CITY_BUILDINGS,
@@ -1454,7 +1455,8 @@ if (uWetness > 0.04) {
 
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
-    const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+    const boxGeo = new RoundedBoxGeometry(1, 1, 1, 3, 0.08);
+    const softSlabGeo = new RoundedBoxGeometry(1, 1, 1, 2, 0.05);
 
     if (plinthPlacements.length > 0) {
       const plinthMat = new THREE.MeshStandardMaterial({
@@ -1463,7 +1465,7 @@ if (uWetness > 0.04) {
         metalness: 0.04,
         envMapIntensity: 0.1,
       });
-      const plinthInst = new THREE.InstancedMesh(boxGeo, plinthMat, plinthPlacements.length);
+      const plinthInst = new THREE.InstancedMesh(softSlabGeo, plinthMat, plinthPlacements.length);
       plinthPlacements.forEach((p, i) => {
         dummy.position.set(p.x, 0.08, p.z);
         dummy.scale.set(p.w, 0.16, p.d);
@@ -1573,24 +1575,22 @@ if (uWetness > 0.04) {
       });
       this.buildingEmissiveMats.push(lobbyBandMat, crownTrimMat);
 
-      const cbdPodiumInst = new THREE.InstancedMesh(boxGeo, podiumMat, cbdPlacements.length);
-      const cbdLobbyInst = new THREE.InstancedMesh(boxGeo, lobbyBandMat, cbdPlacements.length);
-      const cbdLowerInst = new THREE.InstancedMesh(boxGeo, skyMat, cbdPlacements.length);
-      const cbdUpperInst = new THREE.InstancedMesh(boxGeo, skyMat, cbdPlacements.length);
-      const cbdCrownInst = new THREE.InstancedMesh(boxGeo, crownTrimMat, cbdPlacements.length);
-      const cbdHvacInst = new THREE.InstancedMesh(boxGeo, podiumMat, cbdPlacements.length);
-      const cbdFinInst = new THREE.InstancedMesh(boxGeo, crownTrimMat, cbdPlacements.length);
+      const cylTowerGeo = new THREE.CylinderGeometry(0.46, 0.52, 1, 16);
+      const cylRingGeo = new THREE.CylinderGeometry(0.49, 0.49, 1, 16);
+
+      const rectCbd = cbdPlacements.filter((_, idx) => idx % 3 !== 0);
+      const cylCbd = cbdPlacements.filter((_, idx) => idx % 3 === 0);
+
+      const cbdPodiumInst = new THREE.InstancedMesh(softSlabGeo, podiumMat, cbdPlacements.length);
+      const cbdLobbyInst = new THREE.InstancedMesh(softSlabGeo, lobbyBandMat, cbdPlacements.length);
       const cbdSpireInst = new THREE.InstancedMesh(
-        new THREE.CylinderGeometry(0.08, 0.2, 1, 6),
+        new THREE.CylinderGeometry(0.08, 0.2, 1, 8),
         podiumMat,
         cbdPlacements.length
       );
 
       cbdPlacements.forEach((b, i) => {
-        const lowerH = b.h * (1 - b.upperRatio * 0.65);
-        const upperH = Math.max(4, b.h - lowerH);
         const roofY = b.podiumH + b.h;
-
         dummy.rotation.set(0, 0, 0);
         dummy.position.set(b.x, b.podiumH * 0.5 + 0.14, b.z);
         dummy.scale.set(b.w + 1.4, b.podiumH, b.d + 1.4);
@@ -1602,66 +1602,106 @@ if (uWetness > 0.04) {
         dummy.updateMatrix();
         cbdLobbyInst.setMatrixAt(i, dummy.matrix);
 
-        dummy.position.set(b.x, b.podiumH + lowerH * 0.5, b.z);
-        dummy.scale.set(b.w, lowerH, b.d);
-        dummy.updateMatrix();
-        cbdLowerInst.setMatrixAt(i, dummy.matrix);
-        color.setHex(b.color);
-        cbdLowerInst.setColorAt(i, color);
-
-        dummy.position.set(b.x, b.podiumH + lowerH + upperH * 0.5, b.z);
-        dummy.scale.set(b.w * 0.76, upperH, b.d * 0.76);
-        dummy.updateMatrix();
-        cbdUpperInst.setMatrixAt(i, dummy.matrix);
-        cbdUpperInst.setColorAt(i, color);
-
-        dummy.position.set(b.x, roofY + 0.35, b.z);
-        dummy.scale.set(b.w * 0.78, 0.55, b.d * 0.78);
-        dummy.updateMatrix();
-        cbdCrownInst.setMatrixAt(i, dummy.matrix);
-        color.setHex(b.accent);
-        cbdCrownInst.setColorAt(i, color);
-
-        dummy.position.set(b.x, roofY + 1.05, b.z);
-        dummy.scale.set(b.w * 0.38, 1.15, b.d * 0.38);
-        dummy.updateMatrix();
-        cbdHvacInst.setMatrixAt(i, dummy.matrix);
-
-        dummy.position.set(b.x, b.podiumH + b.h * 0.5, b.z);
-        dummy.scale.set(b.w * 1.02, b.h * 0.92, 0.28);
-        dummy.updateMatrix();
-        cbdFinInst.setMatrixAt(i, dummy.matrix);
-        cbdFinInst.setColorAt(i, color);
-
         dummy.position.set(b.x, roofY + 2.8, b.z);
         dummy.scale.set(1, 4.6, 1);
         dummy.updateMatrix();
         cbdSpireInst.setMatrixAt(i, dummy.matrix);
       });
-
-      [
-        cbdPodiumInst,
-        cbdLobbyInst,
-        cbdLowerInst,
-        cbdUpperInst,
-        cbdCrownInst,
-        cbdHvacInst,
-        cbdFinInst,
-        cbdSpireInst,
-      ].forEach((inst) => {
+      [cbdPodiumInst, cbdLobbyInst, cbdSpireInst].forEach((inst) => {
         inst.instanceMatrix.needsUpdate = true;
-        if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
       });
-      group.add(
-        cbdPodiumInst,
-        cbdLobbyInst,
-        cbdLowerInst,
-        cbdUpperInst,
-        cbdCrownInst,
-        cbdHvacInst,
-        cbdFinInst,
-        cbdSpireInst
-      );
+      group.add(cbdPodiumInst, cbdLobbyInst, cbdSpireInst);
+
+      if (rectCbd.length > 0) {
+        const cbdLowerInst = new THREE.InstancedMesh(boxGeo, skyMat, rectCbd.length);
+        const cbdUpperInst = new THREE.InstancedMesh(boxGeo, skyMat, rectCbd.length);
+        const cbdCrownInst = new THREE.InstancedMesh(boxGeo, crownTrimMat, rectCbd.length);
+        const cbdHvacInst = new THREE.InstancedMesh(boxGeo, podiumMat, rectCbd.length);
+        const cbdFinInst = new THREE.InstancedMesh(boxGeo, crownTrimMat, rectCbd.length);
+
+        rectCbd.forEach((b, i) => {
+          const lowerH = b.h * (1 - b.upperRatio * 0.65);
+          const upperH = Math.max(4, b.h - lowerH);
+          const roofY = b.podiumH + b.h;
+
+          dummy.rotation.set(0, 0, 0);
+          dummy.position.set(b.x, b.podiumH + lowerH * 0.5, b.z);
+          dummy.scale.set(b.w, lowerH, b.d);
+          dummy.updateMatrix();
+          cbdLowerInst.setMatrixAt(i, dummy.matrix);
+          color.setHex(b.color);
+          cbdLowerInst.setColorAt(i, color);
+
+          dummy.position.set(b.x, b.podiumH + lowerH + upperH * 0.5, b.z);
+          dummy.scale.set(b.w * 0.76, upperH, b.d * 0.76);
+          dummy.updateMatrix();
+          cbdUpperInst.setMatrixAt(i, dummy.matrix);
+          cbdUpperInst.setColorAt(i, color);
+
+          dummy.position.set(b.x, roofY + 0.35, b.z);
+          dummy.scale.set(b.w * 0.78, 0.55, b.d * 0.78);
+          dummy.updateMatrix();
+          cbdCrownInst.setMatrixAt(i, dummy.matrix);
+          color.setHex(b.accent);
+          cbdCrownInst.setColorAt(i, color);
+
+          dummy.position.set(b.x, roofY + 1.05, b.z);
+          dummy.scale.set(b.w * 0.38, 1.15, b.d * 0.38);
+          dummy.updateMatrix();
+          cbdHvacInst.setMatrixAt(i, dummy.matrix);
+
+          dummy.position.set(b.x, b.podiumH + b.h * 0.5, b.z);
+          dummy.scale.set(b.w * 1.02, b.h * 0.92, 0.28);
+          dummy.updateMatrix();
+          cbdFinInst.setMatrixAt(i, dummy.matrix);
+          cbdFinInst.setColorAt(i, color);
+        });
+
+        [cbdLowerInst, cbdUpperInst, cbdCrownInst, cbdHvacInst, cbdFinInst].forEach((inst) => {
+          inst.instanceMatrix.needsUpdate = true;
+          if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+        });
+        group.add(cbdLowerInst, cbdUpperInst, cbdCrownInst, cbdHvacInst, cbdFinInst);
+      }
+
+      if (cylCbd.length > 0) {
+        const cylLowerInst = new THREE.InstancedMesh(cylTowerGeo, skyMat, cylCbd.length);
+        const cylUpperInst = new THREE.InstancedMesh(cylTowerGeo, skyMat, cylCbd.length);
+        const cylCrownInst = new THREE.InstancedMesh(cylRingGeo, crownTrimMat, cylCbd.length);
+
+        cylCbd.forEach((b, i) => {
+          const lowerH = b.h * (1 - b.upperRatio * 0.55);
+          const upperH = Math.max(4, b.h - lowerH);
+          const roofY = b.podiumH + b.h;
+
+          dummy.rotation.set(0, 0, 0);
+          dummy.position.set(b.x, b.podiumH + lowerH * 0.5, b.z);
+          dummy.scale.set(b.w, lowerH, b.d);
+          dummy.updateMatrix();
+          cylLowerInst.setMatrixAt(i, dummy.matrix);
+          color.setHex(b.color);
+          cylLowerInst.setColorAt(i, color);
+
+          dummy.position.set(b.x, b.podiumH + lowerH + upperH * 0.5, b.z);
+          dummy.scale.set(b.w * 0.78, upperH, b.d * 0.78);
+          dummy.updateMatrix();
+          cylUpperInst.setMatrixAt(i, dummy.matrix);
+          cylUpperInst.setColorAt(i, color);
+
+          dummy.position.set(b.x, roofY + 0.35, b.z);
+          dummy.scale.set(b.w * 0.8, 0.55, b.d * 0.8);
+          dummy.updateMatrix();
+          cylCrownInst.setMatrixAt(i, dummy.matrix);
+          color.setHex(b.accent);
+          cylCrownInst.setColorAt(i, color);
+        });
+
+        [cylLowerInst, cylUpperInst, cylCrownInst].forEach((inst) => {
+          inst.instanceMatrix.needsUpdate = true;
+          if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+        });
+        group.add(cylLowerInst, cylUpperInst, cylCrownInst);
+      }
     }
 
     // 2. Jakarta Multi-Bay Ruko & Heritage Shophouses (Step Massing + Shopfront Awning + Pitched Clay Roof + Toren Water Tanks)
@@ -1797,11 +1837,14 @@ if (uWetness > 0.04) {
       });
 
       const indBodyInst = new THREE.InstancedMesh(boxGeo, indMat, indPlacements.length);
+      const vaultRoofGeo = new THREE.CylinderGeometry(0.48, 0.48, 1, 14, 1, false, 0, Math.PI);
+      vaultRoofGeo.rotateZ(Math.PI / 2);
+      const indVaultInst = new THREE.InstancedMesh(vaultRoofGeo, siloMat, indPlacements.length);
       const siloList = indPlacements.filter((p) => p.hasSilo);
       const siloInst =
         siloList.length > 0
           ? new THREE.InstancedMesh(
-              new THREE.CylinderGeometry(1.4, 1.4, 1, 12),
+              new THREE.CylinderGeometry(1.4, 1.4, 1, 14),
               siloMat,
               siloList.length
             )
@@ -1817,6 +1860,11 @@ if (uWetness > 0.04) {
         color.setHex(p.color);
         indBodyInst.setColorAt(i, color);
 
+        dummy.position.set(p.x, p.h + 0.14, p.z);
+        dummy.scale.set(p.w * 0.96, p.d * 0.34, p.d * 0.96);
+        dummy.updateMatrix();
+        indVaultInst.setMatrixAt(i, dummy.matrix);
+
         if (p.hasSilo && siloInst) {
           dummy.position.set(p.x + p.w * 0.34, p.h * 0.65, p.z - p.d * 0.24);
           dummy.scale.set(1, p.h * 1.15, 1);
@@ -1825,8 +1873,9 @@ if (uWetness > 0.04) {
         }
       });
       indBodyInst.instanceMatrix.needsUpdate = true;
+      indVaultInst.instanceMatrix.needsUpdate = true;
       if (indBodyInst.instanceColor) indBodyInst.instanceColor.needsUpdate = true;
-      group.add(indBodyInst);
+      group.add(indBodyInst, indVaultInst);
       if (siloInst) {
         siloInst.instanceMatrix.needsUpdate = true;
         group.add(siloInst);
@@ -1834,7 +1883,7 @@ if (uWetness > 0.04) {
     }
 
     if (treePlacements.length > 0) {
-      const trunkGeo = new THREE.CylinderGeometry(0.16, 0.3, 1, 6);
+      const trunkGeo = new THREE.CylinderGeometry(0.16, 0.3, 1, 10);
       const trunkMat = new THREE.MeshStandardMaterial({
         color: 0x4a3728,
         roughness: 0.94,
@@ -1846,13 +1895,18 @@ if (uWetness > 0.04) {
         treePlacements.length
       );
 
-      const canopyGeo = new THREE.IcosahedronGeometry(1, 1);
+      const canopyGeo = new THREE.IcosahedronGeometry(1, 2);
       const canopyMat = new THREE.MeshStandardMaterial({
         color: 0xffffff,
         roughness: 0.88,
         metalness: 0.04,
       });
       const canopyInst = new THREE.InstancedMesh(
+        canopyGeo,
+        canopyMat,
+        treePlacements.length
+      );
+      const canopySubInst = new THREE.InstancedMesh(
         canopyGeo,
         canopyMat,
         treePlacements.length
@@ -1872,11 +1926,24 @@ if (uWetness > 0.04) {
         canopyInst.setMatrixAt(i, dummy.matrix);
         color.setHex(t.color);
         canopyInst.setColorAt(i, color);
+
+        const lobeAng = (i * 1.9) % (Math.PI * 2);
+        dummy.position.set(
+          t.x + Math.cos(lobeAng) * t.crownR * 0.38,
+          t.trunkH + t.crownR * 0.62 + 0.16,
+          t.z + Math.sin(lobeAng) * t.crownR * 0.38
+        );
+        dummy.scale.set(t.crownR * 0.68, t.crownR * 0.54, t.crownR * 0.68);
+        dummy.updateMatrix();
+        canopySubInst.setMatrixAt(i, dummy.matrix);
+        canopySubInst.setColorAt(i, color);
       });
       trunkInst.instanceMatrix.needsUpdate = true;
       canopyInst.instanceMatrix.needsUpdate = true;
+      canopySubInst.instanceMatrix.needsUpdate = true;
       if (canopyInst.instanceColor) canopyInst.instanceColor.needsUpdate = true;
-      group.add(trunkInst, canopyInst);
+      if (canopySubInst.instanceColor) canopySubInst.instanceColor.needsUpdate = true;
+      group.add(trunkInst, canopyInst, canopySubInst);
     }
 
     return { group, colliders };
