@@ -75,9 +75,9 @@ describe('Wave 2 Perfection Upgrade — Domain Systems', () => {
 
   it('evaluates 6 handcrafted Jakarta stunt ramps launch contact and scores air-time jumps', () => {
     assert.equal(STUNT_RAMPS_CATALOG.length, 6);
-    const ramp = STUNT_RAMPS_CATALOG[0]; // heading PI (-Z)
-    const tipZ = ramp.z - ramp.length * 0.4;
-    const contact = evaluateStuntRampContact(ramp.x, tipZ, 20, Math.PI);
+    const ramp = STUNT_RAMPS_CATALOG[0]; // heading 0 (+Z)
+    const tipZ = ramp.z + ramp.length * 0.4;
+    const contact = evaluateStuntRampContact(ramp.x, tipZ, 20, 0);
     assert.equal(contact.onRamp, true);
     assert.equal(contact.launchReady, true);
     assert.ok(contact.surfaceHeight > 2.0);

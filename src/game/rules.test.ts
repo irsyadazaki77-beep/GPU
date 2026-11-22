@@ -104,31 +104,31 @@ test('resolveDistrictAtPosition identifies all 13 Jakarta districts including PI
   const monas = resolveDistrictAtPosition(2, -3);
   assert.equal(monas.id, 'monas');
 
-  const sudirman = resolveDistrictAtPosition(0, -55);
+  const sudirman = resolveDistrictAtPosition(0, 55);
   assert.equal(sudirman.id, 'sudirman');
 
-  const priok = resolveDistrictAtPosition(60, -56);
+  const priok = resolveDistrictAtPosition(58, -52);
   assert.equal(priok.id, 'tanjung_priok');
 
-  const scbd = resolveDistrictAtPosition(-60, -55);
+  const scbd = resolveDistrictAtPosition(58, 56);
   assert.equal(scbd.id, 'scbd');
 
-  const ancol = resolveDistrictAtPosition(-60, 56);
+  const ancol = resolveDistrictAtPosition(-58, -52);
   assert.equal(ancol.id, 'ancol_pik');
 
-  const halim = resolveDistrictAtPosition(60, 56);
+  const halim = resolveDistrictAtPosition(58, 104);
   assert.equal(halim.id, 'halim_station');
 
-  const gbk = resolveDistrictAtPosition(-63, 35);
+  const gbk = resolveDistrictAtPosition(-58, 56);
   assert.equal(gbk.id, 'senayan_gbk');
 
-  const kemayoran = resolveDistrictAtPosition(63, -35);
+  const kemayoran = resolveDistrictAtPosition(58, -18);
   assert.equal(kemayoran.id, 'kemayoran');
 
-  const pik2 = resolveDistrictAtPosition(-75, -18);
+  const pik2 = resolveDistrictAtPosition(-106, -50);
   assert.equal(pik2.id, 'pik2_mangrove');
 
-  const tmii = resolveDistrictAtPosition(48, 73);
+  const tmii = resolveDistrictAtPosition(58, 166);
   assert.equal(tmii.id, 'tmii_ragunan');
 });
 

@@ -344,36 +344,39 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
       ctx.lineTo(originX + 216 * scale, originY);
       ctx.stroke();
 
-      ctx.strokeStyle = 'rgba(51, 65, 85, 0.78)';
-      ctx.lineWidth = Math.max(3.5, 5.5 * zoom);
+      ctx.strokeStyle = 'rgba(51, 65, 85, 0.82)';
+      ctx.lineWidth = Math.max(3.2, 5.2 * zoom);
       ctx.beginPath();
-      // Outer Ring x = +-128 over z [-68..214] & z = 128 across [-214..214]
-      ctx.moveTo(originX - 128 * scale, originY - 68 * scale);
-      ctx.lineTo(originX - 128 * scale, originY + 214 * scale);
-      ctx.moveTo(originX + 128 * scale, originY - 68 * scale);
-      ctx.lineTo(originX + 128 * scale, originY + 214 * scale);
-      ctx.moveTo(originX - 214 * scale, originY + 128 * scale);
-      ctx.lineTo(originX + 214 * scale, originY + 128 * scale);
-      // JORR Perimeter x = +-208 over z [-71..215] & z = 208 across [-215..215]
+      for (const rx of [-128, -84, 84, 128]) {
+        ctx.moveTo(originX + rx * scale, originY - 70 * scale);
+        ctx.lineTo(originX + rx * scale, originY + 214 * scale);
+      }
+      for (const rz of [-66, 80, 128]) {
+        ctx.moveTo(originX - 214 * scale, originY + rz * scale);
+        ctx.lineTo(originX + 214 * scale, originY + rz * scale);
+      }
+      // JORR Perimeter x = +-208 & z = 208
       ctx.moveTo(originX - 208 * scale, originY - 71 * scale);
       ctx.lineTo(originX - 208 * scale, originY + 215 * scale);
       ctx.moveTo(originX + 208 * scale, originY - 71 * scale);
       ctx.lineTo(originX + 208 * scale, originY + 215 * scale);
       ctx.moveTo(originX - 215 * scale, originY + 208 * scale);
       ctx.lineTo(originX + 215 * scale, originY + 208 * scale);
-      // Northern coastal wings z = -66 across [-214..-122] and [122..214]
-      ctx.moveTo(originX - 214 * scale, originY - 66 * scale);
-      ctx.lineTo(originX - 122 * scale, originY - 66 * scale);
-      ctx.moveTo(originX + 122 * scale, originY - 66 * scale);
-      ctx.lineTo(originX + 214 * scale, originY - 66 * scale);
       ctx.stroke();
 
-      // Elevated Toll Road (Tol Layang)
-      ctx.strokeStyle = 'rgba(245, 158, 11, 0.55)';
+      // Bundaran HI Roundabout at (0, +32)
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = Math.max(4, 6 * zoom);
+      ctx.beginPath();
+      ctx.arc(originX, originY + 32 * scale, 8.5 * scale, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Elevated Toll Road (Tol Layang Simpang Semanggi z = +80)
+      ctx.strokeStyle = 'rgba(245, 158, 11, 0.65)';
       ctx.lineWidth = Math.max(2.5, 3.2 * zoom);
       ctx.beginPath();
-      ctx.moveTo(originX - 90 * scale, originY + 24 * scale);
-      ctx.lineTo(originX + 90 * scale, originY + 24 * scale);
+      ctx.moveTo(originX - 68 * scale, originY + 80 * scale);
+      ctx.lineTo(originX + 68 * scale, originY + 80 * scale);
       ctx.stroke();
 
       // Monas Central Plaza

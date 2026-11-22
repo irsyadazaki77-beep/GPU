@@ -336,9 +336,9 @@ export class JakartaPhysicsWorld {
         .setRestitution(0.1);
       this.world.createCollider(groundDesc);
 
-      // Semanggi Elevated Tollway deck & approach ramp colliders
+      // Semanggi-Gatot Subroto Elevated Tollway deck & approach ramp colliders (z = +80)
       const deckBody = this.world.createRigidBody(
-        RAPIER.RigidBodyDesc.fixed().setTranslation(0, 5.9, -26)
+        RAPIER.RigidBodyDesc.fixed().setTranslation(0, 5.9, 80)
       );
       this.world.createCollider(
         RAPIER.ColliderDesc.cuboid(42, 0.3, 4.5).setFriction(0.8),

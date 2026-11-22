@@ -90,10 +90,11 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   };
 
   const nsSidewalkSegments: [number, number][] = [
-    [-86, -42],
-    [-19, -8],
-    [19, 25],
-    [40, 86],
+    [-60, -38],
+    [-26, -19],
+    [19, 23],
+    [43, 74],
+    [86, 121],
   ];
   for (const [zStart, zEnd] of nsSidewalkSegments) {
     const len = zEnd - zStart;
@@ -103,10 +104,10 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   }
 
   const ewSidewalkSegments: [number, number][] = [
-    [-82, -40],
-    [-25, -20],
-    [20, 25],
-    [40, 82],
+    [-78, -38],
+    [-26, -20],
+    [20, 26],
+    [38, 78],
   ];
   for (const [xStart, xEnd] of ewSidewalkSegments) {
     const len = xEnd - xStart;
@@ -117,10 +118,11 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
 
   for (const rx of [-32, 32]) {
     for (const [zStart, zEnd] of [
-      [-74, -40],
-      [-18, -9],
-      [9, 24],
-      [40, 74],
+      [-60, -38],
+      [-26, -8],
+      [8, 25],
+      [39, 73],
+      [86, 121],
     ] as [number, number][]) {
       const len = zEnd - zStart;
       const zMid = (zStart + zEnd) * 0.5;
@@ -130,12 +132,11 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   }
   for (const rz of [-32, 32]) {
     for (const [xStart, xEnd] of [
-      [-74, -40],
-      [-24, -10],
-      [10, 24],
-      [40, 74],
+      [-78, -38],
+      [-25, -12],
+      [12, 25],
+      [38, 78],
     ] as [number, number][]) {
-      if (rz === -32 && Math.abs(xStart) < 70 && Math.abs(xEnd) < 70) continue;
       const len = xEnd - xStart;
       const xMid = (xStart + xEnd) * 0.5;
       addSidewalkSlab(xMid, rz - 6.6, len, 3.0, 'bottom');
@@ -604,10 +605,10 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
     new THREE.BoxGeometry(2.6, 0.55, 168),
     mrtConcreteMat
   );
-  mrtViaductBeam.position.set(mrtTrackX, mrtDeckY, 0);
+  mrtViaductBeam.position.set(mrtTrackX, mrtDeckY, 54);
   group.add(mrtViaductBeam);
 
-  for (const zPillar of [-74, -52, -36, 36, 54, 74]) {
+  for (const zPillar of [-16, 14, 44, 68, 92, 118]) {
     if (isNearBuilding(mrtTrackX, zPillar, 1.6)) continue;
     const mPillar = new THREE.Mesh(
       new THREE.CylinderGeometry(0.45, 0.55, mrtDeckY, 8),
@@ -618,7 +619,7 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   }
 
   const mrtTrainGroup = new THREE.Group();
-  mrtTrainGroup.position.set(mrtTrackX, mrtDeckY + 0.35, -60);
+  mrtTrainGroup.position.set(mrtTrackX, mrtDeckY + 0.35, 54);
   for (const carOffsetZ of [-6.8, 0, 6.8]) {
     const carShell = new THREE.Mesh(
       new THREE.BoxGeometry(2.15, 2.25, 6.2),
@@ -644,14 +645,14 @@ export function buildJakartaStreetscape(maxAnisotropy: number): {
   }
   group.add(mrtTrainGroup);
 
-  // Elevated MRT Station Boarding Beacons (Dukuh Atas z=-68 & Blok M z=68)
+  // Elevated MRT Station Boarding Beacons (Dukuh Atas z=48 & Blok M z=108)
   const stationRingMat = new THREE.MeshBasicMaterial({
     color: 0x38bdf8,
     transparent: true,
     opacity: 0.72,
     side: THREE.DoubleSide,
   });
-  for (const stZ of [-68, 68]) {
+  for (const stZ of [48, 108]) {
     const stationRing = new THREE.Mesh(
       new THREE.RingGeometry(1.4, 2.05, 24),
       stationRingMat
@@ -729,12 +730,12 @@ export function buildElevatedHighwayMesh(
 
   const deckGeo = new THREE.BoxGeometry(84, 0.5, 9.0);
   const deckMesh = new THREE.Mesh(deckGeo, roadMat);
-  deckMesh.position.set(0, 6.2 - 0.25, -26);
+  deckMesh.position.set(0, 6.2 - 0.25, 80);
   deckMesh.receiveShadow = true;
   deckMesh.castShadow = true;
   group.add(deckMesh);
 
-  for (const sz of [-30.35, -21.65]) {
+  for (const sz of [75.65, 84.35]) {
     const parapet = new THREE.Mesh(
       new THREE.BoxGeometry(84, 0.7, 0.38),
       concreteMat
@@ -754,12 +755,12 @@ export function buildElevatedHighwayMesh(
   const capGeo = new THREE.BoxGeometry(2.2, 0.65, 7.6);
   for (const px of [-36, -20, -8, 8, 20, 36]) {
     const pillar = new THREE.Mesh(pillarGeo, concreteMat);
-    pillar.position.set(px, 2.8, -26);
+    pillar.position.set(px, 2.8, 80);
     pillar.castShadow = true;
     group.add(pillar);
 
     const cap = new THREE.Mesh(capGeo, concreteMat);
-    cap.position.set(px, 5.7, -26);
+    cap.position.set(px, 5.7, 80);
     group.add(cap);
   }
 
@@ -772,7 +773,7 @@ export function buildElevatedHighwayMesh(
     new THREE.BoxGeometry(rampLen, 0.45, 8.8),
     roadMat
   );
-  westRamp.position.set(-55, rampRise / 2 - 0.2, -26);
+  westRamp.position.set(-55, rampRise / 2 - 0.2, 80);
   westRamp.rotation.z = rampAngle;
   westRamp.receiveShadow = true;
   group.add(westRamp);
@@ -781,7 +782,7 @@ export function buildElevatedHighwayMesh(
     new THREE.BoxGeometry(rampLen, 0.45, 8.8),
     roadMat
   );
-  eastRamp.position.set(55, rampRise / 2 - 0.2, -26);
+  eastRamp.position.set(55, rampRise / 2 - 0.2, 80);
   eastRamp.rotation.z = -rampAngle;
   eastRamp.receiveShadow = true;
   group.add(eastRamp);
@@ -790,12 +791,12 @@ export function buildElevatedHighwayMesh(
     new THREE.BoxGeometry(1.4, 1.05, 9.8),
     concreteMat
   );
-  archBeam.position.set(0, 10.6, -26);
+  archBeam.position.set(0, 10.6, 80);
   group.add(archBeam);
 
   const etollTex = createGantrySignTexture(
-    'GERBANG TOL DALAM KOTA',
-    'e-TOLL  ·  OTOMATIS'
+    'GERBANG TOL SEMANGGI',
+    'e-TOLL  ·  SIMPANG SUSUN'
   );
   const etollPanel = new THREE.Mesh(
     new THREE.BoxGeometry(0.18, 0.9, 6.2),
@@ -806,10 +807,10 @@ export function buildElevatedHighwayMesh(
     })
   );
   etollPanel.rotation.y = Math.PI / 2;
-  etollPanel.position.set(0.75, 10.6, -26);
+  etollPanel.position.set(0.75, 10.6, 80);
   group.add(etollPanel);
 
-  for (const sz of [-30.4, -21.6]) {
+  for (const sz of [75.6, 84.4]) {
     const post = new THREE.Mesh(
       new THREE.BoxGeometry(0.45, 4.5, 0.45),
       concreteMat

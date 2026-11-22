@@ -227,5 +227,5 @@ test('Grand Plan 5.0: Co-Op passenger seat offset, shared heist sync, and rideab
 
   const mrt = computeMrtTrainState(0);
   assert.equal(mrt.x, -13.6);
-  assert.ok(isPlayerNearMrtStation(-13.6, -68, 6.5));
+  assert.ok(isPlayerNearMrtStation(-13.6, 48, 6.5));
 });

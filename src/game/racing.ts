@@ -244,34 +244,34 @@ export const STREET_RACES: StreetRaceSpec[] = [
   {
     id: 'race_tol_layang',
     name: 'GP Malam Tol Layang Semanggi',
-    subtitle: 'Lintasan Atas Jalan Tol Layang & Tanjakan Kemayoran (4 Checkpoint)',
+    subtitle: 'Lintasan Atas Tol Layang Semanggi & SCBD Selatan (4 Checkpoint)',
     entryFeeRp: 50000,
     rewardRp: 650000,
     checkpoints: [
-      [-45, -26],
-      [0, -26],
-      [45, -26],
-      [0, 18],
+      [-45, 80],
+      [0, 80],
+      [45, 80],
+      [0, 32],
     ],
   },
   {
     id: 'race_sudirman_sprint',
-    name: 'Sprint Neon Sudirman – Monas',
-    subtitle: 'Adu Kecepatan Tinggi Mengitari Tugu Monas & Bundaran HI (5 Checkpoint)',
+    name: 'Sprint Neon Sudirman – Bundaran HI',
+    subtitle: 'Adu Kecepatan Mengitari Monas, Bundaran HI & Koridor Sudirman (5 Checkpoint)',
     entryFeeRp: 100000,
     rewardRp: 1200000,
     checkpoints: [
-      [0, -32],
-      [0, -64],
+      [0, 32],
+      [0, 64],
+      [32, 32],
       [32, -32],
-      [32, 24],
-      [0, 24],
+      [0, -32],
     ],
   },
   {
     id: 'race_drift_sabuk_tol',
     name: 'Turnamen Drift Malam Sabuk Tol & Semanggi',
-    subtitle: 'Uji Sudut Drift Tajam Mengelilingi Cincin Monas, SCBD & Kemayoran (6 Checkpoint)',
+    subtitle: 'Uji Sudut Drift Tajam Mengelilingi Cincin Monas, SCBD & Kota Tua (6 Checkpoint)',
     entryFeeRp: 75000,
     rewardRp: 950000,
     checkpoints: [
@@ -279,7 +279,7 @@ export const STREET_RACES: StreetRaceSpec[] = [
       [32, -32],
       [32, 32],
       [-32, 32],
-      [-32, -26],
+      [32, 80],
       [0, 24],
     ],
   },
@@ -374,11 +374,14 @@ export function isOnMainRoadwayFootprint(
   z: number,
   pad: number = 0.1
 ): boolean {
-  if (Math.abs(x) < 7.0 + pad && Math.abs(z) < 96) return true;
-  if (Math.abs(z) < 7.0 + pad && Math.abs(x) < 96) return true;
-  if (Math.abs(Math.abs(x) - 32) < 5.0 + pad && Math.abs(z) < 82) return true;
-  if (Math.abs(Math.abs(z) - 32) < 5.0 + pad && Math.abs(x) < 82) return true;
-  if (z >= -30.6 - pad && z <= -21.4 + pad && Math.abs(x) <= 68.5 + pad) {
+  if (Math.abs(x) < 7.0 + pad && Math.abs(z) < 126) return true;
+  if (Math.abs(z) < 7.0 + pad && Math.abs(x) < 126) return true;
+  if (Math.abs(Math.abs(x) - 32) < 5.0 + pad && Math.abs(z) < 126) return true;
+  if (Math.abs(Math.abs(z) - 32) < 5.0 + pad && Math.abs(x) < 126) return true;
+  if (Math.abs(Math.abs(x) - 84) < 5.0 + pad && Math.abs(z) < 126) return true;
+  if (Math.abs(z + 66) < 5.0 + pad && Math.abs(x) < 126) return true;
+  if (Math.hypot(x, z - 32) < 12.2 + pad) return true;
+  if (z >= 75.4 - pad && z <= 84.6 + pad && Math.abs(x) <= 68.5 + pad) {
     return true;
   }
   return false;
@@ -391,11 +394,11 @@ export function isRoadsideSpotClear(
   halfZ: number,
   occupied: { x: number; z: number; hx: number; hz: number }[]
 ): boolean {
-  if (Math.abs(x) + halfX > 88 || Math.abs(z) + halfZ > 88) return false;
+  if (Math.abs(x) + halfX > 122 || Math.abs(z) + halfZ > 122) return false;
   const roadPad = Math.min(halfX, halfZ) * 0.25;
   if (isOnMainRoadwayFootprint(x, z, roadPad)) return false;
   if (x * x + z * z < 19.6 * 19.6) return false;
-  if (Math.abs(x) < 11.8 && z >= 18.0 && z <= 29.0) return false;
+  if (Math.hypot(x, z - 32) < 13.5) return false;
 
   for (const b of CITY_BUILDINGS) {
     const hw = b.width * 0.5 + halfX + 0.8;
@@ -424,13 +427,13 @@ export function generateRoadsideSpawnLayout(
   const transJakartaHaltes: TransJakartaHalteSpawn[] = [];
 
   const halteCandidates: Omit<TransJakartaHalteSpawn, 'y'>[] = [
-    { id: 'halte_bundaran_hi', stationName: 'HALTE BUNDARAN HI', corridorCode: 'K1', routeSummary: 'BLOK M  <->  KOTA', x: -9.65, z: -67, rotY: 0 },
-    { id: 'halte_dukuh_atas', stationName: 'HALTE DUKUH ATAS', corridorCode: 'K1', routeSummary: 'MONAS  <->  SENAYAN', x: 9.65, z: -58, rotY: Math.PI },
-    { id: 'halte_blok_m', stationName: 'HALTE BLOK M', corridorCode: 'K1', routeSummary: 'BLOK M  <->  HARMONI', x: -9.65, z: 59, rotY: 0 },
-    { id: 'halte_karet_sudirman', stationName: 'HALTE KARET SUDIRMAN', corridorCode: 'K1', routeSummary: 'SUDIRMAN  <->  MELAWAI', x: 9.65, z: 68, rotY: Math.PI },
-    { id: 'halte_tanah_abang', stationName: 'HALTE TANAH ABANG', corridorCode: 'K8', routeSummary: 'HARMONI  <->  LEBAK BULUS', x: -58, z: 9.65, rotY: Math.PI / 2 },
-    { id: 'halte_kota_tua', stationName: 'HALTE KOTA TUA', corridorCode: 'K12', routeSummary: 'KOTA  <->  TANJUNG PRIOK', x: 50, z: 9.65, rotY: Math.PI / 2 },
-    { id: 'halte_glodok_harco', stationName: 'HALTE GLODOK HARCO', corridorCode: 'K1', routeSummary: 'KOTA TUA  <->  BLOK M', x: 75, z: -9.65, rotY: -Math.PI / 2 },
+    { id: 'halte_bundaran_hi', stationName: 'HALTE BUNDARAN HI', corridorCode: 'K1', routeSummary: 'BLOK M  <->  KOTA', x: -9.65, z: 43.2, rotY: 0 },
+    { id: 'halte_dukuh_atas', stationName: 'HALTE DUKUH ATAS', corridorCode: 'K1', routeSummary: 'MONAS  <->  SENAYAN', x: 9.65, z: 117.2, rotY: Math.PI },
+    { id: 'halte_blok_m', stationName: 'HALTE BLOK M', corridorCode: 'K1', routeSummary: 'BLOK M  <->  HARMONI', x: -9.65, z: 91.5, rotY: 0 },
+    { id: 'halte_karet_sudirman', stationName: 'HALTE KARET SUDIRMAN', corridorCode: 'K1', routeSummary: 'SUDIRMAN  <->  MELAWAI', x: 9.65, z: 68.8, rotY: Math.PI },
+    { id: 'halte_tanah_abang', stationName: 'HALTE TANAH ABANG', corridorCode: 'K8', routeSummary: 'HARMONI  <->  LEBAK BULUS', x: -73.6, z: 9.65, rotY: Math.PI / 2 },
+    { id: 'halte_kota_tua', stationName: 'HALTE KOTA TUA', corridorCode: 'K12', routeSummary: 'KOTA  <->  TANJUNG PRIOK', x: -9.65, z: -90, rotY: 0 },
+    { id: 'halte_glodok_harco', stationName: 'HALTE GLODOK HARCO', corridorCode: 'K1', routeSummary: 'KOTA TUA  <->  BLOK M', x: 50, z: 9.65, rotY: Math.PI / 2 },
   ];
 
   for (const hc of halteCandidates) {
@@ -445,11 +448,11 @@ export function generateRoadsideSpawnLayout(
 
   const tollCandidates: Omit<TollSignSpawn, 'y'>[] = [
     { id: 'toll_sudirman_northbound', variant: 'cantilever', theme: 'green_arterial', topText: 'TOL DALAM KOTA ↑', bottomText: 'SEMANGGI · CAWANG · PRIOK', badgeText: 'TOL', x: -7.75, z: 45.5, rotY: 0 },
-    { id: 'toll_sudirman_southbound', variant: 'cantilever', theme: 'green_arterial', topText: 'BLOK M · SENAYAN GBK ↑', bottomText: 'JALUR PROTOKOL SELATAN', badgeText: 'JKT', x: 7.75, z: 78.5, rotY: Math.PI },
+    { id: 'toll_sudirman_southbound', variant: 'cantilever', theme: 'green_arterial', topText: 'BLOK M · SENAYAN GBK ↑', bottomText: 'JALUR PROTOKOL SELATAN', badgeText: 'JKT', x: 7.75, z: 66.5, rotY: Math.PI },
     { id: 'toll_thamrin_southbound', variant: 'cantilever', theme: 'green_arterial', topText: 'TOL SEMANGGI · MONAS ↑', bottomText: 'CAWANG · HALIM · BLOK M', badgeText: 'TOL', x: 7.75, z: -44.5, rotY: Math.PI },
     { id: 'toll_thamrin_northbound', variant: 'cantilever', theme: 'blue_toll', topText: 'SCBD ←   PRIOK →', bottomText: 'TOL BANDARA SOETTA ↑', badgeText: 'TOL', x: -7.75, z: -80.5, rotY: 0 },
-    { id: 'toll_ramp_semanggi_west', variant: 'twin_post', theme: 'blue_toll', topText: 'GERBANG TOL SEMANGGI', bottomText: 'e-TOLL · TOL LAYANG →', badgeText: 'TOL', x: -64.5, z: -19.8, rotY: -Math.PI / 2 },
-    { id: 'toll_ramp_kemayoran_east', variant: 'twin_post', theme: 'blue_toll', topText: 'TOL LAYANG KEMAYORAN', bottomText: '← SCBD · SENAYAN · PIK 2', badgeText: 'TOL', x: 64.5, z: -19.8, rotY: Math.PI / 2 },
+    { id: 'toll_ramp_semanggi_west', variant: 'twin_post', theme: 'blue_toll', topText: 'GERBANG TOL SEMANGGI', bottomText: 'e-TOLL · TOL LAYANG →', badgeText: 'TOL', x: -64.5, z: 74.2, rotY: -Math.PI / 2 },
+    { id: 'toll_ramp_kemayoran_east', variant: 'twin_post', theme: 'blue_toll', topText: 'TOL LAYANG SEMANGGI', bottomText: '← SCBD · SENAYAN · PIK 2', badgeText: 'TOL', x: 64.5, z: 85.8, rotY: Math.PI / 2 },
     { id: 'toll_ew_west_approach', variant: 'cantilever', theme: 'green_arterial', topText: 'MONAS · SUDIRMAN ↑', bottomText: 'AKSES TOL DALAM KOTA 200m', badgeText: 'TOL', x: -48.5, z: 7.75, rotY: -Math.PI / 2 },
     { id: 'toll_ew_east_approach', variant: 'cantilever', theme: 'green_arterial', topText: 'KOTA TUA ←   MONAS ↑', bottomText: 'TOL TANJUNG PRIOK · HALIM →', badgeText: 'TOL', x: 67.5, z: -7.75, rotY: Math.PI / 2 },
   ];
@@ -523,10 +526,10 @@ export function generateRoadsideSpawnLayout(
   }
 
   const tollShoulderCandidates: { x: number; z: number; rotY: number; kind: TrafficSignKind }[] = [
-    { x: -58, z: -20.5, rotY: -Math.PI / 2, kind: 'batas_kecepatan_60' },
-    { x: -45, z: -20.5, rotY: -Math.PI / 2, kind: 'arah_wajib_lurus' },
-    { x: 58, z: -31.5, rotY: Math.PI / 2, kind: 'batas_kecepatan_60' },
-    { x: 45, z: -31.5, rotY: Math.PI / 2, kind: 'arah_wajib_lurus' },
+    { x: -58, z: 74.5, rotY: -Math.PI / 2, kind: 'batas_kecepatan_60' },
+    { x: -45, z: 74.5, rotY: -Math.PI / 2, kind: 'arah_wajib_lurus' },
+    { x: 58, z: 85.5, rotY: Math.PI / 2, kind: 'batas_kecepatan_60' },
+    { x: 45, z: 85.5, rotY: Math.PI / 2, kind: 'arah_wajib_lurus' },
   ];
   for (const ts of tollShoulderCandidates) {
     if (isRoadsideSpotClear(ts.x, ts.z, 0.55, 0.55, occupied)) {
@@ -623,10 +626,10 @@ export const TRAFFIC_ROUTES: Record<TrafficRouteId, TrafficWaypoint[]> = {
     { x: -34.4, z: 4.6 },
   ],
   tol_layang_express: [
-    { x: -65, z: -24.2 },
-    { x: 65, z: -24.2 },
-    { x: 65, z: -27.8 },
-    { x: -65, z: -27.8 },
+    { x: -65, z: 81.8 },
+    { x: 65, z: 81.8 },
+    { x: 65, z: 78.2 },
+    { x: -65, z: 78.2 },
   ],
   outer_ring_express: [
     { x: -126, z: 2.5 },

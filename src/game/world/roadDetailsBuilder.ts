@@ -45,7 +45,6 @@ export function buildProceduralRoadDetailSystem(
   // 1. Intersection & Crosswalk Cleanout Asphalt Patches (cover crossing dashed centerlines)
   const cleanoutSpecs: { x: number; z: number; w: number; d: number }[] = [
     { x: 0, z: -32, w: 13.6, d: 9.8 },
-    { x: 0, z: 32, w: 13.6, d: 9.8 },
     { x: -32, z: 0, w: 9.8, d: 13.6 },
     { x: 32, z: 0, w: 9.8, d: 13.6 },
     { x: -32, z: -32, w: 9.8, d: 9.8 },
@@ -57,9 +56,7 @@ export function buildProceduralRoadDetailSystem(
     { x: -20.0, z: 0, w: 2.5, d: 13.4 },
     { x: 20.0, z: 0, w: 2.5, d: 13.4 },
     { x: 0, z: -26.1, w: 13.4, d: 2.5 },
-    { x: 0, z: 26.1, w: 13.4, d: 2.5 },
     { x: 0, z: -38.3, w: 13.4, d: 2.5 },
-    { x: 0, z: 38.3, w: 13.4, d: 2.5 },
     { x: -26.1, z: 0, w: 2.5, d: 13.4 },
     { x: 26.1, z: 0, w: 2.5, d: 13.4 },
     { x: -38.3, z: 0, w: 2.5, d: 13.4 },
@@ -110,7 +107,6 @@ export function buildProceduralRoadDetailSystem(
   );
   const yellowBoxCoords: { x: number; z: number; w: number; d: number }[] = [
     { x: 0, z: -32, w: 12.6, d: 8.8 },
-    { x: 0, z: 32, w: 12.6, d: 8.8 },
     { x: -32, z: 0, w: 8.8, d: 12.6 },
     { x: 32, z: 0, w: 8.8, d: 12.6 },
   ];
@@ -131,8 +127,9 @@ export function buildProceduralRoadDetailSystem(
 
   // 3. TransJakarta Busway Terracotta Corridor Strips & BUSWAY Stencils
   const buswaySegments: [number, number][] = [
-    [-86, -39.9],
-    [39.9, 86],
+    [-60.5, -39.9],
+    [44.5, 73.5],
+    [86.5, 121.0],
   ];
   const busStripMat = trackMat(
     new THREE.MeshStandardMaterial({
@@ -182,14 +179,16 @@ export function buildProceduralRoadDetailSystem(
     })
   );
   const buswayStencils: { x: number; z: number; rotY: number }[] = [
-    { x: -1.85, z: -48, rotY: 0 },
-    { x: 1.85, z: -48, rotY: Math.PI },
-    { x: -1.85, z: -68, rotY: 0 },
-    { x: 1.85, z: -68, rotY: Math.PI },
-    { x: -1.85, z: 48, rotY: 0 },
-    { x: 1.85, z: 48, rotY: Math.PI },
+    { x: -1.85, z: -50, rotY: 0 },
+    { x: 1.85, z: -50, rotY: Math.PI },
+    { x: -1.85, z: 50, rotY: 0 },
+    { x: 1.85, z: 50, rotY: Math.PI },
     { x: -1.85, z: 68, rotY: 0 },
     { x: 1.85, z: 68, rotY: Math.PI },
+    { x: -1.85, z: 96, rotY: 0 },
+    { x: 1.85, z: 96, rotY: Math.PI },
+    { x: -1.85, z: 114, rotY: 0 },
+    { x: 1.85, z: 114, rotY: Math.PI },
   ];
   const busStencilInst = new THREE.InstancedMesh(
     unitPlaneGeo,

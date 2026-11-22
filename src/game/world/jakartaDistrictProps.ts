@@ -64,9 +64,10 @@ export function buildJakartaDistrictProps(
   // Clean Sudirman–Thamrin & Blok M busway segments positioned between intersections
   // (y=0.040 sits cleanly above nsRoad y=0.036 and below crosswalks/yellow-box decals y=0.05+)
   const busSegments: { zCenter: number; length: number }[] = [
-    { zCenter: -56, length: 34 }, // Sudirman–Thamrin North
+    { zCenter: -49, length: 24 }, // Glodok–Kota Tua North Corridor
     { zCenter: -22.5, length: 6.5 }, // North of Monas Plaza
-    { zCenter: 54, length: 32 }, // Blok M Corridor South
+    { zCenter: 58, length: 26 }, // Sudirman Central Corridor (Bundaran HI - Semanggi)
+    { zCenter: 104, length: 34 }, // Blok M Corridor South
   ];
   for (const seg of busSegments) {
     const segGeo = new THREE.PlaneGeometry(13.6, seg.length);
@@ -79,12 +80,12 @@ export function buildJakartaDistrictProps(
 
   // Instanced concrete separator curbs along the TransJakarta busway lane
   const curbCoords: { x: number; z: number }[] = [];
-  for (let z = -72; z <= -22; z += 5.5) {
-    if (Math.abs(z - -26) < 6 || Math.abs(z - -32) < 5) continue;
+  for (let z = -60; z <= -22; z += 5.5) {
+    if (Math.abs(z - -32) < 5) continue;
     curbCoords.push({ x: -2.6, z }, { x: 2.6, z });
   }
-  for (let z = 22; z <= 72; z += 5.5) {
-    if (Math.abs(z - 32) < 5) continue;
+  for (let z = 46; z <= 120; z += 5.5) {
+    if (Math.abs(z - 80) < 6) continue;
     curbCoords.push({ x: -2.6, z }, { x: 2.6, z });
   }
   const busCurbGeo = new THREE.BoxGeometry(0.22, 0.16, 2.4);

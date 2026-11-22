@@ -19,21 +19,23 @@ export function isNearBuilding(x: number, z: number, pad: number = 4): boolean {
 }
 
 export function isOnRoadway(x: number, z: number): boolean {
-  if (Math.abs(x) < 9.5 && z >= -76 && z <= 216) return true;
+  // Primary Thamrin-Sudirman N-S corridor (x=0) & Medan Merdeka E-W (z=0)
+  if (Math.abs(x) < 9.5 && z >= -74 && z <= 216) return true;
   if (Math.abs(z) < 9.5 && Math.abs(x) <= 216) return true;
-  if (Math.abs(Math.abs(x) - 32) < 6.5 && z >= -76 && z <= 216) return true;
+  // Inner Ring (x = +-32, z = +-32) + Bundaran HI Roundabout at (0, +32)
+  if (Math.abs(Math.abs(x) - 32) < 6.5 && z >= -74 && z <= 216) return true;
   if (Math.abs(Math.abs(z) - 32) < 6.5 && Math.abs(x) <= 216) return true;
-  if (Math.abs(Math.abs(x) - 128) < 7.0 && z >= -72 && z <= 216) return true;
+  if (Math.hypot(x, z - 32) < 12.2) return true;
+  // District Arteri & Semanggi / Blok M Corridors (x = +-84, z = -66, +80, +128)
+  if (Math.abs(Math.abs(x) - 84) < 6.5 && z >= -74 && z <= 216) return true;
+  if (Math.abs(z - -66) < 6.5 && Math.abs(x) <= 216) return true;
+  if (Math.abs(z - 80) < 6.5 && Math.abs(x) <= 216) return true;
+  // Outer Ring (x = +-128, z = +128)
+  if (Math.abs(Math.abs(x) - 128) < 7.0 && z >= -74 && z <= 216) return true;
   if (Math.abs(z - 128) < 7.0 && Math.abs(x) <= 216) return true;
-  if (Math.abs(Math.abs(x) - 208) < 7.0 && z >= -70 && z <= 216) return true;
-  if (Math.abs(z - 208) < 7.0 && Math.abs(x) <= 216) return true;
-  if (
-    Math.abs(z - -66) < 6.2 &&
-    ((x >= -216 && x <= -122) || (x >= 122 && x <= 216))
-  ) {
-    return true;
-  }
-  if (z >= -32 && z <= -20 && Math.abs(x) <= 72) return true;
+  // JORR Perimeter Loop (x = +-208, z = +208)
+  if (Math.abs(Math.abs(x) - 208) < 7.5 && z >= -74 && z <= 216) return true;
+  if (Math.abs(z - 208) < 7.5 && Math.abs(x) <= 216) return true;
   return false;
 }
 

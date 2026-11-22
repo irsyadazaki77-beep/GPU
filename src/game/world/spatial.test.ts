@@ -31,7 +31,7 @@ test('isNearBuilding and isOnRoadway classify Jakarta geometry accurately', () =
 
   assert.equal(isOnRoadway(0, 26), true);
   assert.equal(isOnRoadway(-32, 10), true);
-  assert.equal(isOnRoadway(75, 75), false);
+  assert.equal(isOnRoadway(58, 58), false);
 });
 
 test('SpatialHashGrid insert, queryAABB, queryRadius, nearest, and clear operate in O(1) buckets', () => {
@@ -104,10 +104,10 @@ test('resolveCameraWallPullIn pulls camera boom in front of obstructing building
   assert.equal(clearCam.x, 0);
   assert.equal(clearCam.z, 35.4);
 
-  // Obstructed boom reaching behind Wisma Nabilo (-22, -42, width 12, depth 12)
-  const blockedCam = resolveCameraWallPullIn(-12, -42, -26, 4.5, -42, grid);
+  // Obstructed boom reaching behind Wisma Nabilo (-18, 56, width 13, depth 13)
+  const blockedCam = resolveCameraWallPullIn(-10, 56, -24, 4.5, 56, grid);
   assert.equal(blockedCam.pulledIn, true);
-  assert.equal(blockedCam.x > -16.5, true);
+  assert.equal(blockedCam.x > -14, true);
   assert.equal(blockedCam.y >= 4.5, true);
 });
 

@@ -97,37 +97,40 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
         ctx.stroke();
       }
 
-      // 1. Roads (Inner Ring + Outer Ring +-128 + JORR Perimeter +-208 + Coastal Wings)
+      // 1. Roads (Inner Ring + District x=+-84, z=-66,80 + Outer Ring +-128 + JORR +-208 + Bundaran HI)
       ctx.strokeStyle = '#1e293b';
-      ctx.lineWidth = 12;
+      ctx.lineWidth = 10;
       ctx.strokeRect(
         cx + (-32 - px) * zoom,
         cy + (-32 - pz) * zoom,
         64 * zoom,
         64 * zoom
       );
-      ctx.strokeStyle = 'rgba(30, 41, 59, 0.72)';
-      ctx.lineWidth = 8;
+      ctx.strokeStyle = 'rgba(30, 41, 59, 0.78)';
+      ctx.lineWidth = 7;
       ctx.beginPath();
-      // Outer Ring x = +-128 over z [-68..214] & z = 128 across [-214..214]
-      ctx.moveTo(cx + (-128 - px) * zoom, cy + (-68 - pz) * zoom);
-      ctx.lineTo(cx + (-128 - px) * zoom, cy + (214 - pz) * zoom);
-      ctx.moveTo(cx + (128 - px) * zoom, cy + (-68 - pz) * zoom);
-      ctx.lineTo(cx + (128 - px) * zoom, cy + (214 - pz) * zoom);
-      ctx.moveTo(cx + (-214 - px) * zoom, cy + (128 - pz) * zoom);
-      ctx.lineTo(cx + (214 - px) * zoom, cy + (128 - pz) * zoom);
-      // JORR Perimeter x = +-208 over z [-71..215] & z = 208 across [-215..215]
+      for (const rx of [-128, -84, -32, 32, 84, 128]) {
+        ctx.moveTo(cx + (rx - px) * zoom, cy + (-70 - pz) * zoom);
+        ctx.lineTo(cx + (rx - px) * zoom, cy + (214 - pz) * zoom);
+      }
+      for (const rz of [-66, -32, 32, 80, 128]) {
+        ctx.moveTo(cx + (-214 - px) * zoom, cy + (rz - pz) * zoom);
+        ctx.lineTo(cx + (214 - px) * zoom, cy + (rz - pz) * zoom);
+      }
+      // JORR Perimeter x = +-208 & z = 208
       ctx.moveTo(cx + (-208 - px) * zoom, cy + (-71 - pz) * zoom);
       ctx.lineTo(cx + (-208 - px) * zoom, cy + (215 - pz) * zoom);
       ctx.moveTo(cx + (208 - px) * zoom, cy + (-71 - pz) * zoom);
       ctx.lineTo(cx + (208 - px) * zoom, cy + (215 - pz) * zoom);
       ctx.moveTo(cx + (-215 - px) * zoom, cy + (208 - pz) * zoom);
       ctx.lineTo(cx + (215 - px) * zoom, cy + (208 - pz) * zoom);
-      // Northern wing coastal boulevards (z = -66 across [-214..-122] and [122..214])
-      ctx.moveTo(cx + (-214 - px) * zoom, cy + (-66 - pz) * zoom);
-      ctx.lineTo(cx + (-122 - px) * zoom, cy + (-66 - pz) * zoom);
-      ctx.moveTo(cx + (122 - px) * zoom, cy + (-66 - pz) * zoom);
-      ctx.lineTo(cx + (214 - px) * zoom, cy + (-66 - pz) * zoom);
+      ctx.stroke();
+
+      // Bundaran HI Roundabout
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(cx + (0 - px) * zoom, cy + (32 - pz) * zoom, 8.5 * zoom, 0, Math.PI * 2);
       ctx.stroke();
 
       ctx.strokeStyle = '#1e293b';

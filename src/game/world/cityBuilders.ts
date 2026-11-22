@@ -569,22 +569,29 @@ export function buildJakartaIconicLandmarks(): THREE.Group {
     envMapIntensity: 0.95,
   });
 
-  // 1. Bundaran HI Fountain & Patung Selamat Datang Plaza (-15.5, 0, -52)
+  // 1. Bundaran HI Fountain & Patung Selamat Datang Plaza RIGHT AT Thamrin Roundabout (0, 0, +32)
   const hiGroup = new THREE.Group();
-  hiGroup.position.set(-15.5, 0, -52);
+  hiGroup.position.set(0, 0, 32);
+
+  const plazaApron = new THREE.Mesh(
+    new THREE.CylinderGeometry(5.4, 5.6, 0.16, 28),
+    darkSlateMat
+  );
+  plazaApron.position.y = 0.08;
+  hiGroup.add(plazaApron);
 
   const basinRim = new THREE.Mesh(
     new THREE.CylinderGeometry(4.6, 4.9, 0.65, 24),
     darkSlateMat
   );
-  basinRim.position.y = 0.32;
+  basinRim.position.y = 0.36;
   hiGroup.add(basinRim);
 
   const waterPool = new THREE.Mesh(
     new THREE.CylinderGeometry(4.2, 4.2, 0.72, 24),
     waterMat
   );
-  waterPool.position.y = 0.34;
+  waterPool.position.y = 0.38;
   hiGroup.add(waterPool);
 
   const innerRing = new THREE.Mesh(
@@ -592,7 +599,7 @@ export function buildJakartaIconicLandmarks(): THREE.Group {
     stoneMat
   );
   innerRing.rotation.x = Math.PI / 2;
-  innerRing.position.y = 0.75;
+  innerRing.position.y = 0.78;
   hiGroup.add(innerRing);
 
   const pedestal = new THREE.Mesh(
@@ -629,15 +636,23 @@ export function buildJakartaIconicLandmarks(): THREE.Group {
   }
   landmarksGroup.add(hiGroup);
 
-  // 2. Masjid Istiqlal Grand Geodesic Dome & Minaret (22, 0, -16)
+  // 2. Masjid Istiqlal Grand Geodesic Dome & Minaret (NE of Monas at +20, 0, -17)
   const istiqlalGroup = new THREE.Group();
-  istiqlalGroup.position.set(22, 0, -16);
+  istiqlalGroup.position.set(20, 0, -17);
+
+  const istiqlalPlaza = new THREE.Mesh(
+    new THREE.BoxGeometry(16.5, 0.18, 15.5),
+    darkSlateMat
+  );
+  istiqlalPlaza.position.y = 0.09;
+  istiqlalPlaza.receiveShadow = true;
+  istiqlalGroup.add(istiqlalPlaza);
 
   const hallBase = new THREE.Mesh(
     new THREE.BoxGeometry(11.5, 4.2, 11.5),
     stoneMat
   );
-  hallBase.position.y = 2.1;
+  hallBase.position.y = 2.15;
   hallBase.castShadow = true;
   hallBase.receiveShadow = true;
   istiqlalGroup.add(hallBase);
@@ -652,7 +667,7 @@ export function buildJakartaIconicLandmarks(): THREE.Group {
     new THREE.SphereGeometry(4.8, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.52),
     domeMat
   );
-  grandDome.position.y = 4.1;
+  grandDome.position.y = 4.15;
   grandDome.castShadow = true;
   istiqlalGroup.add(grandDome);
 
@@ -660,7 +675,7 @@ export function buildJakartaIconicLandmarks(): THREE.Group {
     new THREE.CylinderGeometry(0.06, 0.14, 2.4, 8),
     bronzeMat
   );
-  crescentSpire.position.y = 9.6;
+  crescentSpire.position.y = 9.65;
   istiqlalGroup.add(crescentSpire);
 
   const minaret = new THREE.Mesh(
@@ -679,9 +694,17 @@ export function buildJakartaIconicLandmarks(): THREE.Group {
   istiqlalGroup.add(minaretCap);
   landmarksGroup.add(istiqlalGroup);
 
-  // 3. Gelora Bung Karno (GBK) Stadium Temu Gelang Ring (-64, 0, 36)
+  // 3. Gelora Bung Karno (GBK) Stadium Temu Gelang Ring (SW of Semanggi at -58, 0, +56)
   const gbkGroup = new THREE.Group();
-  gbkGroup.position.set(-64, 0, 36);
+  gbkGroup.position.set(-58, 0, 56);
+
+  const gbkPlaza = new THREE.Mesh(
+    new THREE.CylinderGeometry(16.5, 16.8, 0.18, 32),
+    darkSlateMat
+  );
+  gbkPlaza.position.y = 0.09;
+  gbkPlaza.receiveShadow = true;
+  gbkGroup.add(gbkPlaza);
 
   const stadiumBowl = new THREE.Mesh(
     new THREE.CylinderGeometry(11.2, 9.2, 5.4, 24, 1, true),
@@ -700,7 +723,7 @@ export function buildJakartaIconicLandmarks(): THREE.Group {
     })
   );
   pitchTurf.rotation.x = -Math.PI / 2;
-  pitchTurf.position.y = 0.08;
+  pitchTurf.position.y = 0.2;
   gbkGroup.add(pitchTurf);
 
   const roofRing = new THREE.Mesh(
@@ -726,9 +749,17 @@ export function buildJakartaIconicLandmarks(): THREE.Group {
   gbkGroup.add(gbkAccentRing);
   landmarksGroup.add(gbkGroup);
 
-  // 4. Pelabuhan Tanjung Priok Container Stacks (68, 0, -64)
+  // 4. Pelabuhan Tanjung Priok Container Stacks (beside Priok Terminal at +106, 0, -49)
   const priokGroup = new THREE.Group();
-  priokGroup.position.set(68, 0, -64);
+  priokGroup.position.set(106, 0, -49);
+
+  const yardSlab = new THREE.Mesh(
+    new THREE.BoxGeometry(16, 0.18, 16),
+    darkSlateMat
+  );
+  yardSlab.position.y = 0.09;
+  yardSlab.receiveShadow = true;
+  priokGroup.add(yardSlab);
 
   const containerColors = [0xdc2626, 0x0284c7, 0xd97706, 0x15803d];
   const containerGeo = new THREE.BoxGeometry(2.6, 2.4, 5.8);

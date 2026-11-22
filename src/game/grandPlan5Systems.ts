@@ -477,8 +477,8 @@ export const MRT_DECK_Y = 8.95;
 export const MRT_ROOF_Y = 11.2;
 
 export const MRT_STATIONS = [
-  { id: 'mrt_sudirman', name: 'Stasiun MRT Dukuh Atas - Sudirman', x: -13.6, z: -68 },
-  { id: 'mrt_blok_m', name: 'Stasiun MRT Blok M BCA', x: -13.6, z: 68 },
+  { id: 'mrt_sudirman', name: 'Stasiun MRT Dukuh Atas - Sudirman', x: -13.6, z: 48 },
+  { id: 'mrt_blok_m', name: 'Stasiun MRT Blok M BCA', x: -13.6, z: 108 },
 ] as const;
 
 export function computeMrtTrainState(elapsedTimeSec: number): {
@@ -493,7 +493,7 @@ export function computeMrtTrainState(elapsedTimeSec: number): {
   const omega = 0.18;
   const amp = 68;
   const cycle = (elapsedTimeSec * omega) % (Math.PI * 2);
-  const z = Math.sin(cycle) * amp;
+  const z = 54 + Math.sin(cycle) * amp;
   const vz = Math.cos(cycle) * amp * omega;
 
   return {

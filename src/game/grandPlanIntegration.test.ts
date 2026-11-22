@@ -221,7 +221,7 @@ test('Wave 5 open-world districts, living pedestrian AI interactions/recycling, 
 
   // 1. Outer 480m districts resolve accurately
   assert.equal(resolveDistrictAtPosition(-145, 160).id, 'pondok_indah');
-  assert.equal(resolveDistrictAtPosition(48, 172).id, 'kemang_selatan');
+  assert.equal(resolveDistrictAtPosition(16, 172).id, 'kemang_selatan');
   assert.equal(resolveDistrictAtPosition(172, 48).id, 'kelapa_gading');
   assert.equal(resolveDistrictAtPosition(-172, 12).id, 'pantai_pik_utara');
 

@@ -413,13 +413,15 @@ if (uWetness > 0.04) {
     };
     this.roadMat.customProgramCacheKey = () => 'san-nabilo-wet-asphalt-v3';
 
-    const nsRoadGeo = new THREE.PlaneGeometry(14, 288);
+    // Primary N-S Thamrin-Sudirman Corridor (x=0, z in [-72..214])
+    const nsRoadGeo = new THREE.PlaneGeometry(14, 286);
     nsRoadGeo.rotateX(-Math.PI / 2);
     const nsRoad = new THREE.Mesh(nsRoadGeo, this.roadMat);
-    nsRoad.position.set(0, 0.036, 72);
+    nsRoad.position.set(0, 0.036, 71);
     nsRoad.receiveShadow = true;
     this.rootGroup.add(nsRoad);
 
+    // Primary E-W Medan Merdeka Corridor (z=0)
     const ewRoadGeo = new THREE.PlaneGeometry(14, 434);
     ewRoadGeo.rotateX(-Math.PI / 2);
     ewRoadGeo.rotateY(Math.PI / 2);
@@ -428,6 +430,15 @@ if (uWetness > 0.04) {
     ewRoad.receiveShadow = true;
     this.rootGroup.add(ewRoad);
 
+    // Bundaran HI Asphalt Traffic Roundabout Ring around Patung Selamat Datang (0, +32)
+    const hiRingGeo = new THREE.RingGeometry(5.5, 11.4, 40);
+    hiRingGeo.rotateX(-Math.PI / 2);
+    const hiRing = new THREE.Mesh(hiRingGeo, this.roadMat);
+    hiRing.position.set(0, 0.046, 32);
+    hiRing.receiveShadow = true;
+    this.rootGroup.add(hiRing);
+
+    // Inner Urban Grid Corridors (x = +-32, z = +-32)
     for (const offset of [-32, 32]) {
       const hRoadGeo = new THREE.PlaneGeometry(10, 434);
       hRoadGeo.rotateX(-Math.PI / 2);
@@ -436,14 +447,31 @@ if (uWetness > 0.04) {
       hRoad.position.set(0, 0.02, offset);
       this.rootGroup.add(hRoad);
 
-      const vRoadGeo = new THREE.PlaneGeometry(10, 292);
+      const vRoadGeo = new THREE.PlaneGeometry(10, 288);
       vRoadGeo.rotateX(-Math.PI / 2);
       const vRoad = new THREE.Mesh(vRoadGeo, this.roadMat);
-      vRoad.position.set(offset, 0.028, 74);
+      vRoad.position.set(offset, 0.028, 72);
       this.rootGroup.add(vRoad);
     }
 
-    // Outer Jakarta Ring Boulevard (x = +-128 over z [-68..214], z = +128 across [-214..214])
+    // District Arteri Grid (x = +-84 Tanah Abang/GBK & Kemayoran/SCBD/Halim; z = -66 Coastal North, z = +80 Semanggi-Gatot Subroto)
+    for (const artX of [-84, 84]) {
+      const artGeo = new THREE.PlaneGeometry(10, 286);
+      artGeo.rotateX(-Math.PI / 2);
+      const artRoad = new THREE.Mesh(artGeo, this.roadMat);
+      artRoad.position.set(artX, 0.024, 72);
+      this.rootGroup.add(artRoad);
+    }
+    for (const artZ of [-66, 80]) {
+      const artHGeo = new THREE.PlaneGeometry(11, 432);
+      artHGeo.rotateX(-Math.PI / 2);
+      artHGeo.rotateY(Math.PI / 2);
+      const artHRoad = new THREE.Mesh(artHGeo, this.roadMat);
+      artHRoad.position.set(0, 0.024, artZ);
+      this.rootGroup.add(artHRoad);
+    }
+
+    // Outer Jakarta Ring Boulevard (x = +-128, z = +128)
     const outerRingSouthGeo = new THREE.PlaneGeometry(12, 428);
     outerRingSouthGeo.rotateX(-Math.PI / 2);
     outerRingSouthGeo.rotateY(Math.PI / 2);
@@ -459,7 +487,7 @@ if (uWetness > 0.04) {
       this.rootGroup.add(outerSide);
     }
 
-    // JORR Outer Perimeter Loop (x = +-208, z = +208) + Northern Wing Coastal Roads (z = -66)
+    // JORR Outer Perimeter Loop (x = +-208, z = +208)
     const jorrSouthGeo = new THREE.PlaneGeometry(14, 430);
     jorrSouthGeo.rotateX(-Math.PI / 2);
     jorrSouthGeo.rotateY(Math.PI / 2);
@@ -473,15 +501,6 @@ if (uWetness > 0.04) {
       const jorrSide = new THREE.Mesh(jorrSideGeo, this.roadMat);
       jorrSide.position.set(sideX, 0.025, 72);
       this.rootGroup.add(jorrSide);
-    }
-
-    for (const wingX of [-168, 168]) {
-      const wingGeo = new THREE.PlaneGeometry(11, 92);
-      wingGeo.rotateX(-Math.PI / 2);
-      wingGeo.rotateY(Math.PI / 2);
-      const wingRoad = new THREE.Mesh(wingGeo, this.roadMat);
-      wingRoad.position.set(wingX, 0.025, -66);
-      this.rootGroup.add(wingRoad);
     }
 
     // 3. Tol Layang, Enterable Interior Stage & Warung Stalls
@@ -1106,14 +1125,45 @@ if (uWetness > 0.04) {
 
   private buildOuterMegapolitanBlocks(maxAnisotropy: number): THREE.Group {
     const group = new THREE.Group();
-    group.name = 'OuterMegapolitanInstancedBlocks';
+    group.name = 'OrganizedJakartaCityBlocks';
 
+    // Curated urban block centers neatly framed between real road arteries:
+    // Roads N-S: -208, -128, -84, -32, 0, 32, 84, 128, 208
+    // Roads E-W: -66, -32, 0, 32, 80, 128, 208
+    const xBlockBands: [number, number][] = [
+      [-186, 16],
+      [-150, 16],
+      [-106, 15],
+      [-64, 14],
+      [-48, 13],
+      [-18, 12],
+      [18, 12],
+      [48, 13],
+      [64, 14],
+      [106, 15],
+      [150, 16],
+      [186, 16],
+    ];
+    const zBlockBands: [number, number][] = [
+      [-49, 13],
+      [-17, 12],
+      [17, 12],
+      [56, 15],
+      [104, 14],
+      [148, 15],
+      [182, 15],
+    ];
+
+    const plinthPlacements: { x: number; z: number; w: number; d: number }[] = [];
     const blockPlacements: {
       x: number;
       z: number;
       w: number;
       h: number;
       d: number;
+      podiumW: number;
+      podiumD: number;
+      podiumH: number;
       color: number;
     }[] = [];
     const treePlacements: {
@@ -1124,81 +1174,129 @@ if (uWetness > 0.04) {
       color: number;
     }[] = [];
 
-    const reservedSpots: [number, number][] = [
-      [-146, 162],
-      [38, 168],
-      [160, 48],
-      [-168, 176],
-      [176, 172],
-      [176, -42],
-      [-178, -54],
+    const reservedLandmarks: { x: number; z: number; r: number }[] = [
+      { x: 0, z: 0, r: 28 }, // Monas Medan Merdeka Park
+      { x: 0, z: 32, r: 16 }, // Bundaran HI
+      { x: 20, z: -17, r: 17 }, // Masjid Istiqlal courtyard
+      { x: -58, z: 56, r: 22 }, // GBK Senayan Stadium Park
+      { x: 106, z: -49, r: 16 }, // Priok Container Yard
     ];
-    const blockPalette = [0xcbd5e1, 0xd6d3d1, 0xbfdbfe, 0xe2e8f0, 0xc4b5a5];
-    const treePalette = [0x164e2e, 0x1e5631, 0x1b4332, 0x22543d];
+
+    const cbdPalette = [0x94a3b8, 0xcbd5e1, 0x64748b, 0xbfdbfe];
+    const heritagePalette = [0xe7e5e4, 0xd6d3d1, 0xcbd5e1, 0xd9c7b8];
+    const industrialPalette = [0x94a3b8, 0x64748b, 0x9ca3af];
+    const treePalette = [0x15803d, 0x166534, 0x1e5631, 0x1b4332];
 
     const hashUnit = (gx: number, gz: number): number => {
       const s = Math.sin(gx * 12.9898 + gz * 78.233) * 43758.5453;
       return s - Math.floor(s);
     };
 
-    for (let x = -222; x <= 222; x += 22) {
-      for (let z = -54; z <= 220; z += 22) {
-        if (Math.abs(x) <= 96 && z <= 96) continue;
-        if (z < -62) continue;
-        if (
-          isOnRoadway(x, z) ||
-          isOnRoadway(x - 10, z) ||
-          isOnRoadway(x + 10, z) ||
-          isOnRoadway(x, z - 10) ||
-          isOnRoadway(x, z + 10)
-        ) {
-          continue;
-        }
-        if (isNearBuilding(x, z, 15)) continue;
-        let nearReserved = false;
-        for (let r = 0; r < reservedSpots.length; r++) {
-          const dx = x - reservedSpots[r][0];
-          const dz = z - reservedSpots[r][1];
-          if (dx * dx + dz * dz < 14 * 14) {
-            nearReserved = true;
+    for (const [bx, slotW] of xBlockBands) {
+      for (const [bz, slotD] of zBlockBands) {
+        if (isOnRoadway(bx, bz)) continue;
+        // Every organized urban block receives a clean concrete sidewalk plinth pad
+        plinthPlacements.push({
+          x: bx,
+          z: bz,
+          w: slotW + 2.6,
+          d: slotD + 2.6,
+        });
+
+        let inLandmark = false;
+        for (const lm of reservedLandmarks) {
+          if (Math.hypot(bx - lm.x, bz - lm.z) < lm.r) {
+            inLandmark = true;
             break;
           }
         }
-        if (nearReserved) continue;
-
-        const rnd = hashUnit(x, z);
-        if (rnd < 0.38) {
-          const trunkH = 1.6 + rnd * 1.4;
-          const crownR = 1.8 + hashUnit(z, x) * 1.4;
-          treePlacements.push({
-            x,
-            z,
-            trunkH,
-            crownR,
-            color: treePalette[Math.floor(rnd * 17) % treePalette.length],
-          });
-        } else {
-          const rnd2 = hashUnit(z + 7, x - 3);
-          const w = 8 + Math.floor(rnd * 4.5);
-          const d = 8 + Math.floor(rnd2 * 4.5);
-          const h = 11 + Math.floor(((rnd + rnd2) * 0.5) * 21);
-          blockPlacements.push({
-            x,
-            z,
-            w,
-            h,
-            d,
-            color:
-              blockPalette[
-                Math.floor((rnd + rnd2) * 19) % blockPalette.length
-              ],
-          });
+        if (inLandmark || isNearBuilding(bx, bz, 12.5)) {
+          continue;
         }
+
+        const rnd = hashUnit(bx, bz);
+        // Reserve ~22% of clean blocks as manicured pocket parks with symmetrical trees
+        if (rnd < 0.22) {
+          for (const [ox, oz] of [
+            [-3.5, -3.5],
+            [3.5, -3.5],
+            [-3.5, 3.5],
+            [3.5, 3.5],
+          ]) {
+            treePlacements.push({
+              x: bx + ox,
+              z: bz + oz,
+              trunkH: 2.0 + hashUnit(bx + ox, bz + oz) * 0.9,
+              crownR: 2.2 + hashUnit(bz + oz, bx + ox) * 0.6,
+              color: treePalette[Math.floor(rnd * 23) % treePalette.length],
+            });
+          }
+          continue;
+        }
+
+        const isSudirmanScbd =
+          Math.abs(bx) <= 72 && bz >= 12 && bz <= 112;
+        const isNorthHeritage = bz <= -36 && Math.abs(bx) <= 72;
+        const isIndustrial = bz <= -36 && Math.abs(bx) > 72;
+
+        const w = Math.max(8, Math.round(slotW * (0.68 + rnd * 0.16)));
+        const d = Math.max(8, Math.round(slotD * (0.68 + hashUnit(bz, bx) * 0.16)));
+        const podiumH = isSudirmanScbd ? 4.8 : 3.4;
+        const h = isSudirmanScbd
+          ? 24 + Math.floor(rnd * 20)
+          : isNorthHeritage
+          ? 11 + Math.floor(rnd * 6)
+          : isIndustrial
+          ? 12 + Math.floor(rnd * 8)
+          : 15 + Math.floor(rnd * 14);
+
+        const palette = isSudirmanScbd
+          ? cbdPalette
+          : isIndustrial
+          ? industrialPalette
+          : heritagePalette;
+
+        blockPlacements.push({
+          x: bx,
+          z: bz,
+          w,
+          h,
+          d,
+          podiumW: w + 1.8,
+          podiumD: d + 1.8,
+          podiumH,
+          color: palette[Math.floor(rnd * 19) % palette.length],
+        });
       }
     }
 
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
+
+    if (plinthPlacements.length > 0) {
+      const plinthGeo = new THREE.BoxGeometry(1, 0.16, 1);
+      const plinthMat = new THREE.MeshStandardMaterial({
+        color: 0x334155,
+        roughness: 0.92,
+        metalness: 0.04,
+        envMapIntensity: 0.1,
+      });
+      const plinthInst = new THREE.InstancedMesh(
+        plinthGeo,
+        plinthMat,
+        plinthPlacements.length
+      );
+      plinthPlacements.forEach((p, i) => {
+        dummy.position.set(p.x, 0.08, p.z);
+        dummy.scale.set(p.w, 1, p.d);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        plinthInst.setMatrixAt(i, dummy.matrix);
+      });
+      plinthInst.instanceMatrix.needsUpdate = true;
+      plinthInst.receiveShadow = true;
+      group.add(plinthInst);
+    }
 
     if (blockPlacements.length > 0) {
       const outerFacade = proceduralTextures.getBuildingFacadeTextures(
@@ -1214,9 +1312,9 @@ if (uWetness > 0.04) {
         roughnessMap: outerFacade.roughnessMap,
         emissiveMap: outerFacade.emissiveMap,
         emissive: new THREE.Color(0xffffff),
-        emissiveIntensity: 0.1,
-        roughness: 0.72,
-        metalness: 0.22,
+        emissiveIntensity: 0.12,
+        roughness: 0.68,
+        metalness: 0.24,
       });
       this.buildingEmissiveMats.push(boxMat);
       const blockInst = new THREE.InstancedMesh(
@@ -1225,11 +1323,22 @@ if (uWetness > 0.04) {
         blockPlacements.length
       );
 
+      const podiumMat = new THREE.MeshStandardMaterial({
+        color: 0x1e293b,
+        roughness: 0.78,
+        metalness: 0.18,
+      });
+      const podiumInst = new THREE.InstancedMesh(
+        boxGeo,
+        podiumMat,
+        blockPlacements.length
+      );
+
       const roofGeo = new THREE.BoxGeometry(1, 1, 1);
       const roofMat = new THREE.MeshStandardMaterial({
-        color: 0x1e293b,
+        color: 0x0f172a,
         roughness: 0.84,
-        metalness: 0.18,
+        metalness: 0.2,
       });
       const roofInst = new THREE.InstancedMesh(
         roofGeo,
@@ -1238,23 +1347,29 @@ if (uWetness > 0.04) {
       );
 
       blockPlacements.forEach((b, i) => {
-        dummy.position.set(b.x, b.h * 0.5, b.z);
-        dummy.scale.set(b.w, b.h, b.d);
+        dummy.position.set(b.x, b.podiumH * 0.5 + 0.12, b.z);
+        dummy.scale.set(b.podiumW, b.podiumH, b.podiumD);
         dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        podiumInst.setMatrixAt(i, dummy.matrix);
+
+        dummy.position.set(b.x, b.podiumH + b.h * 0.5, b.z);
+        dummy.scale.set(b.w, b.h, b.d);
         dummy.updateMatrix();
         blockInst.setMatrixAt(i, dummy.matrix);
         color.setHex(b.color);
         blockInst.setColorAt(i, color);
 
-        dummy.position.set(b.x, b.h + 0.7, b.z);
-        dummy.scale.set(b.w * 0.62, 1.4, b.d * 0.62);
+        dummy.position.set(b.x, b.podiumH + b.h + 0.65, b.z);
+        dummy.scale.set(b.w * 0.65, 1.3, b.d * 0.65);
         dummy.updateMatrix();
         roofInst.setMatrixAt(i, dummy.matrix);
       });
+      podiumInst.instanceMatrix.needsUpdate = true;
       blockInst.instanceMatrix.needsUpdate = true;
       if (blockInst.instanceColor) blockInst.instanceColor.needsUpdate = true;
       roofInst.instanceMatrix.needsUpdate = true;
-      group.add(blockInst, roofInst);
+      group.add(podiumInst, blockInst, roofInst);
     }
 
     if (treePlacements.length > 0) {
