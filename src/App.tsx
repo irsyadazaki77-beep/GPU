@@ -1357,6 +1357,7 @@ export default function App() {
             }
             onToggleFokus={handleToggleFokus}
             onHonk={() => controllerRef.current?.triggerHorn()}
+            onToggleDroneRecon={() => controllerRef.current?.toggleDroneRecon()}
           />
         )}
 

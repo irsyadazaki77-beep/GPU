@@ -4,6 +4,8 @@ import {
   ENTERABLE_INTERIORS,
   GRAND_HEISTS,
   JAKARTA_DISTRICTS,
+  JAKARTA_SPEED_TRAPS,
+  MRT_STATIONS,
   PROTAGONIST_PROFILES,
   ProtagonistId,
   STORY_MISSIONS,
@@ -192,6 +194,35 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
         color: '#ef4444',
         badge: '!',
         rewardText: formatRupiah(b.rewardRp),
+      });
+    }
+
+    // 7. ETLE Speed Traps & MRT Ratangga Stations
+    for (const trap of JAKARTA_SPEED_TRAPS) {
+      list.push({
+        id: `etle_${trap.id}`,
+        label: trap.name,
+        subtitle: `Kamera ETLE · Target >= ${trap.targetKmh} km/j`,
+        x: trap.x,
+        z: trap.z,
+        category: 'race',
+        filterGroup: 'heist_balap',
+        color: '#facc15',
+        badge: 'E',
+        rewardText: formatRupiah(trap.rewardRp),
+      });
+    }
+    for (const st of MRT_STATIONS) {
+      list.push({
+        id: `mrt_${st.id}`,
+        label: st.name,
+        subtitle: 'Stasiun Naik/Turun MRT Ratangga [G]',
+        x: st.x,
+        z: st.z,
+        category: 'property',
+        filterGroup: 'properti_transit',
+        color: '#38bdf8',
+        badge: 'M',
       });
     }
 

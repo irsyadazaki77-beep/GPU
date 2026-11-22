@@ -974,6 +974,10 @@ export class PlayerController {
     }
     const rig = buildCharacterRig(boss.policy);
     rig.group.scale.setScalar(1.32);
+    const bossRingMat = rig.telegraphRing.material as THREE.MeshBasicMaterial;
+    bossRingMat.color.setHex(0xfacc15);
+    bossRingMat.opacity = 0.72;
+    rig.telegraphRing.scale.setScalar(1.45);
     const groundY = getGroundElevationAt(boss.x, boss.z);
     rig.group.position.set(boss.x, groundY, boss.z);
     this.scene.add(rig.group);
@@ -1223,7 +1227,29 @@ export class PlayerController {
     soundEngine.playPickup();
   }
 
+  private clearTransientModes(): void {
+    this.droneReconActive = false;
+    this.ridingMrt = false;
+    this.ridingPeerId = null;
+    this.parachuteDeployed = false;
+    this.stealthCrouching = false;
+    this.parachuteMesh.visible = false;
+    gameStore.setDroneReconState(false, true);
+    gameStore.setCoopPassengerUi(null, null);
+    gameStore.setMrtRideUi(false, null);
+    gameStore.setCoverState(false, 'none');
+    gameStore.setParachuteState({
+      deployed: false,
+      altitudeAboveGround: 0,
+      glideSpeed: 0,
+      descentRate: 0,
+      canDeploy: false,
+    });
+  }
+
   public resetWorldForNewRun(): void {
+    this.clearTransientModes();
+    this.activeBossEnemyId = null;
     this.playerPhys.drivingVehicleId = null;
     this.playerPhys.x = 0;
     this.playerPhys.y = 0;
@@ -1279,6 +1305,7 @@ export class PlayerController {
   }
 
   public teleportPlayerTo(targetX: number, targetZ: number): void {
+    this.clearTransientModes();
     const safe = resolveCircleAABBCollision(
       targetX,
       targetZ,
@@ -1319,6 +1346,7 @@ export class PlayerController {
     targetX: number,
     targetZ: number
   ): void {
+    this.clearTransientModes();
     if (this.playerPhys.drivingVehicleId) {
       this.playerPhys.drivingVehicleId = null;
       this.playerRig.group.visible = true;

@@ -88,10 +88,28 @@ test('San Nabilo Open-World E2E Smoke: health/readyz probes, WebGL canvas boot, 
   await page.keyboard.press('Escape');
   await page.waitForTimeout(200);
 
-  // Simulate brief WASD movement
+  // Simulate brief WASD movement, Stealth Crouch [X], Drone FPV [F4], and Wheel overlays [Y]/[C]
   await page.keyboard.down('KeyW');
   await page.waitForTimeout(350);
   await page.keyboard.up('KeyW');
+
+  await page.keyboard.press('KeyX');
+  await page.waitForTimeout(150);
+  await page.keyboard.press('KeyX');
+
+  await page.keyboard.press('F4');
+  const droneHud = page.locator('[data-testid="drone-recon-hud"]');
+  await droneHud.waitFor({ state: 'visible', timeout: 5_000 });
+  await page.keyboard.press('F4');
+  await page.waitForTimeout(150);
+
+  await page.keyboard.press('KeyY');
+  await page.waitForTimeout(120);
+  await page.keyboard.press('Escape');
+
+  await page.keyboard.press('KeyB');
+  await page.waitForTimeout(150);
+  await page.keyboard.press('Escape');
 
   expect(pageErrors).toEqual([]);
   expect(fatalConsoleErrors).toEqual([]);

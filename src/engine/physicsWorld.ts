@@ -1,4 +1,5 @@
-import RAPIER from '@dimforge/rapier3d-compat';
+import type RAPIER_NS from '@dimforge/rapier3d-compat';
+let RAPIER: typeof RAPIER_NS;
 import {
   BuildingFootprint,
   CITY_BUILDINGS,
@@ -285,9 +286,9 @@ export function computeDriftAndSuspensionStep(
 
 export class JakartaPhysicsWorld {
   private rapierReady = false;
-  private world: RAPIER.World | null = null;
-  private bodyMap = new Map<string, RAPIER.RigidBody>();
-  private chunkStaticBodies = new Map<string, RAPIER.RigidBody>();
+  private world: RAPIER_NS.World | null = null;
+  private bodyMap = new Map<string, RAPIER_NS.RigidBody>();
+  private chunkStaticBodies = new Map<string, RAPIER_NS.RigidBody>();
   private vehicles = new Map<string, VehiclePhysicsRecord>();
   private accumulator = 0;
   private disposed = false;
@@ -305,6 +306,10 @@ export class JakartaPhysicsWorld {
   public async init(): Promise<boolean> {
     if (this.rapierReady || this.disposed) return this.rapierReady;
     try {
+      if (!RAPIER) {
+        const mod = await import('@dimforge/rapier3d-compat');
+        RAPIER = mod.default ?? (mod as unknown as typeof RAPIER_NS);
+      }
       await RAPIER.init();
       if (this.disposed) return false;
 

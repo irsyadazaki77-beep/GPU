@@ -2166,6 +2166,14 @@ export const gameStore = {
       activeChoice: null,
       activeQuestState: null,
       combatCombo: null,
+      droneReconActive: false,
+      slipstreamActive: false,
+      ridingPeerId: null,
+      ridingMrt: false,
+      activeVigilante: null,
+      activeRivalBoss: null,
+      inCover: false,
+      coverKind: 'none',
       policeTactical: createInitialPoliceTacticalState(),
       lastOutcomeText: `Keluar RS Cipto Mangunkusumo · Biaya Medis -Rp ${res.billRp.toLocaleString('id-ID')}`,
     };
@@ -2436,6 +2444,17 @@ export const gameStore = {
 
   setRivalBossState: (boss: ActiveRivalBossState | null) => {
     state = { ...state, activeRivalBoss: boss };
+    emitChange();
+  },
+
+  abortVigilantePatrol: () => {
+    if (!state.activeVigilante) return;
+    state = {
+      ...state,
+      activeVigilante: null,
+      customWaypoint: null,
+      lastOutcomeText: 'Patroli Patwal dihentikan.',
+    };
     emitChange();
   },
 };

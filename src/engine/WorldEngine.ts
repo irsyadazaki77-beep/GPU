@@ -24,6 +24,7 @@ import {
   isPlayerNearMrtStation,
   isPlayerWithinStreetEvent,
   resolveAcousticZone,
+  resolveCircleAABBCollision,
   resolveDistrictAtPosition,
   stepVigilanteTargetMovement,
 } from '../game/rules';
@@ -1112,25 +1113,32 @@ export class WorldEngine {
           playerZ: phys.z,
           dt,
         });
-        this.trafficSystem.syncVigilanteTarget(moveVig.x, moveVig.z, moveVig.heading, true);
-        const distVig = Math.hypot(moveVig.x - phys.x, moveVig.z - phys.z);
+        const safeVig = resolveCircleAABBCollision(
+          moveVig.x,
+          moveVig.z,
+          2.2,
+          undefined,
+          this.cityRenderer.buildingGrid
+        );
+        this.trafficSystem.syncVigilanteTarget(safeVig.x, safeVig.z, moveVig.heading, true);
+        const distVig = Math.hypot(safeVig.x - phys.x, safeVig.z - phys.z);
         let nextVigHp = activeVig.targetHp;
         if (distVig < 5.8 && activeVeh && Math.abs(activeVeh.speed) > 7) {
           nextVigHp -= Math.round(Math.abs(activeVeh.speed) * 3.6);
           activeVeh.speed *= 0.65;
-          this.playerController.spawnParticles(moveVig.x, 0.8, moveVig.z, 12, 0xf97316, 8);
+          this.playerController.spawnParticles(safeVig.x, 0.8, safeVig.z, 12, 0xf97316, 8);
           soundEngine.playPropCrash(0);
         } else if (distVig < 9 && pState.fokusActive) {
           nextVigHp -= Math.round(25 * dt);
         }
         if (nextVigHp <= 0) {
           this.trafficSystem.syncVigilanteTarget(0, 0, 0, false);
-          this.playerController.spawnShockwave(moveVig.x, 0.2, moveVig.z, 9, 0xef4444, 0.45);
+          this.playerController.spawnShockwave(safeVig.x, 0.2, safeVig.z, 9, 0xef4444, 0.45);
           gameStore.completeVigilantePatrol();
         } else {
           gameStore.updateVigilantePatrol({
-            targetX: moveVig.x,
-            targetZ: moveVig.z,
+            targetX: safeVig.x,
+            targetZ: safeVig.z,
             targetHp: nextVigHp,
           });
         }

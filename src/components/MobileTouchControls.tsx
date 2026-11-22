@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { TouchControlsMode, VehicleType } from '../game/types';
-import { virtualInputRef } from '../state/gameStore';
+import { gameStore, useGameStore, virtualInputRef } from '../state/gameStore';
 
 interface MobileTouchControlsProps {
   mode?: TouchControlsMode;
@@ -12,6 +12,7 @@ interface MobileTouchControlsProps {
   onToggleFokus: () => void;
   onToggleTpsAim: () => void;
   onHonk?: () => void;
+  onToggleDroneRecon?: () => void;
 }
 
 const STICK_RADIUS = 46;
@@ -26,7 +27,15 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({
   onToggleFokus,
   onToggleTpsAim,
   onHonk,
+  onToggleDroneRecon,
 }) => {
+  const parachuteCanDeploy = useGameStore((s) => s.parachuteState.canDeploy);
+  const droneReconActive = useGameStore((s) => s.droneReconActive);
+  const nearbyMrtStationName = useGameStore((s) => s.nearbyMrtStationName);
+  const ridingMrt = useGameStore((s) => s.ridingMrt);
+  const nearbyPeerVehicleName = useGameStore((s) => s.nearbyPeerVehicleName);
+  const ridingPeerId = useGameStore((s) => s.ridingPeerId);
+  const activeVigilante = useGameStore((s) => s.activeVigilante);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   const [knobOffset, setKnobOffset] = useState<{ x: number; y: number }>({
     x: 0,
@@ -137,6 +146,19 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({
           >
             Kamera
           </button>
+          {!drivingVehicle && onToggleDroneRecon && (
+            <button
+              type="button"
+              onClick={onToggleDroneRecon}
+              className={`min-h-[34px] px-2.5 rounded-lg font-mono-num text-[10px] font-bold border active:scale-95 cursor-pointer ${
+                droneReconActive
+                  ? 'bg-[#22d3ee] text-[#090c12] border-[#22d3ee]'
+                  : 'bg-[#090c12]/85 text-[#22d3ee] border-[#22d3ee]/40'
+              }`}
+            >
+              {droneReconActive ? 'Keluar Drone' : 'Drone'}
+            </button>
+          )}
         </div>
 
         <div
@@ -204,6 +226,16 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({
         {drivingVehicle ? (
           /* DRIVING MODE PEDALS & CONTROLS */
           <div className="grid grid-cols-2 gap-2">
+            {(drivingVehicle === 'polisi' || drivingVehicle === 'barracuda') &&
+              !activeVigilante && (
+                <button
+                  type="button"
+                  onClick={() => gameStore.startVigilantePatrol()}
+                  className="col-span-2 min-h-[38px] px-3 rounded-xl bg-[#ef4444]/85 border border-white/25 text-xs font-mono-num font-bold text-white active:scale-95 cursor-pointer"
+                >
+                  Mulai Patroli Patwal
+                </button>
+              )}
             <button
               type="button"
               onClick={onHonk}
@@ -252,6 +284,42 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({
         ) : (
           /* ON-FOOT COMBAT & INTERACTION CLUSTER */
           <div className="grid grid-cols-2 gap-2">
+            {parachuteCanDeploy && (
+              <button
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' }));
+                  window.setTimeout(
+                    () => window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space' })),
+                    60
+                  );
+                }}
+                className="col-span-2 min-h-[44px] px-3 rounded-xl bg-[#ef4444] border border-white/40 text-xs font-display font-extrabold uppercase tracking-wider text-white animate-pulse cursor-pointer"
+              >
+                Buka Parasut
+              </button>
+            )}
+            {(nearbyMrtStationName || ridingMrt || nearbyPeerVehicleName || ridingPeerId) && (
+              <button
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyG' }));
+                  window.setTimeout(
+                    () => window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyG' })),
+                    60
+                  );
+                }}
+                className="col-span-2 min-h-[40px] px-3 rounded-xl bg-[#38bdf8] border border-white/30 text-xs font-mono-num font-bold text-[#090c12] cursor-pointer"
+              >
+                {ridingPeerId
+                  ? 'Turun Kendaraan Teman'
+                  : nearbyPeerVehicleName
+                  ? `Nebeng ${nearbyPeerVehicleName}`
+                  : ridingMrt
+                  ? 'Turun MRT'
+                  : 'Naik MRT Ratangga'}
+              </button>
+            )}
             <button
               type="button"
               onClick={onToggleTpsAim}

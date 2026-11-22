@@ -4,10 +4,13 @@ import {
   GRAND_HEISTS,
   JAKARTA_DISTRICTS,
   JAKARTA_FLOOD_ZONES,
+  JAKARTA_SPEED_TRAPS,
+  MRT_STATIONS,
   PROTAGONIST_PROFILES,
   ProtagonistId,
   STREET_RACES,
   STUNT_RAMPS_CATALOG,
+  computeMrtTrainState,
   generateRoadsideSpawnLayout,
 } from '../game/rules';
 import {
@@ -278,6 +281,50 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
         ctx.arc(tx, tz, tw.radius * zoom, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
+      }
+
+      // 8e. ETLE Speed Traps, MRT Stations, Live MRT Train & Vigilante Target
+      for (let ti = 0; ti < JAKARTA_SPEED_TRAPS.length; ti++) {
+        const trap = JAKARTA_SPEED_TRAPS[ti];
+        const tx = cx + (trap.x - px) * zoom;
+        const tz = cy + (trap.z - pz) * zoom;
+        ctx.fillStyle = '#facc15';
+        ctx.fillRect(tx - 2.2, tz - 2.2, 4.4, 4.4);
+      }
+
+      for (let mi = 0; mi < MRT_STATIONS.length; mi++) {
+        const st = MRT_STATIONS[mi];
+        const mx = cx + (st.x - px) * zoom;
+        const mz = cy + (st.z - pz) * zoom;
+        ctx.fillStyle = '#0284c7';
+        ctx.strokeStyle = '#e0f2fe';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(mx, mz, 3.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      const mrtLive = computeMrtTrainState(now * 0.001);
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(
+        cx + (mrtLive.x - px) * zoom - 2,
+        cy + (mrtLive.z - pz) * zoom - 6,
+        4,
+        12
+      );
+
+      if (store.activeVigilante && store.activeVigilante.status === 'active') {
+        const vx = cx + (store.activeVigilante.targetX - px) * zoom;
+        const vz = cy + (store.activeVigilante.targetZ - pz) * zoom;
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.arc(vx, vz, 6.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(vx, vz, 2.8, 0, Math.PI * 2);
+        ctx.fill();
       }
 
       // 8e. Active Street Race Checkpoint & Rival AI Racers

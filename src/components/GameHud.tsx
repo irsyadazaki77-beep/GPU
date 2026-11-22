@@ -1100,12 +1100,22 @@ export const GameHud: React.FC<GameHudProps> = ({
               className="aaa-glass-subtle rounded-lg px-3 py-1.5 border-l-2 border-l-[#ef4444] w-72"
             >
               <div className="flex items-center justify-between text-[11px] font-mono-num">
-                <span className="font-bold text-[#fca5a5]">
+                <span className="font-bold text-[#fca5a5] truncate">
                   PATROLI: {activeVigilante.targetName}
                 </span>
-                <span className="text-[#fde047]">
-                  Streak {activeVigilante.streak}
-                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[#fde047]">
+                    Streak {activeVigilante.streak}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => gameStore.abortVigilantePatrol()}
+                    title="Batalkan Patroli"
+                    className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[#cbd5e1] text-[10px] cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                </div>
               </div>
               <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden mt-1">
                 <div
