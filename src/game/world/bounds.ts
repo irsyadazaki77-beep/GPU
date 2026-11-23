@@ -375,6 +375,13 @@ export const MAIN_BOULEVARD_SIDEWALK_SLABS: SidewalkBounds[] = [
   { minX: 40, maxX: 118, minZ: 136, maxZ: 141 },
   { minX: -118, maxX: -40, minZ: 197, maxZ: 201 },
   { minX: 40, maxX: 118, minZ: 197, maxZ: 201 },
+  // SCBD, Blok M & Coastal North Promenade Pedestrian Corridors
+  { minX: 38, maxX: 76, minZ: 38, maxZ: 42 },
+  { minX: 38, maxX: 76, minZ: 70, maxZ: 74 },
+  { minX: -76, maxX: -38, minZ: -60, maxZ: -56 },
+  { minX: 38, maxX: 76, minZ: -60, maxZ: -56 },
+  { minX: -76, maxX: -38, minZ: 88, maxZ: 92 },
+  { minX: 38, maxX: 76, minZ: 88, maxZ: 92 },
 ];
 
 /**

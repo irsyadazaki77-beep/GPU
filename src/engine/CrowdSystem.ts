@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import {
   BuildingFootprint,
   MAIN_BOULEVARD_SIDEWALK_SLABS,
@@ -141,7 +142,7 @@ export class CrowdSystem {
       });
     }
 
-    const torsoGeo = new THREE.BoxGeometry(0.42, 0.58, 0.24);
+    const torsoGeo = new RoundedBoxGeometry(0.42, 0.58, 0.24, 3, 0.075);
     const torsoMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       roughness: 0.76,
@@ -155,7 +156,7 @@ export class CrowdSystem {
     this.torsoMesh.frustumCulled = false;
     this.group.add(this.torsoMesh);
 
-    const headGeo = new THREE.SphereGeometry(0.16, 8, 8);
+    const headGeo = new THREE.SphereGeometry(0.16, 12, 10);
     const headMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       roughness: 0.65,
@@ -164,7 +165,7 @@ export class CrowdSystem {
     this.headMesh.frustumCulled = false;
     this.group.add(this.headMesh);
 
-    const armGeo = new THREE.BoxGeometry(0.11, 0.44, 0.11);
+    const armGeo = new THREE.CapsuleGeometry(0.056, 0.34, 4, 8);
     armGeo.translate(0, -0.18, 0);
     const armMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
@@ -176,8 +177,8 @@ export class CrowdSystem {
 
     const hatGeo = new THREE.SphereGeometry(
       0.185,
+      12,
       8,
-      6,
       0,
       Math.PI * 2,
       0,
@@ -192,7 +193,7 @@ export class CrowdSystem {
     this.hatHelmetMesh.frustumCulled = false;
     this.group.add(this.hatHelmetMesh);
 
-    const legGeo = new THREE.BoxGeometry(0.15, 0.52, 0.16);
+    const legGeo = new THREE.CapsuleGeometry(0.075, 0.38, 4, 8);
     legGeo.translate(0, -0.26, 0);
     const legMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,

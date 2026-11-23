@@ -37,6 +37,8 @@ import {
 function buildExpansionZonesGroup(uTimeUniform: { value: number }): {
   group: THREE.Group;
   bayWaterMat: THREE.MeshStandardMaterial;
+  cargoShipGroup: THREE.Group;
+  lighthouseBeacon: THREE.Object3D;
 } {
   const group = new THREE.Group();
   group.name = 'JakartaExpansionZonesGroup';
@@ -101,50 +103,164 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.88, 0.96, 1.0), clamp(foamLine *
   bayMesh.position.set(0, -0.02, -160);
   group.add(bayMesh);
 
-  // Kepulauan Seribu Coral Atolls & Speedboat Jetty Pier
+  // Kepulauan Seribu Coral Atolls, Tropical Palms, Beach Gazebos, Lighthouse & Speedboat Jetty Pier
   const sandMat = new THREE.MeshStandardMaterial({
-    color: 0xd6d3d1,
+    color: 0xe7dfc8,
     roughness: 0.88,
     metalness: 0.04,
   });
+  const islandGrassMat = new THREE.MeshStandardMaterial({
+    color: 0x16a34a,
+    roughness: 0.9,
+    metalness: 0.02,
+  });
+  const woodMat = new THREE.MeshStandardMaterial({
+    color: 0x78350f,
+    roughness: 0.85,
+    metalness: 0.05,
+  });
+  const islandPalmTrunkMat = new THREE.MeshStandardMaterial({
+    color: 0x5c4033,
+    roughness: 0.92,
+  });
+  const islandPalmLeafMat = new THREE.MeshStandardMaterial({
+    color: 0x15803d,
+    roughness: 0.82,
+  });
+
   const reefPositions: [number, number, number, number][] = [
     [-48, 0.35, -83, 7.5],
     [92, 0.35, -148, 9.2],
     [-118, 0.35, -152, 8.6],
   ];
-  for (const [rx, ry, rz, rad] of reefPositions) {
+  const lighthouseBeacon = new THREE.Group();
+  reefPositions.forEach(([rx, ry, rz, rad], idx) => {
     const reefIsland = new THREE.Mesh(
-      new THREE.CylinderGeometry(rad, rad + 2.2, 1.2, 16),
+      new THREE.CylinderGeometry(rad, rad + 2.4, 1.2, 18),
       sandMat
     );
     reefIsland.position.set(rx, ry, rz);
+    reefIsland.receiveShadow = true;
     group.add(reefIsland);
-  }
+
+    const grassCap = new THREE.Mesh(
+      new THREE.CylinderGeometry(rad * 0.72, rad * 0.84, 0.45, 16),
+      islandGrassMat
+    );
+    grassCap.position.set(rx, ry + 0.65, rz);
+    group.add(grassCap);
+
+    // Tropical island palm cluster
+    for (let pi = 0; pi < 3; pi++) {
+      const ang = (pi / 3) * Math.PI * 2 + idx * 0.9;
+      const px = rx + Math.cos(ang) * (rad * 0.44);
+      const pz = rz + Math.sin(ang) * (rad * 0.44);
+      const pTrunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.14, 0.24, 4.2, 8),
+        islandPalmTrunkMat
+      );
+      pTrunk.position.set(px, ry + 2.7, pz);
+      pTrunk.rotation.z = Math.cos(ang) * 0.14;
+      group.add(pTrunk);
+
+      const pCrown = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(1.65, 2),
+        islandPalmLeafMat
+      );
+      pCrown.scale.set(1.2, 0.65, 1.2);
+      pCrown.position.set(px + Math.cos(ang) * 0.3, ry + 4.8, pz);
+      group.add(pCrown);
+    }
+
+    if (idx === 0) {
+      // Coastal Lighthouse with rotating amber beacon on primary island
+      const lhTower = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.85, 1.35, 9.5, 14),
+        new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.5 })
+      );
+      lhTower.position.set(rx, ry + 5.3, rz);
+      lhTower.castShadow = true;
+      group.add(lhTower);
+
+      const lhBand = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.06, 1.18, 2.2, 14),
+        new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.48 })
+      );
+      lhBand.position.set(rx, ry + 6.4, rz);
+      group.add(lhBand);
+
+      const lhLantern = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.75, 0.75, 1.35, 12),
+        new THREE.MeshStandardMaterial({
+          color: 0xfef08a,
+          emissive: 0xf59e0b,
+          emissiveIntensity: 1.8,
+        })
+      );
+      lhLantern.position.set(rx, ry + 10.6, rz);
+      group.add(lhLantern);
+
+      lighthouseBeacon.position.set(rx, ry + 10.6, rz);
+      const beamConeGeo = new THREE.ConeGeometry(2.4, 24, 12, 1, true);
+      beamConeGeo.rotateZ(-Math.PI / 2);
+      beamConeGeo.translate(12, 0, 0);
+      const beamCone = new THREE.Mesh(
+        beamConeGeo,
+        new THREE.MeshBasicMaterial({
+          color: 0xfef08a,
+          transparent: true,
+          opacity: 0.16,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        })
+      );
+      lighthouseBeacon.add(beamCone);
+      group.add(lighthouseBeacon);
+    } else {
+      // Wooden Beach Resort Gazebo
+      const gazeboBase = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.2, 0.35, 8), woodMat);
+      gazeboBase.position.set(rx, ry + 1.0, rz);
+      const gazeboRoof = new THREE.Mesh(new THREE.ConeGeometry(2.5, 1.4, 8), woodMat);
+      gazeboRoof.position.set(rx, ry + 3.2, rz);
+      group.add(gazeboBase, gazeboRoof);
+    }
+  });
 
   const jettyMat = new THREE.MeshStandardMaterial({
-    color: 0x475569,
+    color: 0x64748b,
     roughness: 0.75,
     metalness: 0.2,
   });
   const jettyDeck = new THREE.Mesh(
-    new THREE.BoxGeometry(4.5, 0.4, 14),
+    new RoundedBoxGeometry(4.8, 0.42, 15, 2, 0.08),
     jettyMat
   );
-  jettyDeck.position.set(-28, 0.35, -75);
+  jettyDeck.position.set(-28, 0.38, -76);
   group.add(jettyDeck);
+  for (const jx of [-30.1, -25.9]) {
+    for (const jz of [-71, -76, -81]) {
+      const piling = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.22, 1.9, 8),
+        woodMat
+      );
+      piling.position.set(jx, 0.35, jz);
+      group.add(piling);
+    }
+  }
 
-  // 2. Tanjung Priok Waterfront Pier & Cargo Container Stacks
+  // 2. Tanjung Priok Waterfront Pier, Cargo Container Stacks & Moored Cargo Vessel
   const dockMat = new THREE.MeshStandardMaterial({
     color: 0x334155,
     roughness: 0.85,
     metalness: 0.14,
   });
-  const dockSlab = new THREE.Mesh(new THREE.BoxGeometry(16, 0.7, 14), dockMat);
+  const dockSlab = new THREE.Mesh(new RoundedBoxGeometry(16, 0.7, 14, 2, 0.12), dockMat);
   dockSlab.position.set(78, 0.35, -78);
   group.add(dockSlab);
 
   const containerColors = [0x0284c7, 0xea580c, 0x16a34a, 0xdc2626];
-  const containerGeo = new THREE.BoxGeometry(2.6, 2.5, 6.2);
+  const containerGeo = new RoundedBoxGeometry(2.6, 2.5, 6.2, 2, 0.08);
   for (let row = 0; row < 3; row++) {
     for (let tier = 0; tier < 2; tier++) {
       const cMat = new THREE.MeshStandardMaterial({
@@ -157,6 +273,43 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.88, 0.96, 1.0), clamp(foamLine *
       group.add(box);
     }
   }
+
+  // Moored Cargo Container Ship ("KM Nusantara Express") bobbing gently off Tanjung Priok Pier
+  const cargoShipGroup = new THREE.Group();
+  cargoShipGroup.position.set(78, 0.2, -97);
+  const hullMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.58, metalness: 0.35 });
+  const upperHullMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.52, metalness: 0.4 });
+  const bridgeMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.45, metalness: 0.15 });
+
+  const lowerHull = new THREE.Mesh(new RoundedBoxGeometry(34, 2.2, 10.2, 3, 0.45), hullMat);
+  lowerHull.position.y = 0.7;
+  const upperHull = new THREE.Mesh(new RoundedBoxGeometry(35, 1.6, 10.6, 3, 0.35), upperHullMat);
+  upperHull.position.y = 2.4;
+  const shipBridge = new THREE.Mesh(new RoundedBoxGeometry(5.8, 6.2, 8.8, 2, 0.2), bridgeMat);
+  shipBridge.position.set(11.5, 6.1, 0);
+  const shipBridgeGlass = new THREE.Mesh(
+    new THREE.BoxGeometry(6.0, 1.1, 7.6),
+    new THREE.MeshStandardMaterial({ color: 0x0ea5e9, emissive: 0x0284c7, emissiveIntensity: 0.45, roughness: 0.15 })
+  );
+  shipBridgeGlass.position.set(11.5, 8.0, 0);
+  cargoShipGroup.add(lowerHull, upperHull, shipBridge, shipBridgeGlass);
+
+  for (let sr = 0; sr < 4; sr++) {
+    for (let st = 0; st < 2; st++) {
+      const sBox = new THREE.Mesh(
+        containerGeo,
+        new THREE.MeshStandardMaterial({
+          color: containerColors[(sr + st + 1) % containerColors.length],
+          roughness: 0.6,
+          metalness: 0.28,
+        })
+      );
+      sBox.rotation.y = Math.PI / 2;
+      sBox.position.set(-10 + sr * 6.5, 4.45 + st * 2.55, st % 2 === 0 ? -2.2 : 2.2);
+      cargoShipGroup.add(sBox);
+    }
+  }
+  group.add(cargoShipGroup);
 
   // 3. Semanggi Elevated Tollway Cloverleaf Neon Arch Portals (z = +80)
   const archMat = new THREE.MeshStandardMaterial({
@@ -175,7 +328,7 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.88, 0.96, 1.0), clamp(foamLine *
     group.add(archBeam);
   }
 
-  return { group, bayWaterMat };
+  return { group, bayWaterMat, cargoShipGroup, lighthouseBeacon };
 }
 
 function bayMatOrFallback(mat: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
@@ -224,6 +377,8 @@ export class CityRenderer {
   private readonly roadMat: THREE.MeshStandardMaterial;
   private readonly spireBeaconMat: THREE.MeshBasicMaterial;
   private readonly bayWaterMat: THREE.MeshStandardMaterial;
+  private readonly cargoShipGroup: THREE.Group;
+  private readonly lighthouseBeacon: THREE.Object3D;
   private readonly collectibleMeshes = new Map<string, THREE.Group>();
   private lastCollectedCount = -1;
   private lastCollectedFirstId: string | undefined;
@@ -257,6 +412,8 @@ export class CityRenderer {
 
     const expZones = buildExpansionZonesGroup(this.roadUniforms.uTime);
     this.bayWaterMat = expZones.bayWaterMat;
+    this.cargoShipGroup = expZones.cargoShipGroup;
+    this.lighthouseBeacon = expZones.lighthouseBeacon;
     this.rootGroup.add(expZones.group);
 
     // 10 Glowing Koper Emas Nusantara Collectibles
@@ -349,6 +506,56 @@ export class CityRenderer {
     plazaMesh.position.y = 0.072;
     plazaMesh.receiveShadow = true;
     this.rootGroup.add(plazaMesh);
+
+    // Taman Medan Merdeka (Monas Park): 4 emerald lawn quadrants + cardinal stone walkways + ornamental bollards
+    const monasLawnMat = new THREE.MeshStandardMaterial({
+      color: 0x16a34a,
+      roughness: 0.9,
+      metalness: 0.02,
+    });
+    const monasStoneMat = new THREE.MeshStandardMaterial({
+      color: 0x94a3b8,
+      roughness: 0.84,
+      metalness: 0.06,
+    });
+    const monasBollardGlowMat = new THREE.MeshStandardMaterial({
+      color: 0xfef3c7,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 0.85,
+      roughness: 0.25,
+    });
+    for (let qi = 0; qi < 4; qi++) {
+      const startAng = qi * (Math.PI * 0.5) + 0.22;
+      const quadGeo = new THREE.RingGeometry(8.2, 17.5, 16, 1, startAng, Math.PI * 0.5 - 0.44);
+      quadGeo.rotateX(-Math.PI / 2);
+      const quadMesh = new THREE.Mesh(quadGeo, monasLawnMat);
+      quadMesh.position.y = 0.095;
+      quadMesh.receiveShadow = true;
+      this.rootGroup.add(quadMesh);
+    }
+    const innerMarbleRing = new THREE.Mesh(
+      new THREE.RingGeometry(7.2, 8.2, 32).rotateX(-Math.PI / 2),
+      monasStoneMat
+    );
+    innerMarbleRing.position.y = 0.098;
+    this.rootGroup.add(innerMarbleRing);
+
+    for (let bi = 0; bi < 8; bi++) {
+      const bang = (bi / 8) * Math.PI * 2 + Math.PI / 8;
+      const bx = Math.cos(bang) * 16.4;
+      const bz = Math.sin(bang) * 16.4;
+      const bollard = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.22, 0.9, 8),
+        monasStoneMat
+      );
+      bollard.position.set(bx, 0.52, bz);
+      const cap = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 8, 8),
+        monasBollardGlowMat
+      );
+      cap.position.set(bx, 1.02, bz);
+      this.rootGroup.add(bollard, cap);
+    }
 
     const plazaCurbGeo = new THREE.RingGeometry(18.15, 18.85, 48);
     plazaCurbGeo.rotateX(-Math.PI / 2);
@@ -2029,6 +2236,9 @@ if (uWetness > 0.04) {
     this.roadMat.envMapIntensity = 0.34 + wetnessFactor * 0.42;
     this.spireBeaconMat.color.setScalar(0.55 + nightFactor * 0.45);
     this.bayWaterMat.roughness = 0.14 + Math.sin(this.elapsedTime * 1.8) * 0.04;
+    this.cargoShipGroup.position.y = 0.2 + Math.sin(this.elapsedTime * 1.35) * 0.14;
+    this.cargoShipGroup.rotation.z = Math.cos(this.elapsedTime * 1.1) * 0.018;
+    this.lighthouseBeacon.rotation.y += dt * 0.85;
 
     // Automatically illuminate Jakarta skyscraper offices & Blok M ruko windows at dusk/night
     for (let i = 0; i < this.buildingEmissiveMats.length; i++) {

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { getGroundElevationAt } from '../game/rules';
 import { soundEngine } from '../game/sound';
 import { isNearBuilding, isOnRoadway } from '../game/world/spatial';
@@ -67,19 +68,22 @@ export class DestructiblePropsSystem {
       { kind: 'barrel', x: -16.5, z: 18 },
       { kind: 'barrel', x: 16.5, z: -18 },
       { kind: 'barrel', x: -34.5, z: 10 },
-      { kind: 'barrel', x: 43.0, z: -64 },
-      { kind: 'barrel', x: -24.5, z: -66 },
-      { kind: 'barrel', x: 35.0, z: 28 },
-      { kind: 'barrel', x: -18.5, z: -50 },
-      { kind: 'barrel', x: 18.5, z: 50 },
+      { kind: 'barrel', x: 43.0, z: -60 },
+      { kind: 'barrel', x: -42.0, z: -60 },
+      { kind: 'barrel', x: 35.0, z: 24 },
+      { kind: 'barrel', x: 42.0, z: 54 },
+      { kind: 'barrel', x: -42.0, z: 96 },
+      { kind: 'crate', x: 42.0, z: 94 },
+      { kind: 'crate', x: 64.0, z: -60 },
+      { kind: 'barrier', x: -42.0, z: 46 },
     ];
     candidates.push(...extra);
 
     for (const c of candidates) {
-      if (c.kind !== 'barrel' && this.props.length >= 30) continue;
+      if (c.kind !== 'barrel' && this.props.length >= 36) continue;
       if (isNearBuilding(c.x, c.z, 1.3)) continue;
       if (isOnRoadway(c.x, c.z)) continue;
-      const gY = getGroundElevationAt(c.x, c.z);
+      const gY = getGroundElevationAt(c.x, c.z, 0);
       const idx = this.props.length;
       this.props.push({
         kind: c.kind,
@@ -124,7 +128,7 @@ export class DestructiblePropsSystem {
     this.coneMesh.castShadow = true;
     this.group.add(this.coneMesh);
 
-    const crateGeo = new THREE.BoxGeometry(0.75, 0.72, 0.75);
+    const crateGeo = new RoundedBoxGeometry(0.75, 0.72, 0.75, 2, 0.06);
     crateGeo.translate(0, 0.36, 0);
     const crateMat = new THREE.MeshStandardMaterial({
       color: 0x92400e,
@@ -139,7 +143,7 @@ export class DestructiblePropsSystem {
     this.crateMesh.castShadow = true;
     this.group.add(this.crateMesh);
 
-    const barrierGeo = new THREE.BoxGeometry(1.35, 0.65, 0.38);
+    const barrierGeo = new RoundedBoxGeometry(1.35, 0.65, 0.38, 2, 0.06);
     barrierGeo.translate(0, 0.325, 0);
     const barrierMat = new THREE.MeshStandardMaterial({
       color: 0xdc2626,
@@ -278,7 +282,7 @@ export class DestructiblePropsSystem {
 
       if (prop.knocked) {
         prop.resetTimer -= dt;
-        const floorY = getGroundElevationAt(prop.x, prop.z);
+        const floorY = getGroundElevationAt(prop.x, prop.z, prop.y);
         if (
           !prop.detonated &&
           (prop.y > floorY + 0.01 ||
@@ -294,7 +298,7 @@ export class DestructiblePropsSystem {
           prop.ry += prop.vry * dt;
           prop.rz += prop.vrz * dt;
 
-          const newFloor = getGroundElevationAt(prop.x, prop.z);
+          const newFloor = getGroundElevationAt(prop.x, prop.z, prop.y);
           if (prop.y <= newFloor) {
             prop.y = newFloor;
             prop.vy = Math.abs(prop.vy) > 2.4 ? -prop.vy * 0.35 : 0;
@@ -313,7 +317,7 @@ export class DestructiblePropsSystem {
         ) {
           prop.x = prop.homeX;
           prop.z = prop.homeZ;
-          prop.y = getGroundElevationAt(prop.homeX, prop.homeZ);
+          prop.y = getGroundElevationAt(prop.homeX, prop.homeZ, 0);
           prop.vx = 0;
           prop.vy = 0;
           prop.vz = 0;
