@@ -53,7 +53,7 @@ import {
   stepParachuteGlide,
   stepRagdollState,
 } from '../game/rules';
-import { soundEngine } from '../game/sound';
+import { computeEngineTransmissionRpm, soundEngine } from '../game/sound';
 import {
   INTERIOR_ROOM_CENTERS,
   animateCharacterRig,
@@ -261,6 +261,8 @@ export class PlayerController {
   private camLookInitialized = false;
   private lastHornMs = -9999;
   private exhaustPuffAccum = 0;
+  private lastTransmissionGear = 1;
+  private backfireCooldown = 0;
   private lastAppliedOutfitId = '';
   private lastWeaponVisualKey = '';
   private lastNearMissMs = -9999;
@@ -3102,6 +3104,38 @@ export class PlayerController {
         this.exhaustPuffAccum = 0;
       }
 
+      // Gear-shift & high-RPM throttle lift-off exhaust backfire pops + flame sparks
+      if (this.backfireCooldown > 0) {
+        this.backfireCooldown = Math.max(0, this.backfireCooldown - simDt);
+      }
+      if (!vSpec.isAircraft && !vSpec.isWatercraft) {
+        const rpmState = computeEngineTransmissionRpm(
+          Math.abs(activeVehicle.speed) / Math.max(1, vSpec.maxSpeed),
+          activeVehicle.type,
+          false,
+          Boolean(pState.fokusActive || abilitySurgeActive)
+        );
+        const gearChangedAtHighSpeed =
+          rpmState.gear !== this.lastTransmissionGear &&
+          Math.abs(activeVehicle.speed) > 9.5;
+        const highRpmDecel =
+          moveForward <= 0 &&
+          activeVehicle.speed > 14.5 &&
+          this.backfireCooldown <= 0;
+        this.lastTransmissionGear = rpmState.gear;
+
+        if ((gearChangedAtHighSpeed || highRpmDecel) && this.backfireCooldown <= 0) {
+          this.backfireCooldown = 1.15;
+          cityAudio.playExhaustBackfire(
+            activeVehicle.type === 'supercar' ? 0.92 : 0.68
+          );
+          const tailX = activeVehicle.x - Math.sin(activeVehicle.heading) * 1.85;
+          const tailZ = activeVehicle.z - Math.cos(activeVehicle.heading) * 1.85;
+          this.spawnParticles(tailX, activeVehicle.y + 0.34, tailZ, 4, 0xf97316, 4.8);
+          this.spawnParticles(tailX, activeVehicle.y + 0.34, tailZ, 2, 0x38bdf8, 5.4);
+        }
+      }
+
       // Tire smoke, asphalt skidmarks & live Drift Combo Scoring during drift
       const driftSkillLv = pState.characterSkills?.driftControl ?? 1;
       if (isDrifting && activeVehicle.y < 1.2) {
@@ -3140,7 +3174,30 @@ export class PlayerController {
           }
         }
       } else {
-        soundEngine.updateDriftAudio(0, false);
+        const isHardBraking =
+          !vSpec.isAircraft &&
+          !vSpec.isWatercraft &&
+          activeVehicle.y < 1.2 &&
+          Boolean(activeVehicle.isBraking) &&
+          Math.abs(activeVehicle.speed) > 9.0;
+        if (isHardBraking) {
+          soundEngine.updateDriftAudio(
+            Math.min(0.62, Math.abs(activeVehicle.speed) / 24),
+            true
+          );
+          this.skidSpawnAccum += simDt;
+          if (this.skidSpawnAccum >= 0.065) {
+            this.skidSpawnAccum = 0;
+            this.dropSkidmarkPair(
+              activeVehicle.x,
+              activeVehicle.y,
+              activeVehicle.z,
+              activeVehicle.heading
+            );
+          }
+        } else {
+          soundEngine.updateDriftAudio(0, false);
+        }
         if (this.driftChainScore >= 120) {
           const bonusRp = Math.round(this.driftChainScore * 35);
           const pts = Math.round(this.driftChainScore);

@@ -803,6 +803,13 @@ if (uWetness > 0.04) {
     this.turfWarRingGroup.visible = false;
     this.rootGroup.add(this.turfWarRingGroup);
 
+    const gpsWidgets = this.buildGpsRoadGuidanceWidgets();
+    this.gpsGuidanceMesh = gpsWidgets.chevronMesh;
+    this.gpsGuidanceMat = gpsWidgets.chevronMat;
+    this.gpsDestinationBeacon = gpsWidgets.destinationGroup;
+    this.gpsDestinationMat = gpsWidgets.destinationMat;
+    this.rootGroup.add(this.gpsGuidanceMesh, this.gpsDestinationBeacon);
+
     // 4. Buildings (3-Tier THREE.LOD: 0m High, 72m Mid, 135m Low Proxy) + Instanced Rooftop Aviation Beacons
     const beaconPositions: { x: number; y: number; z: number; color: number }[] = [];
     for (const b of CITY_BUILDINGS) {
@@ -909,6 +916,11 @@ if (uWetness > 0.04) {
   private wave2FloodZonesGroup: THREE.Group;
   private raceCheckpointGroup: THREE.Group;
   private turfWarRingGroup: THREE.Group;
+  private gpsGuidanceMesh: THREE.InstancedMesh;
+  private gpsGuidanceMat: THREE.MeshBasicMaterial;
+  private gpsDestinationBeacon: THREE.Group;
+  private gpsDestinationMat: THREE.MeshBasicMaterial;
+  private readonly _gpsDummy = new THREE.Object3D();
   private readonly videotronMats: THREE.MeshStandardMaterial[] = [];
   private readonly palmCanopies: THREE.Object3D[] = [];
   private readonly rampChevronMats: THREE.MeshBasicMaterial[] = [];
@@ -1378,6 +1390,133 @@ if (uWetness > 0.04) {
     this.turfWarRingGroup.position.set(x, 0, z);
     const scale = radius / 26;
     this.turfWarRingGroup.scale.set(scale, 1, scale);
+  }
+
+  private buildGpsRoadGuidanceWidgets(): {
+    chevronMesh: THREE.InstancedMesh;
+    chevronMat: THREE.MeshBasicMaterial;
+    destinationGroup: THREE.Group;
+    destinationMat: THREE.MeshBasicMaterial;
+  } {
+    // 2D Chevron Shape extruded/projected flat on asphalt
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0.85);
+    shape.lineTo(0.85, -0.45);
+    shape.lineTo(0.42, -0.75);
+    shape.lineTo(0, -0.1);
+    shape.lineTo(-0.42, -0.75);
+    shape.lineTo(-0.85, -0.45);
+    shape.closePath();
+
+    const chevronGeo = new THREE.ShapeGeometry(shape);
+    chevronGeo.rotateX(-Math.PI / 2);
+
+    const chevronMat = new THREE.MeshBasicMaterial({
+      color: 0xc084fc,
+      transparent: true,
+      opacity: 0.72,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+
+    const MAX_GPS_CHEVRONS = 20;
+    const chevronMesh = new THREE.InstancedMesh(
+      chevronGeo,
+      chevronMat,
+      MAX_GPS_CHEVRONS
+    );
+    chevronMesh.count = 0;
+    chevronMesh.visible = false;
+    chevronMesh.frustumCulled = false;
+
+    const destinationGroup = new THREE.Group();
+    destinationGroup.visible = false;
+
+    const ringGeo = new THREE.RingGeometry(1.75, 2.35, 28);
+    ringGeo.rotateX(-Math.PI / 2);
+    const destinationMat = new THREE.MeshBasicMaterial({
+      color: 0xc084fc,
+      transparent: true,
+      opacity: 0.65,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const ring = new THREE.Mesh(ringGeo, destinationMat);
+    ring.position.y = 0.11;
+    destinationGroup.add(ring);
+
+    const beamGeo = new THREE.CylinderGeometry(1.7, 1.9, 3.6, 20, 1, true);
+    const beam = new THREE.Mesh(beamGeo, destinationMat);
+    beam.position.y = 1.9;
+    destinationGroup.add(beam);
+
+    return { chevronMesh, chevronMat, destinationGroup, destinationMat };
+  }
+
+  public updateGpsRoadGuidance(
+    routePoints: Array<{ x: number; z: number }> | null,
+    colorHex: number = 0xc084fc
+  ): void {
+    if (!routePoints || routePoints.length < 2) {
+      this.gpsGuidanceMesh.visible = false;
+      this.gpsGuidanceMesh.count = 0;
+      this.gpsDestinationBeacon.visible = false;
+      return;
+    }
+
+    this.gpsGuidanceMat.color.setHex(colorHex);
+    this.gpsDestinationMat.color.setHex(colorHex);
+
+    const finalPt = routePoints[routePoints.length - 1];
+    this.gpsDestinationBeacon.visible = true;
+    this.gpsDestinationBeacon.position.set(finalPt.x, 0, finalPt.z);
+    const pulse = 1 + Math.sin(this.elapsedTime * 5.0) * 0.08;
+    this.gpsDestinationBeacon.scale.set(pulse, 1, pulse);
+
+    // Sample up to 20 road chevrons every 4.8m along the route polyline with animated march offset
+    const stepSpacing = 4.8;
+    const marchOffset = (this.elapsedTime * 6.5) % stepSpacing;
+    let nextTargetDist = 3.8 + marchOffset;
+    let accumDist = 0;
+    let count = 0;
+    const MAX_CHEVRONS = 20;
+
+    for (let i = 0; i < routePoints.length - 1 && count < MAX_CHEVRONS; i++) {
+      const a = routePoints[i];
+      const b = routePoints[i + 1];
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const segLen = Math.hypot(dx, dz);
+      if (segLen < 0.25) continue;
+
+      const heading = Math.atan2(dx, dz);
+      while (
+        nextTargetDist <= accumDist + segLen &&
+        count < MAX_CHEVRONS
+      ) {
+        const localT = (nextTargetDist - accumDist) / segLen;
+        const cx = a.x + dx * localT;
+        const cz = a.z + dz * localT;
+
+        this._gpsDummy.position.set(cx, 0.095, cz);
+        this._gpsDummy.rotation.set(0, heading + Math.PI, 0);
+        const waveScale = 0.88 + Math.sin(this.elapsedTime * 6 - count * 0.45) * 0.14;
+        this._gpsDummy.scale.setScalar(waveScale);
+        this._gpsDummy.updateMatrix();
+        this.gpsGuidanceMesh.setMatrixAt(count, this._gpsDummy.matrix);
+        count++;
+        nextTargetDist += stepSpacing;
+      }
+      accumDist += segLen;
+    }
+
+    this.gpsGuidanceMesh.count = count;
+    this.gpsGuidanceMesh.visible = count > 0;
+    if (count > 0) {
+      this.gpsGuidanceMesh.instanceMatrix.needsUpdate = true;
+    }
   }
 
   public getSidewalkRects(): SidewalkRect[] {

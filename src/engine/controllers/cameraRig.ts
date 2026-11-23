@@ -28,6 +28,24 @@ export interface ChaseCameraSolveOutput {
 }
 
 /**
+ * Computes subtle high-speed asphalt vibration (>72% top speed / ~90+ km/h)
+ */
+export function computeHighSpeedCameraRumble(
+  speedRatio: number,
+  nowMs: number
+): { offsetX: number; offsetY: number } {
+  if (speedRatio <= 0.72) {
+    return { offsetX: 0, offsetY: 0 };
+  }
+  const intensity = Math.min(1, (speedRatio - 0.72) / 0.35);
+  const amp = intensity * 0.038;
+  return {
+    offsetX: Math.sin(nowMs * 0.052) * amp,
+    offsetY: Math.cos(nowMs * 0.068) * amp * 0.85,
+  };
+}
+
+/**
  * Pure orbital / chase / cinematic / TPS camera rig solver pulled cleanly out of PlayerController.
  */
 export function solveChaseCameraRig(
@@ -92,8 +110,16 @@ export function solveChaseCameraRig(
   const lookPitchShift =
     (0.28 - input.camPitch) * (input.isTpsAim ? 9.5 : 4.5);
 
+  const rumble = input.isDriving
+    ? computeHighSpeedCameraRumble(input.speedRatio, input.nowMs)
+    : { offsetX: 0, offsetY: 0 };
+
   return {
-    desiredPos: pulledCam,
+    desiredPos: {
+      x: pulledCam.x + orbitRightX * rumble.offsetX,
+      y: pulledCam.y + rumble.offsetY,
+      z: pulledCam.z + orbitRightZ * rumble.offsetX,
+    },
     lookTarget: {
       x: input.playerX + orbitFwdX * lookDist,
       y:

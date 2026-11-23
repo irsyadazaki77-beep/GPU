@@ -344,6 +344,109 @@ class CityAudioSynthesizer {
     osc.stop(now + 0.24);
   }
 
+  /**
+   * Dual-pop racing exhaust backfire crackle on high-RPM gear shift or throttle lift-off
+   */
+  public playExhaustBackfire(intensity: number = 0.7): void {
+    const masterSfx = this.getSfxMasterGain();
+    if (masterSfx <= 0.001) return;
+    const ctx = this.ensureContext();
+    if (!ctx || !this.masterGain || ctx.state !== 'running') return;
+    this.masterGain.gain.setTargetAtTime(masterSfx, ctx.currentTime, 0.02);
+
+    const now = ctx.currentTime;
+    const popOffsets = [0, 0.065];
+    for (let i = 0; i < popOffsets.length; i++) {
+      const t0 = now + popOffsets[i];
+      const amp = Math.max(0.05, Math.min(0.22, intensity * (i === 0 ? 0.18 : 0.12)));
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(i === 0 ? 155 : 132, t0);
+      osc.frequency.exponentialRampToValueAtTime(38, t0 + 0.055);
+
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(240, t0);
+      filter.Q.setValueAtTime(1.4, t0);
+
+      gain.gain.setValueAtTime(amp, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.065);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(t0);
+      osc.stop(t0 + 0.075);
+    }
+  }
+
+  /**
+   * Warm resonant Maghrib bedug drum chime at Jakarta twilight (17:50 - 18:25 WIB)
+   */
+  public playDistantMaghribBedug(): void {
+    const masterSfx = this.getSfxMasterGain();
+    if (masterSfx <= 0.001) return;
+    const ctx = this.ensureContext();
+    if (!ctx || !this.masterGain || ctx.state !== 'running') return;
+
+    const now = ctx.currentTime;
+    const strikes = [0, 0.42, 0.78];
+    for (let i = 0; i < strikes.length; i++) {
+      const t0 = now + strikes[i];
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(92 - i * 4, t0);
+      osc.frequency.exponentialRampToValueAtTime(46, t0 + 0.34);
+
+      gain.gain.setValueAtTime(0.001, t0);
+      gain.gain.linearRampToValueAtTime(0.065, t0 + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.36);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(t0);
+      osc.stop(t0 + 0.38);
+    }
+  }
+
+  /**
+   * Deep maritime container ship foghorn near Tanjung Priok / Jakarta Bay coast
+   */
+  public playHarborFoghorn(): void {
+    const masterSfx = this.getSfxMasterGain();
+    if (masterSfx <= 0.001) return;
+    const ctx = this.ensureContext();
+    if (!ctx || !this.masterGain || ctx.state !== 'running') return;
+
+    const now = ctx.currentTime;
+    const dur = 1.45;
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(210, now);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.075, now + 0.22);
+    gain.gain.setValueAtTime(0.068, now + dur - 0.35);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+    for (const freq of [73.42, 110.0]) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, now);
+      osc.connect(filter);
+      osc.start(now);
+      osc.stop(now + dur + 0.05);
+    }
+
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+  }
+
   public dispose(): void {
     try {
       this.engineOscMain?.stop();

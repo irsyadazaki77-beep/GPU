@@ -11,6 +11,7 @@ import { proceduralTextures } from './ProceduralTextures';
 import {
   PedestrianAiAgent,
   PedestrianArchetype,
+  pickDiveEvadeCallout,
   recycleDistantPedestrianInPlace,
   stepPedestrianAgentInPlace,
   stepPedestrianInteractions,
@@ -84,6 +85,23 @@ export class CrowdSystem {
   private readonly _color = new THREE.Color();
   private interactionTimer = 0;
   private recycleCursor = 0;
+  private pendingReactionEvent: {
+    kind: 'dive' | 'knockdown';
+    x: number;
+    z: number;
+    text: string;
+  } | null = null;
+
+  public consumeRecentEvadeOrKnockdownEvent(): {
+    kind: 'dive' | 'knockdown';
+    x: number;
+    z: number;
+    text: string;
+  } | null {
+    const ev = this.pendingReactionEvent;
+    this.pendingReactionEvent = null;
+    return ev;
+  }
 
   constructor(
     scene: THREE.Scene,
@@ -494,7 +512,26 @@ export class CrowdSystem {
 
     for (let i = 0; i < activeCount; i++) {
       const ag = this.agents[i];
+      const prevState = ag.state;
       const { facing, moving, state } = stepPedestrianAgentInPlace(ag, stepCtx);
+
+      if (state !== prevState && !this.pendingReactionEvent) {
+        if (state === 'KNOCKED_DOWN') {
+          this.pendingReactionEvent = {
+            kind: 'knockdown',
+            x: ag.x,
+            z: ag.z,
+            text: 'Aduh! Tabrak lari woy!!',
+          };
+        } else if (state === 'DIVE_EVADE') {
+          this.pendingReactionEvent = {
+            kind: 'dive',
+            x: ag.x,
+            z: ag.z,
+            text: pickDiveEvadeCallout(i),
+          };
+        }
+      }
 
       const dSq =
         (ag.x - playerX) * (ag.x - playerX) +
@@ -503,7 +540,14 @@ export class CrowdSystem {
 
       const slot = renderedCount++;
       const swing = moving ? Math.sin(ag.phase) * 0.45 : 0;
-      const baseY = 0.14;
+      const isKnocked = state === 'KNOCKED_DOWN';
+      const isDiving = state === 'DIVE_EVADE';
+      const baseY = isKnocked
+        ? -0.28
+        : isDiving
+        ? 0.08 + Math.abs(Math.sin(ag.phase * 0.5)) * 0.18
+        : 0.14;
+      const bodyPitch = isKnocked ? 1.32 : isDiving ? 0.58 : 0;
       const cosF = Math.cos(facing);
       const sinF = Math.sin(facing);
 
@@ -516,7 +560,7 @@ export class CrowdSystem {
 
       // Torso
       dummy.position.set(ag.x, baseY + 0.88, ag.z);
-      dummy.rotation.set(0, facing, 0);
+      dummy.rotation.set(bodyPitch, facing, 0);
       dummy.scale.setScalar(1);
       dummy.updateMatrix();
       this.torsoMesh.setMatrixAt(slot, dummy.matrix);
@@ -524,8 +568,12 @@ export class CrowdSystem {
       this.torsoMesh.setColorAt(slot, this._color);
 
       // Head + varied natural skin tone
-      dummy.position.set(ag.x, baseY + 1.38, ag.z);
-      dummy.rotation.set(0, facing, 0);
+      dummy.position.set(
+        ag.x + sinF * (bodyPitch * 0.32),
+        baseY + 1.38 - Math.abs(bodyPitch) * 0.16,
+        ag.z + cosF * (bodyPitch * 0.32)
+      );
+      dummy.rotation.set(bodyPitch * 0.6, facing, 0);
       dummy.updateMatrix();
       this.headMesh.setMatrixAt(slot, dummy.matrix);
       this.headMesh.setColorAt(
@@ -535,8 +583,12 @@ export class CrowdSystem {
 
       // Hair cap / Hat / Helmet
       const hatHex = resolveHatColor(ag.archetype ?? 'komuter', i);
-      dummy.position.set(ag.x, baseY + 1.425, ag.z);
-      dummy.rotation.set(0, facing, 0);
+      dummy.position.set(
+        ag.x + sinF * (bodyPitch * 0.34),
+        baseY + 1.425 - Math.abs(bodyPitch) * 0.16,
+        ag.z + cosF * (bodyPitch * 0.34)
+      );
+      dummy.rotation.set(bodyPitch * 0.6, facing, 0);
       dummy.updateMatrix();
       this.hatHelmetMesh.setMatrixAt(hatCount, dummy.matrix);
       this.hatHelmetMesh.setColorAt(hatCount, this._color.setHex(hatHex));
@@ -546,11 +598,15 @@ export class CrowdSystem {
       let leftArmRotX = moving ? swing : 0;
       let rightArmRotX = moving ? -swing : 0;
       let armSpreadZ = 0;
-      if (state === 'CHEERING') {
+      if (state === 'CHEERING' || isDiving) {
         const wave = Math.sin(ag.phase) * 0.28;
-        leftArmRotX = -2.55 + wave;
-        rightArmRotX = -2.55 - wave;
-        armSpreadZ = 0.25;
+        leftArmRotX = -2.35 + wave;
+        rightArmRotX = -2.35 - wave;
+        armSpreadZ = 0.32;
+      } else if (isKnocked) {
+        leftArmRotX = 0.85;
+        rightArmRotX = 0.95;
+        armSpreadZ = 0.48;
       } else if (state === 'FILMING') {
         rightArmRotX = -1.25;
       } else if (state === 'BROWSING_PHONE') {

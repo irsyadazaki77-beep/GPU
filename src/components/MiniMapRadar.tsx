@@ -11,6 +11,7 @@ import {
   STREET_RACES,
   STUNT_RAMPS_CATALOG,
   computeMrtTrainState,
+  findRoadNavRoute,
   generateRoadsideSpawnLayout,
 } from '../game/rules';
 import {
@@ -379,28 +380,45 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
         }
       }
 
-      // 9. GPS Route Dashed Line to Active Objective or Nearby Mission
+      // 9. Smart Road GPS Route Ribbon to Active Objective or Nearby Mission
       const gpsTargetX = activeChoice?.targetX ?? nearbyMission?.markerX;
       const gpsTargetZ = activeChoice?.targetZ ?? nearbyMission?.markerZ;
       if (gpsTargetX !== undefined && gpsTargetZ !== undefined) {
-        ctx.strokeStyle = 'rgba(250, 204, 21, 0.85)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 3]);
+        const missionRoute = findRoadNavRoute(px, pz, gpsTargetX, gpsTargetZ);
+        // Outer road route glow
+        ctx.strokeStyle = 'rgba(234, 179, 8, 0.35)';
+        ctx.lineWidth = 4.6;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
         ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(
-          cx + (gpsTargetX - px) * zoom,
-          cy + (gpsTargetZ - pz) * zoom
-        );
+        for (let ri = 0; ri < missionRoute.points.length; ri++) {
+          const rpt = missionRoute.points[ri];
+          const sx = cx + (rpt.x - px) * zoom;
+          const sz = cy + (rpt.z - pz) * zoom;
+          if (ri === 0) ctx.moveTo(sx, sz);
+          else ctx.lineTo(sx, sz);
+        }
         ctx.stroke();
-        ctx.setLineDash([]);
+
+        // Crisp inner golden GPS line
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.95)';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        for (let ri = 0; ri < missionRoute.points.length; ri++) {
+          const rpt = missionRoute.points[ri];
+          const sx = cx + (rpt.x - px) * zoom;
+          const sz = cy + (rpt.z - pz) * zoom;
+          if (ri === 0) ctx.moveTo(sx, sz);
+          else ctx.lineTo(sx, sz);
+        }
+        ctx.stroke();
 
         ctx.fillStyle = '#facc15';
         ctx.beginPath();
         ctx.arc(
           cx + (gpsTargetX - px) * zoom,
           cy + (gpsTargetZ - pz) * zoom,
-          4.2,
+          4.4,
           0,
           Math.PI * 2
         );
@@ -467,19 +485,51 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
         ctx.fillText('!', ex, ez + 0.5);
       }
 
-      // 9c. Custom GPS Waypoint Pin & Dashed Purple Route
+      // 9c. Custom GPS Waypoint Pin & Smart Road Purple Route Ribbon
       const wp = store.customWaypoint;
       if (wp) {
+        const navRoute = findRoadNavRoute(px, pz, wp.x, wp.z);
         const wx = cx + (wp.x - px) * zoom;
         const wz = cy + (wp.z - pz) * zoom;
-        ctx.strokeStyle = 'rgba(192, 132, 252, 0.92)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 3]);
+
+        // Outer neon purple road glow
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.35)';
+        ctx.lineWidth = 4.8;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
         ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(wx, wz);
+        for (let ri = 0; ri < navRoute.points.length; ri++) {
+          const rpt = navRoute.points[ri];
+          const sx = cx + (rpt.x - px) * zoom;
+          const sz = cy + (rpt.z - pz) * zoom;
+          if (ri === 0) ctx.moveTo(sx, sz);
+          else ctx.lineTo(sx, sz);
+        }
         ctx.stroke();
-        ctx.setLineDash([]);
+
+        // Crisp inner purple GPS ribbon
+        ctx.strokeStyle = 'rgba(216, 180, 254, 0.96)';
+        ctx.lineWidth = 2.3;
+        ctx.beginPath();
+        for (let ri = 0; ri < navRoute.points.length; ri++) {
+          const rpt = navRoute.points[ri];
+          const sx = cx + (rpt.x - px) * zoom;
+          const sz = cy + (rpt.z - pz) * zoom;
+          if (ri === 0) ctx.moveTo(sx, sz);
+          else ctx.lineTo(sx, sz);
+        }
+        ctx.stroke();
+
+        // Highlight upcoming turn node with a small white-purple ring
+        if (navRoute.points.length >= 3) {
+          const turnPt = navRoute.points[1];
+          const tx = cx + (turnPt.x - px) * zoom;
+          const tz = cy + (turnPt.z - pz) * zoom;
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(tx, tz, 2.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
 
         // Clamp edge indicator if waypoint is outside radar viewport
         const clampedX = Math.max(8, Math.min(w - 8, wx));
@@ -497,6 +547,26 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('W', clampedX, clampedZ + 0.5);
+
+        // Turn-by-turn compact guidance strip at top of radar canvas
+        const turnBadge =
+          navRoute.nextTurnDirection === 'left'
+            ? `↰ ${navRoute.distanceToNextTurnM}m`
+            : navRoute.nextTurnDirection === 'right'
+            ? `↱ ${navRoute.distanceToNextTurnM}m`
+            : navRoute.nextTurnDirection === 'uturn'
+            ? `↶ ${navRoute.distanceToNextTurnM}m`
+            : `↑ ${navRoute.totalDistanceM}m`;
+        ctx.fillStyle = 'rgba(7, 10, 16, 0.88)';
+        ctx.fillRect(4, 4, 54, 13);
+        ctx.strokeStyle = 'rgba(192, 132, 252, 0.55)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(4, 4, 54, 13);
+        ctx.fillStyle = '#e9d5ff';
+        ctx.font = 'bold 8px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(turnBadge, 7, 10.5);
       }
 
       // 10. Autonomous 3D Trio Squad Wingmen (Raka & Kirana live telemetry)

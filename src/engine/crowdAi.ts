@@ -19,12 +19,27 @@ export type PedestrianAiState =
   | 'WALKING'
   | 'CROSSING_AT_GREEN'
   | 'FLEEING'
+  | 'DIVE_EVADE'
+  | 'KNOCKED_DOWN'
   | 'CROWDING'
   | 'FILMING'
   | 'JOGGING'
   | 'CHATTING'
   | 'BROWSING_PHONE'
   | 'CHEERING';
+
+export const JAKARTA_DIVE_EVADE_CALLOUTS = [
+  'Woy ati-ati bawa mobil!',
+  'Awas ketabrak woy!',
+  'Astaga! Gila lu ya ngebut!',
+  'Minggir woy mobil ugal-ugalan!',
+  'Buset hampir aja keserempet!',
+];
+
+export function pickDiveEvadeCallout(seedIndex: number): string {
+  const idx = Math.abs(Math.floor(seedIndex)) % JAKARTA_DIVE_EVADE_CALLOUTS.length;
+  return JAKARTA_DIVE_EVADE_CALLOUTS[idx];
+}
 
 export interface PedestrianAiAgent {
   x: number;
@@ -42,6 +57,12 @@ export interface PedestrianAiAgent {
   panicTimer: number;
   panicVx: number;
   panicVz: number;
+  diveTimer?: number;
+  diveVx?: number;
+  diveVz?: number;
+  knockdownTimer?: number;
+  knockdownVx?: number;
+  knockdownVz?: number;
   crowdTimer: number;
   crowdAnchorX: number;
   crowdAnchorZ: number;
@@ -83,6 +104,14 @@ export function evaluatePedestrianAiState(
   agent: PedestrianAiAgent,
   ctx: PedestrianStepContext
 ): PedestrianAiState {
+  if ((agent.knockdownTimer ?? 0) > 0) {
+    return 'KNOCKED_DOWN';
+  }
+
+  if ((agent.diveTimer ?? 0) > 0) {
+    return 'DIVE_EVADE';
+  }
+
   if (agent.panicTimer > 0) {
     return 'FLEEING';
   }
@@ -160,17 +189,47 @@ export function stepPedestrianAgentInPlace(
 
   if (
     playerInVehicle &&
-    playerSpeed > 14 &&
-    ag.panicTimer <= 0 &&
-    dPlayerSq < 7.5 * 7.5
+    playerSpeed > 6.5 &&
+    (ag.knockdownTimer ?? 0) <= 0 &&
+    dPlayerSq <= 1.75 * 1.75
   ) {
     const dP = Math.sqrt(dPlayerSq) || 1;
+    ag.knockdownTimer = 2.4;
+    ag.diveTimer = 0;
+    ag.panicTimer = 0;
+    ag.cheerTimer = 0;
+    ag.chatTimer = 0;
+    ag.phoneTimer = 0;
+    const impulseSpeed = Math.min(12.5, Math.max(5.5, playerSpeed * 0.65));
+    ag.knockdownVx = (dxPlayer / dP) * impulseSpeed;
+    ag.knockdownVz = (dzPlayer / dP) * impulseSpeed;
+  } else if (
+    playerInVehicle &&
+    playerSpeed > 12.5 &&
+    (ag.knockdownTimer ?? 0) <= 0 &&
+    (ag.diveTimer ?? 0) <= 0 &&
+    ag.panicTimer <= 0 &&
+    dPlayerSq < 8.5 * 8.5
+  ) {
+    const dP = Math.sqrt(dPlayerSq) || 1;
+    ag.diveTimer = 0.72;
     ag.panicTimer = 1.65;
     ag.cheerTimer = 0;
     ag.chatTimer = 0;
     ag.phoneTimer = 0;
-    ag.panicVx = (dxPlayer / dP) * 4.2;
-    ag.panicVz = (dzPlayer / dP) * 4.2;
+    // Lateral dive vector perpendicular to radial threat + radial escape push
+    const radX = dxPlayer / dP;
+    const radZ = dzPlayer / dP;
+    const perpSign = ag.dir >= 0 ? 1 : -1;
+    const perpX = -radZ * perpSign;
+    const perpZ = radX * perpSign;
+    const mixX = radX * 0.65 + perpX * 0.75;
+    const mixZ = radZ * 0.65 + perpZ * 0.75;
+    const mixLen = Math.hypot(mixX, mixZ) || 1;
+    ag.diveVx = (mixX / mixLen) * 6.8;
+    ag.diveVz = (mixZ / mixLen) * 6.8;
+    ag.panicVx = radX * 4.2;
+    ag.panicVz = radZ * 4.2;
   }
 
   if (wantedLevel >= 2 && ag.panicTimer <= 0 && (ag.filmTimer ?? 0) <= 0) {
@@ -222,6 +281,45 @@ export function stepPedestrianAgentInPlace(
   }
 
   ag.state = evaluatePedestrianAiState(ag, ctx);
+
+  if (ag.state === 'KNOCKED_DOWN') {
+    ag.knockdownTimer = Math.max(0, (ag.knockdownTimer ?? 0) - dt);
+    const kvx = ag.knockdownVx ?? 0;
+    const kvz = ag.knockdownVz ?? 0;
+    const col = resolveCircleAABBCollision(
+      ag.x + kvx * dt,
+      ag.z + kvz * dt,
+      0.4,
+      undefined,
+      buildingGrid
+    );
+    ag.x = col.x;
+    ag.z = col.z;
+    const damp = Math.exp(-3.4 * dt);
+    ag.knockdownVx = kvx * damp;
+    ag.knockdownVz = kvz * damp;
+    const facing = Math.atan2(kvx, kvz);
+    ag.phase += dt * 16.0;
+    return { facing, moving: true, state: ag.state };
+  }
+
+  if (ag.state === 'DIVE_EVADE') {
+    ag.diveTimer = Math.max(0, (ag.diveTimer ?? 0) - dt);
+    const dvx = ag.diveVx ?? ag.panicVx;
+    const dvz = ag.diveVz ?? ag.panicVz;
+    const col = resolveCircleAABBCollision(
+      ag.x + dvx * dt,
+      ag.z + dvz * dt,
+      0.4,
+      undefined,
+      buildingGrid
+    );
+    ag.x = col.x;
+    ag.z = col.z;
+    const facing = Math.atan2(dvx, dvz);
+    ag.phase += dt * 14.5;
+    return { facing, moving: true, state: ag.state };
+  }
 
   if (ag.state === 'FLEEING') {
     ag.panicTimer = Math.max(0, ag.panicTimer - dt);

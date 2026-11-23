@@ -21,6 +21,7 @@ import {
   clampDt,
   computePlayerRacePosition,
   evaluateSpeedTrapTrigger,
+  findRoadNavRoute,
   isPlayerNearMrtStation,
   isPlayerWithinStreetEvent,
   resolveAcousticZone,
@@ -196,6 +197,9 @@ export class WorldEngine {
   private lastChunkX = 9999;
   private lastChunkZ = 9999;
   private lastAmbientCalloutAt = 0;
+  private lastPedHitAt = 0;
+  private lastMaghribBedugAt = 0;
+  private lastHarborFoghornAt = 0;
   private radioBroadcastAccum = 0;
   private speedTrapCooldowns: Record<string, number> = {};
   private lastLaserAlarmAt = 0;
@@ -1249,6 +1253,48 @@ export class WorldEngine {
         playerSpeed,
         Boolean(activeVeh)
       );
+      const pedReaction = this.crowdSystem.consumeRecentEvadeOrKnockdownEvent();
+      if (pedReaction && this.activeWorldCallouts.length < 4) {
+        this.calloutCounter += 1;
+        this.activeWorldCallouts.push({
+          id: `callout_${this.calloutCounter}`,
+          text: pedReaction.text,
+          x: pedReaction.x,
+          y: 1.95,
+          z: pedReaction.z,
+          createdAt: now,
+          durationMs: 2200,
+        });
+        if (
+          pedReaction.kind === 'knockdown' &&
+          now - this.lastPedHitAt > 4500
+        ) {
+          this.lastPedHitAt = now;
+          cityAudio.playCollisionThud(0.58);
+          this.crowdSystem.triggerPanicNear(pedReaction.x, pedReaction.z, 18);
+          if (pState.wantedLevel === 0) {
+            gameStore.updatePlayerState((prev) => ({
+              ...prev,
+              wantedLevel: Math.max(1, prev.wantedLevel),
+            }));
+          }
+        }
+      }
+
+      // Authentic Jakarta Ambient Audio Cues: Maghrib Bedug (17:50-18:25 WIB) & Tanjung Priok Harbor Foghorn
+      const worldMins = gameStore.getState().worldTimeMinutes;
+      if (
+        worldMins >= 1070 &&
+        worldMins <= 1105 &&
+        now - this.lastMaghribBedugAt > 48000
+      ) {
+        this.lastMaghribBedugAt = now;
+        cityAudio.playDistantMaghribBedug();
+      }
+      if (phys.z < -48 && now - this.lastHarborFoghornAt > 36000) {
+        this.lastHarborFoghornAt = now;
+        cityAudio.playHarborFoghorn();
+      }
       this.heistSecurity3d.step(
         now * 0.001,
         phys.x,
@@ -1357,6 +1403,86 @@ export class WorldEngine {
         }
       } else {
         this.cityRenderer.setActiveStreetEventMarker(null, null);
+      }
+
+      // Smart Road GPS 3D Asphalt Chevron Guidance & Active Contract / Taxi Fare Arrival Evaluation
+      const storeSnap = gameStore.getState();
+      const activeContract = storeSnap.activeContract;
+      if (activeContract && pState.currentInterior === 'exterior') {
+        const distToContract = Math.hypot(
+          phys.x - activeContract.targetX,
+          phys.z - activeContract.targetZ
+        );
+        const currentSpeedAbs = activeVeh
+          ? Math.abs(activeVeh.speed)
+          : Math.hypot(phys.vx, phys.vz);
+        if (distToContract < 8.5 && currentSpeedAbs < 8.0) {
+          const contractTitle = activeContract.title;
+          const rewardRp = activeContract.rewardRp;
+          const isTaxiOrOjol = activeContract.kind === 'ojol_delivery';
+          gameStore.completeStreetContract();
+          this.playerController.spawnParticles(
+            activeContract.targetX,
+            phys.y + 1.6,
+            activeContract.targetZ,
+            20,
+            0xfacc15,
+            6.5
+          );
+          this.crowdSystem.triggerCheerNear(phys.x, phys.z, 20);
+          this.calloutCounter += 1;
+          this.activeWorldCallouts.push({
+            id: `callout_${this.calloutCounter}`,
+            text: isTaxiOrOjol
+              ? `Penumpang Turun: "Makasih banyak mas, bintang 5! (+Rp ${rewardRp.toLocaleString('id-ID')})"`
+              : `${contractTitle} Tuntas! (+Rp ${rewardRp.toLocaleString('id-ID')})`,
+            x: phys.x,
+            y: phys.y + 2.2,
+            z: phys.z,
+            createdAt: performance.now(),
+            durationMs: 3200,
+          });
+        }
+      }
+
+      const activeWp = gameStore.getState().customWaypoint;
+      const activeObjChoice = this.props.activeChoice;
+      if (pState.currentInterior === 'exterior') {
+        if (activeWp) {
+          const distWp = Math.hypot(phys.x - activeWp.x, phys.z - activeWp.z);
+          if (distWp < 7.0 && !gameStore.getState().activeContract) {
+            const label = activeWp.label;
+            gameStore.setCustomWaypoint(null);
+            gameStore.setState({
+              lastOutcomeText: `GPS: Tiba di Destinasi (${label})`,
+            });
+            this.cityRenderer.updateGpsRoadGuidance(null);
+          } else {
+            const route = findRoadNavRoute(
+              phys.x,
+              phys.z,
+              activeWp.x,
+              activeWp.z
+            );
+            this.cityRenderer.updateGpsRoadGuidance(route.points, 0xc084fc);
+          }
+        } else if (
+          activeObjChoice &&
+          activeObjChoice.targetX !== undefined &&
+          activeObjChoice.targetZ !== undefined
+        ) {
+          const route = findRoadNavRoute(
+            phys.x,
+            phys.z,
+            activeObjChoice.targetX,
+            activeObjChoice.targetZ
+          );
+          this.cityRenderer.updateGpsRoadGuidance(route.points, 0xfacc15);
+        } else {
+          this.cityRenderer.updateGpsRoadGuidance(null);
+        }
+      } else {
+        this.cityRenderer.updateGpsRoadGuidance(null);
       }
 
       // Wave 2: Step Active Street Race (3D Rival AI + Checkpoint Arch + Live Rank)

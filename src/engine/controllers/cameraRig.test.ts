@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createBuildingSpatialGrid, GRAND_HEISTS } from '../../game/rules';
-import { solveChaseCameraRig, solveDroneFpvCamera } from './cameraRig';
+import {
+  computeHighSpeedCameraRumble,
+  solveChaseCameraRig,
+  solveDroneFpvCamera,
+} from './cameraRig';
 import { evaluateDroneEmpTargets } from './droneAndTakedown';
 
 test('solveChaseCameraRig resolves smooth follow rig and TPS shoulder offset', () => {
@@ -30,6 +34,15 @@ test('solveChaseCameraRig resolves smooth follow rig and TPS shoulder offset', (
   const fpv = solveDroneFpvCamera({ x: 5, y: 12, z: -8, yaw: 0 });
   assert.ok(fpv.lookAt.z > fpv.eye.z);
   assert.ok(fpv.lookAt.y < fpv.eye.y);
+
+  const lowSpeedRumble = computeHighSpeedCameraRumble(0.5, 1000);
+  assert.equal(lowSpeedRumble.offsetX, 0);
+  assert.equal(lowSpeedRumble.offsetY, 0);
+
+  const highSpeedRumble = computeHighSpeedCameraRumble(0.95, 1250);
+  assert.ok(
+    Math.abs(highSpeedRumble.offsetX) > 0 || Math.abs(highSpeedRumble.offsetY) > 0
+  );
 });
 
 test('evaluateDroneEmpTargets detects enemies and nearby active Grand Heist CCTV vaults', () => {

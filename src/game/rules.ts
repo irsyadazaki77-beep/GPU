@@ -29,3 +29,13 @@ export {
   resolveCameraWallPullIn,
   stepSidewalkPatrol,
 } from './world/spatial';
+export {
+  findRoadNavRoute,
+  getRoadNavNodes,
+  getRoadNavSegments,
+  isRoadNavRouteValid,
+  type RoadNavNode,
+  type RoadNavEdge,
+  type RoadNavRouteResult,
+} from './world/roadNavGraph';
+

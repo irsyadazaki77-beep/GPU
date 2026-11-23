@@ -13,6 +13,7 @@ import {
   applyTurfWarStockShock,
   calculateTurfWarsIncome,
   captureDistrictTurf,
+  findRoadNavRoute,
   formatJakartaClock,
   formatRupiah,
   fortifyDistrictTurf,
@@ -522,17 +523,42 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
       }
 
       if (customWaypoint) {
+        const navRoute = findRoadNavRoute(
+          playerX,
+          playerZ,
+          customWaypoint.x,
+          customWaypoint.z
+        );
         const wx = originX + customWaypoint.x * scale;
         const wz = originY + customWaypoint.z * scale;
 
-        ctx.strokeStyle = '#c084fc';
-        ctx.lineWidth = 2.4;
-        ctx.setLineDash([6, 4]);
+        // Outer neon purple road route glow
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.38)';
+        ctx.lineWidth = 6.2;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
         ctx.beginPath();
-        ctx.moveTo(pCanvasX, pCanvasY);
-        ctx.lineTo(wx, wz);
+        for (let ri = 0; ri < navRoute.points.length; ri++) {
+          const rpt = navRoute.points[ri];
+          const sx = originX + rpt.x * scale;
+          const sz = originY + rpt.z * scale;
+          if (ri === 0) ctx.moveTo(sx, sz);
+          else ctx.lineTo(sx, sz);
+        }
         ctx.stroke();
-        ctx.setLineDash([]);
+
+        // Crisp inner road route ribbon
+        ctx.strokeStyle = '#d8b4fe';
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        for (let ri = 0; ri < navRoute.points.length; ri++) {
+          const rpt = navRoute.points[ri];
+          const sx = originX + rpt.x * scale;
+          const sz = originY + rpt.z * scale;
+          if (ri === 0) ctx.moveTo(sx, sz);
+          else ctx.lineTo(sx, sz);
+        }
+        ctx.stroke();
 
         ctx.fillStyle = '#c084fc';
         ctx.beginPath();

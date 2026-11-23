@@ -55,6 +55,8 @@ export interface VehicleEntity extends TrafficAISteppable {
   rollAngle: number;
   damage: VehicleDamageState;
   smokeParticleAccum: number;
+  highBeamFlashTimer?: number;
+  cutOffHonkCooldown?: number;
 }
 
 export class TrafficSystem {
@@ -714,20 +716,41 @@ export class TrafficSystem {
         }
       }
 
-      // Brake / taillight emissive boost (#ff1a1a) when braking, reversing, or drifting
+      if (v.highBeamFlashTimer && v.highBeamFlashTimer > 0) {
+        v.highBeamFlashTimer = Math.max(0, v.highBeamFlashTimer - dt);
+      }
+      if (v.cutOffHonkCooldown && v.cutOffHonkCooldown > 0) {
+        v.cutOffHonkCooldown = Math.max(0, v.cutOffHonkCooldown - dt);
+      }
+
+      // Brake / reverse taillight dynamic color & emissive flare
       const tailMat = v.mesh.userData.taillightMat as
         | THREE.MeshStandardMaterial
         | undefined;
       if (tailMat) {
+        const isReversing = v.id === drivingVehicleId && v.speed < -0.35;
         const isBraking =
-          v.isDrifting ||
-          Boolean(v.isBraking) ||
-          (v.id === drivingVehicleId && v.speed < -0.2) ||
-          (v.isTraffic && (v.speed < 1.5 || (v.hornReactionTimer ?? 0) > 1.0));
-        tailMat.emissiveIntensity = isBraking ? 3.2 : 0.72 + nightFactor * 0.65;
+          !isReversing &&
+          (v.isDrifting ||
+            Boolean(v.isBraking) ||
+            (v.isTraffic && (v.speed < 1.5 || (v.hornReactionTimer ?? 0) > 1.0)));
+
+        if (isReversing) {
+          tailMat.color.setHex(0xf8fafc);
+          tailMat.emissive.setHex(0xffffff);
+          tailMat.emissiveIntensity = 3.8;
+        } else if (isBraking) {
+          tailMat.color.setHex(0xff0f22);
+          tailMat.emissive.setHex(0xff1122);
+          tailMat.emissiveIntensity = 4.2;
+        } else {
+          tailMat.color.setHex(0xb91c1c);
+          tailMat.emissive.setHex(0xef4444);
+          tailMat.emissiveIntensity = 0.72 + nightFactor * 0.65;
+        }
       }
 
-      // Night headlight glow & subtle additive headlight cones on ground vehicles
+      // Night headlight glow, high-beam flash on cut-off, & additive headlight cones
       const headMat = v.mesh.userData.headlightMat as
         | THREE.MeshStandardMaterial
         | undefined;
@@ -735,9 +758,14 @@ export class TrafficSystem {
         v.damage.headlightsBroken[0] && v.damage.headlightsBroken[1];
       const oneHeadlightBroken =
         v.damage.headlightsBroken[0] || v.damage.headlightsBroken[1];
+      const isFlashingHighBeam =
+        (v.highBeamFlashTimer ?? 0) > 0 &&
+        Math.sin((v.highBeamFlashTimer ?? 0) * 28) > 0;
       if (headMat) {
         headMat.emissiveIntensity = bothHeadlightsBroken
           ? 0.05
+          : isFlashingHighBeam
+          ? 4.8
           : (0.55 + nightFactor * 2.25) * (oneHeadlightBroken ? 0.55 : 1.0);
       }
       const coneMat = v.mesh.userData.headlightConeMat as
@@ -746,10 +774,14 @@ export class TrafficSystem {
       if (coneMat) {
         const activeOrMoving = v.id === drivingVehicleId || v.isTraffic;
         coneMat.opacity =
-          !bothHeadlightsBroken && activeOrMoving && nightFactor > 0.16
-            ? (nightFactor - 0.16) *
-              (v.id === drivingVehicleId ? 0.24 : 0.14) *
-              (oneHeadlightBroken ? 0.52 : 1.0)
+          !bothHeadlightsBroken && activeOrMoving
+            ? isFlashingHighBeam
+              ? 0.34
+              : nightFactor > 0.16
+              ? (nightFactor - 0.16) *
+                (v.id === drivingVehicleId ? 0.24 : 0.14) *
+                (oneHeadlightBroken ? 0.52 : 1.0)
+              : 0
             : 0;
       }
 
@@ -1133,6 +1165,22 @@ export class TrafficSystem {
             const latP = Math.abs(dxP * cosH - dzP * sinH);
             if (latP < rV + 1.4) {
               minAheadDist = Math.min(minAheadDist, Math.max(0, fwdP - rV * 0.5));
+              if (
+                fwdP > 1.2 &&
+                fwdP < 9.2 &&
+                latP < rV + 1.05 &&
+                (v.cutOffHonkCooldown ?? 0) <= 0
+              ) {
+                v.highBeamFlashTimer = 1.35;
+                v.cutOffHonkCooldown = 4.5;
+                const pitch =
+                  v.type === 'bajaj' || v.type === 'ojek'
+                    ? 1.32
+                    : v.type === 'transjakarta' || v.type === 'metromini'
+                    ? 0.72
+                    : 1.04;
+                cityAudio.playTrafficResponseHorn(pitch, 0.08);
+              }
             }
           }
         }

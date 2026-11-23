@@ -20,6 +20,12 @@ import {
   resolveCircleAABBCollision,
   stepSidewalkPatrol,
 } from './spatial';
+import {
+  findRoadNavRoute,
+  getRoadNavNodes,
+  getRoadNavSegments,
+  isRoadNavRouteValid,
+} from './roadNavGraph';
 
 test('hash2D returns deterministic normalized numbers in [0, 1)', () => {
   const a1 = hash2D(12.5, -44.2);
@@ -214,3 +220,33 @@ test('city layout keeps buildings clear of roads & MRT viaduct, and keeps portal
     assert.equal(isOnRoadway(s.x, s.z), false, `Traffic sign ${s.id} is on roadway`);
   }
 });
+
+test('findRoadNavRoute computes A* road routes that stay on asphalt roadways and bypass buildings and Monas', () => {
+  const nodes = getRoadNavNodes();
+  const segments = getRoadNavSegments();
+  assert.ok(nodes.length >= 60, 'Road network graph covers all major Jakarta intersections');
+  assert.ok(segments.length >= 100, 'Road network graph connects N-S and E-W corridors');
+
+  // 1. Thamrin (0, 20) to Kuningan Rasuna Said (84, 56) requires a left turn at Bundaran HI (0, 32)
+  const thamrinToKuningan = findRoadNavRoute(0, 20, 84, 56);
+  assert.ok(thamrinToKuningan.points.length >= 3);
+  assert.equal(isRoadNavRouteValid(thamrinToKuningan), true);
+  assert.ok(thamrinToKuningan.totalDistanceM >= 110);
+  assert.equal(thamrinToKuningan.nextTurnDirection, 'left');
+  assert.ok(thamrinToKuningan.turnInstruction.includes('Belok Kiri'));
+
+  // 2. North Harmoni (0, -40) to South Sudirman (0, 60) routes cleanly around Monas Monument at (0, 0)
+  const harmoniToSudirman = findRoadNavRoute(0, -40, 0, 60);
+  assert.equal(isRoadNavRouteValid(harmoniToSudirman), true);
+  for (const pt of harmoniToSudirman.points) {
+    // Must never pass directly through (0, 0) inside Monas Monument (11x11m footprint)
+    const insideMonas = Math.abs(pt.x) < 5.5 && Math.abs(pt.z) < 5.5;
+    assert.equal(insideMonas, false, `Point (${pt.x}, ${pt.z}) entered Monas footprint`);
+  }
+
+  // 3. Nearby arrival threshold (< 8.5m) reports 'arrived'
+  const arrivedRoute = findRoadNavRoute(0, 32, 0, 36);
+  assert.equal(arrivedRoute.nextTurnDirection, 'arrived');
+  assert.equal(arrivedRoute.turnInstruction, 'Tiba di Destinasi');
+});
+

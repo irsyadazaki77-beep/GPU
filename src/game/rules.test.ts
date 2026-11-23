@@ -842,7 +842,11 @@ test('World clock road event ticker triggers traffic jams and road construction 
 
 test('Phase 2 & Phase 4: Physics suspension/drift, Crowd AI state machine, HRTF Spatial Audio, Co-Op NetSync interpolation, and SimWorker batching', async () => {
   const { computeDriftAndSuspensionStep } = await import('../engine/physicsWorld');
-  const { evaluatePedestrianAiState } = await import('../engine/crowdAi');
+  const {
+    evaluatePedestrianAiState,
+    pickDiveEvadeCallout,
+    stepPedestrianAgentInPlace,
+  } = await import('../engine/crowdAi');
   const { computeSpatialPanAndAttenuation } = await import('../engine/spatialAudio');
   const { interpolateRemotePeerPose } = await import('../engine/netSync');
   const { computeSimBatchInPlace } = await import('../engine/sim.worker');
@@ -919,6 +923,43 @@ test('Phase 2 & Phase 4: Physics suspension/drift, Crowd AI state machine, HRTF 
     ),
     'CROWDING'
   );
+
+  // Oncoming speeding vehicle triggers DIVE_EVADE lateral roll
+  const divePed: import('../engine/crowdAi').PedestrianAiAgent = {
+    ...basePed,
+    x: 9,
+    z: 0,
+  };
+  const diveRes = stepPedestrianAgentInPlace(divePed, {
+    dt: 0.05,
+    signalPhase: 'ns_green',
+    wantedLevel: 0,
+    playerX: 5,
+    playerZ: 0,
+    playerSpeed: 16,
+    playerInVehicle: true,
+  });
+  assert.equal(diveRes.state, 'DIVE_EVADE');
+  assert.ok((divePed.diveTimer ?? 0) > 0);
+  assert.ok(pickDiveEvadeCallout(0).length > 5);
+
+  // Direct high-speed vehicle collision triggers KNOCKED_DOWN tumble
+  const hitPed: import('../engine/crowdAi').PedestrianAiAgent = {
+    ...basePed,
+    x: 9,
+    z: 0,
+  };
+  const hitRes = stepPedestrianAgentInPlace(hitPed, {
+    dt: 0.05,
+    signalPhase: 'ns_green',
+    wantedLevel: 0,
+    playerX: 8.2,
+    playerZ: 0,
+    playerSpeed: 12,
+    playerInVehicle: true,
+  });
+  assert.equal(hitRes.state, 'KNOCKED_DOWN');
+  assert.ok((hitPed.knockdownTimer ?? 0) > 0);
 
   // 3. 3D Spatial Audio HRTF panning & inverse-distance attenuation
   const rightSource = computeSpatialPanAndAttenuation(
