@@ -91,7 +91,12 @@ import {
   solveDroneFpvCamera,
 } from './controllers/cameraRig';
 import { evaluateDroneEmpTargets } from './controllers/droneAndTakedown';
-import { stepDrivenVehicleKinematics } from './controllers/vehiclePhysics';
+import {
+  createInitialNitroTankState,
+  evaluateMotorcycleStuntPose,
+  stepDrivenVehicleKinematics,
+  stepNitroBoostState,
+} from './controllers/vehiclePhysics';
 import {
   advanceMeleeComboStep,
   createInitialDodgeRollState,
@@ -399,6 +404,10 @@ export class PlayerController {
   private activeDynamicEncounter: ActiveDynamicEncounter | null = null;
   private completedDynamicEncounterIds: string[] = [];
   private encounterSpawnCooldown = 4.0;
+  private nitroTankState = createInitialNitroTankState();
+  private nitroFlameAccum = 0;
+  private nitroFovBoostDeg = 0;
+  private readonly underglowLight = new THREE.PointLight(0x22d3ee, 0, 9.5, 1.8);
 
   constructor(
     scene: THREE.Scene,
@@ -2786,9 +2795,93 @@ export class PlayerController {
       if (slipstream.drafting && slipstream.fokusBonusPerSec > 0 && pState.fokusEnergy < 100) {
         pState.fokusEnergy = Math.min(100, pState.fokusEnergy + slipstream.fokusBonusPerSec * simDt);
       }
+      const nitroStep = stepNitroBoostState({
+        state: this.nitroTankState,
+        boostRequested:
+          !vSpec.isAircraft &&
+          (this.keysHeld.has('ShiftLeft') || this.keysHeld.has('ShiftRight')),
+        forwardSpeed: activeVehicle.speed,
+        isDrifting: activeVehicle.isDrifting,
+        isAircraft: Boolean(vSpec.isAircraft),
+        dt: simDt,
+      });
+      this.nitroTankState = nitroStep.nextState;
+      this.nitroFovBoostDeg = THREE.MathUtils.damp(
+        this.nitroFovBoostDeg,
+        nitroStep.fovBoostDeg,
+        7.5,
+        simDt
+      );
+      engineTelemetryRef.nitroLevel = this.nitroTankState.level;
+      engineTelemetryRef.nitroActive = this.nitroTankState.active;
+      if (nitroStep.justReleased) {
+        soundEngine.playNitroBlowOffValve();
+      }
+      if (this.nitroTankState.active) {
+        this.nitroFlameAccum += simDt;
+        if (this.nitroFlameAccum >= 0.035) {
+          this.nitroFlameAccum = 0;
+          const tailX = activeVehicle.x - Math.sin(activeVehicle.heading) * 1.95;
+          const tailZ = activeVehicle.z - Math.cos(activeVehicle.heading) * 1.95;
+          this.spawnParticles(tailX, activeVehicle.y + 0.35, tailZ, 4, 0x38bdf8, 8.5);
+          this.spawnParticles(tailX, activeVehicle.y + 0.35, tailZ, 2, 0xf59e0b, 6.5);
+        }
+      }
+
+      // Motorcycle Wheelie, Stoppie & Corner Lean Stunts
+      const motorStunt = evaluateMotorcycleStuntPose({
+        isMotorcycle: activeVehicle.type === 'ojek',
+        speed: activeVehicle.speed,
+        turnInput: moveTurn,
+        wheelieHeld:
+          this.keysHeld.has('ControlLeft') || this.keysHeld.has('ControlRight'),
+        isBraking: Boolean(activeVehicle.isBraking),
+        dt: simDt,
+      });
+      engineTelemetryRef.motorStuntLabel = motorStunt.label;
+      if (motorStunt.pitchOffsetRad !== 0) {
+        activeVehicle.pitchAngle = THREE.MathUtils.damp(
+          activeVehicle.pitchAngle,
+          motorStunt.pitchOffsetRad,
+          10,
+          simDt
+        );
+      }
+      if (motorStunt.rollOffsetRad !== 0) {
+        activeVehicle.rollAngle = THREE.MathUtils.damp(
+          activeVehicle.rollAngle,
+          motorStunt.rollOffsetRad,
+          10,
+          simDt
+        );
+      }
+
+      // Neon Underglow illumination beneath player vehicle (active at dusk/night or when Nitro active)
+      if (!this.underglowLight.parent) {
+        this.scene.add(this.underglowLight);
+      }
+      const hasCustomNeon =
+        pState.vehicleUpgradeLevel >= 1 || this.nitroTankState.active;
+      this.underglowLight.position.set(
+        activeVehicle.x,
+        activeVehicle.y + 0.25,
+        activeVehicle.z
+      );
+      this.underglowLight.color.setHex(
+        this.nitroTankState.active ? 0x38bdf8 : 0xa855f7
+      );
+      this.underglowLight.intensity = hasCustomNeon
+        ? this.nitroTankState.active
+          ? 3.8
+          : storeState.weatherMode === 'malam' || storeState.weatherMode === 'hujan'
+            ? 2.2
+            : 0.9
+        : 0;
+
       const effectiveMaxSpeed =
         vSpec.maxSpeed *
         turboMult *
+        nitroStep.speedMultiplier *
         handlingPenalty.speedMultiplier *
         slipstream.speedMultiplier;
       const isWetRoad =
@@ -2818,7 +2911,11 @@ export class PlayerController {
         handbrakeHeld,
         climbDir,
         maxSpeed: effectiveMaxSpeed,
-        acceleration: vSpec.acceleration * turboMult * handlingPenalty.speedMultiplier,
+        acceleration:
+          vSpec.acceleration *
+          turboMult *
+          nitroStep.accelerationMultiplier *
+          handlingPenalty.speedMultiplier,
         turnRate: vSpec.turnRate,
         steeringPull: handlingPenalty.steeringPull,
         isAircraft: Boolean(vSpec.isAircraft),
@@ -4646,19 +4743,30 @@ export class PlayerController {
       : 0;
     const photoCfg = storeState.photoConfig;
     const camMode = storeState.cameraViewMode;
-    const targetFov = isPhotoMode
-      ? photoCfg.fov
-      : this.stuntJump.airborne
-      ? 54
-      : isTpsAim
-      ? 46
-      : camMode === 'first_person'
-      ? isDriving
-        ? 72 + speedRatio * 10
-        : 70
-      : camMode === 'cinematic'
-      ? 56 + speedRatio * 8
-      : computeChaseCameraFov(speedRatio, isDriving, pState.fokusActive);
+    const targetFov =
+      (isPhotoMode
+        ? photoCfg.fov
+        : this.stuntJump.airborne
+        ? 54
+        : isTpsAim
+        ? 46
+        : camMode === 'first_person'
+        ? isDriving
+          ? 72 + speedRatio * 10
+          : 70
+        : camMode === 'cinematic'
+        ? 56 + speedRatio * 8
+        : computeChaseCameraFov(speedRatio, isDriving, pState.fokusActive)) +
+      (isDriving && !isPhotoMode ? this.nitroFovBoostDeg : 0);
+    if (!isDriving) {
+      this.underglowLight.intensity = 0;
+      this.nitroFovBoostDeg = THREE.MathUtils.damp(
+        this.nitroFovBoostDeg,
+        0,
+        6,
+        dt
+      );
+    }
     if (Math.abs(camera.fov - targetFov) > 0.12) {
       camera.fov = THREE.MathUtils.lerp(
         camera.fov,

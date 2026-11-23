@@ -8,6 +8,7 @@ import {
 } from '../game/rules';
 import type { SidewalkRect } from '../game/world/textures';
 import { proceduralTextures } from './ProceduralTextures';
+import { soundEngine } from '../game/sound';
 import {
   PedestrianAiAgent,
   PedestrianArchetype,
@@ -411,12 +412,36 @@ export class CrowdSystem {
         };
       }
       if (ag.archetype === 'pedagang') {
+        soundEngine.playGerobakBell();
         return {
-          text: 'Pedagang Kaki Lima: "Mampir dulu Bang, kopi sama gorengan anget!"',
+          text: 'Pedagang Kaki Lima: "Ting-ting! Kopi, bakso & gorengan anget Bang!"',
           x: ag.x,
           y: 2.1,
           z: ag.z,
         };
+      }
+    }
+    // Street Buskers (Pengamen Angklung / Ondel-Ondel) near Bundaran HI, Blok M, and Monas
+    const buskerSpots: { x: number; z: number; line: string }[] = [
+      {
+        x: 0,
+        z: 32,
+        line: 'Pengamen Angklung HI: "Musik jalanan Jakarta! Semangat terus Bang!"',
+      },
+      {
+        x: 0,
+        z: 108,
+        line: 'Pengamen Melawai: "Kopi malem Blok M ditemani gitar akustik!"',
+      },
+      {
+        x: 0,
+        z: 10,
+        line: 'Atraksi Ondel-Ondel Monas: "Nyoook nonton ondel-ondel Betawi!"',
+      },
+    ];
+    for (const spot of buskerSpots) {
+      if (Math.hypot(playerX - spot.x, playerZ - spot.z) < 18) {
+        return { text: spot.line, x: spot.x, y: 2.2, z: spot.z };
       }
     }
     return null;
@@ -465,7 +490,10 @@ export class CrowdSystem {
       18,
       Math.min(MAX_PEDESTRIANS, Math.round(MAX_PEDESTRIANS * crowdRatio))
     );
-    const showUmbrellas = wetnessFactor > 0.65;
+    const showUmbrellas = wetnessFactor > 0.48;
+    const rainHurryMult = showUmbrellas ? 1.28 : 1.0;
+    const effectiveStepDt = dt * rainHurryMult;
+    void effectiveStepDt;
 
     // Rate-limit streaming NPC recycling around player across wide 480m Jakarta
     let recycledThisStep = 0;

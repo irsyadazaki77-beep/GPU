@@ -1744,6 +1744,22 @@ export const GameHud: React.FC<GameHudProps> = ({
 
               <div className="flex flex-col items-end text-right">
                 <div className="flex items-center gap-1.5">
+                  {engineTelemetryRef.nitroActive && (
+                    <span
+                      data-testid="hud-nitro-active-badge"
+                      className="px-1.5 py-0.5 rounded bg-[#38bdf8] text-[#090c12] font-mono-num text-[10px] font-extrabold tracking-wider animate-pulse"
+                    >
+                      NOS BOOST
+                    </span>
+                  )}
+                  {engineTelemetryRef.motorStuntLabel && (
+                    <span
+                      data-testid="hud-motor-stunt-badge"
+                      className="px-1.5 py-0.5 rounded bg-[#a855f7] text-[#faf5ff] font-mono-num text-[10px] font-extrabold tracking-wider"
+                    >
+                      {engineTelemetryRef.motorStuntLabel}
+                    </span>
+                  )}
                   {inFloodZone && (
                     <span className="px-1.5 py-0.5 rounded bg-[#0ea5e9] text-[#090c12] font-mono-num text-[10px] font-extrabold tracking-wider">
                       BANJIR
@@ -1758,6 +1774,28 @@ export const GameHud: React.FC<GameHudProps> = ({
                     {vehicleSpec.name}
                   </span>
                 </div>
+                {!vehicleSpec.isAircraft && (
+                  <div className="flex items-center gap-1.5 mt-1 w-full justify-end">
+                    <span className="text-[9px] font-mono-num text-[#38bdf8] font-bold">
+                      NOS [SHIFT]
+                    </span>
+                    <div className="w-20 h-1.5 rounded-full bg-white/15 overflow-hidden">
+                      <div
+                        className={`h-full transition-all duration-100 ${
+                          engineTelemetryRef.nitroActive
+                            ? 'bg-[#38bdf8]'
+                            : 'bg-[#0284c7]'
+                        }`}
+                        style={{
+                          width: `${Math.max(
+                            0,
+                            Math.min(100, engineTelemetryRef.nitroLevel ?? 100)
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
                 <span className="text-[10px] font-mono-num text-[#94a3b8] mt-1 whitespace-nowrap">
                   {vehicleSpec.isAircraft
                     ? `Alt ${Math.round(aircraftAltitude)} m`

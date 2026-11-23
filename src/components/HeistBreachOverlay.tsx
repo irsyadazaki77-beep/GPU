@@ -3,6 +3,9 @@ import {
   GRAND_HEISTS,
   HeistBreachSession,
   HeistId,
+  attemptSafePinLock,
+  computeSafeDialProximity,
+  createSafeDialSession,
   formatRupiah,
 } from '../game/rules';
 import { soundEngine } from '../game/sound';
@@ -30,11 +33,13 @@ export const HeistBreachOverlay: React.FC<HeistBreachOverlayProps> = ({
   const [cursorFreq, setCursorFreq] = useState<number>(18);
   const [lockedBands, setLockedBands] = useState<number>(0);
 
-  // Thermal Vault Drill state
+  // Thermal Vault Drill state & Grand Plan 8.0 Safe Dial Tumbler mode
   const [drillProgress, setDrillProgress] = useState<number>(0);
   const [drillHeat, setDrillHeat] = useState<number>(20);
   const [drillingHeld, setDrillingHeld] = useState<boolean>(false);
   const [overheated, setOverheated] = useState<boolean>(false);
+  const [safeDialMode, setSafeDialMode] = useState<boolean>(false);
+  const [safeDial, setSafeDial] = useState(() => createSafeDialSession(42));
   const [statusLine, setStatusLine] = useState<string>(
     isCyber
       ? 'Kirana: "Kunci 3 kanal sinyal saat kursor masuk zona hijau!"'
@@ -237,8 +242,121 @@ export const HeistBreachOverlay: React.FC<HeistBreachOverlayProps> = ({
             </button>
           </div>
         ) : (
-          /* STAGE B: RAKA THERMAL VAULT DRILL */
+          /* STAGE B: RAKA THERMAL VAULT DRILL OR GRAND PLAN 8.0 SAFE DIAL LOCK-PICKING */
           <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSafeDialMode((v) => !v)}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[11px] font-mono-num font-bold text-[#38bdf8] cursor-pointer transition-colors"
+              >
+                {safeDialMode
+                  ? 'Beralih ke Bor Termal'
+                  : 'Mode Senyap: Kunci Dial Brankas (+10% Bonus)'}
+              </button>
+            </div>
+
+            {safeDialMode ? (
+              <div
+                data-testid="heist-safe-dial-minigame"
+                className="flex flex-col items-center gap-3 p-3 rounded-xl bg-[#070a10] border border-white/15"
+              >
+                <div className="flex items-center justify-between w-full text-xs font-mono-num">
+                  <span className="text-[#94a3b8]">Pin Tumbler Terbuka</span>
+                  <span className="text-[#22c55e] font-bold">
+                    {safeDial.unlockedPins} / 3
+                  </span>
+                </div>
+                {(() => {
+                  const activeTarget =
+                    safeDial.targetAnglesDeg[
+                      Math.min(2, safeDial.unlockedPins)
+                    ];
+                  const prox = computeSafeDialProximity(
+                    safeDial.currentAngleDeg,
+                    activeTarget
+                  );
+                  return (
+                    <>
+                      <div className="relative w-28 h-28 rounded-full border-4 border-white/20 flex items-center justify-center bg-[#0f172a]">
+                        <div
+                          className="w-1 h-11 bg-[#38bdf8] origin-bottom rounded-full transition-transform duration-75"
+                          style={{
+                            transform: `translateY(-18px) rotate(${safeDial.currentAngleDeg}deg)`,
+                          }}
+                        />
+                        <span className="absolute font-mono-num text-xs font-extrabold text-[#f4f1ea]">
+                          {Math.round(safeDial.currentAngleDeg)}°
+                        </span>
+                      </div>
+                      <div className="w-full flex flex-col gap-1">
+                        <div className="flex justify-between text-[11px] font-mono-num">
+                          <span className="text-[#94a3b8]">Getaran Pin Kunci</span>
+                          <span
+                            className={
+                              prox.inSweetSpot
+                                ? 'text-[#22c55e] font-extrabold'
+                                : 'text-[#f59e0b]'
+                            }
+                          >
+                            {prox.inSweetSpot
+                              ? 'KLIK! ZONA TEPAT!'
+                              : `${prox.tensionPct}%`}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={359}
+                          value={safeDial.currentAngleDeg}
+                          onChange={(e) => {
+                            const angle = Number(e.target.value);
+                            setSafeDial((prev) => ({
+                              ...prev,
+                              currentAngleDeg: angle,
+                            }));
+                            const pNow = computeSafeDialProximity(
+                              angle,
+                              activeTarget
+                            );
+                            if (pNow.inSweetSpot) {
+                              soundEngine.playSafeDialClick(true);
+                            }
+                          }}
+                          className="w-full accent-[#38bdf8] cursor-pointer"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const res = attemptSafePinLock(safeDial);
+                          setSafeDial(res.nextState);
+                          soundEngine.playSafeDialClick(res.pinLocked);
+                          if (res.vaultOpened && !completedRef.current) {
+                            completedRef.current = true;
+                            soundEngine.playVictoryFanfare();
+                            const mult = 1 + (effectiveBonusPct + 10) / 100;
+                            onCompleteBreach(session.heistId, mult);
+                          } else if (res.pinLocked) {
+                            setStatusLine(
+                              `Kirana: "Pin ${res.nextState.unlockedPins}/3 terbuka mulus! Lanjut cari pin berikutnya!"`
+                            );
+                          } else {
+                            setStatusLine(
+                              'Kirana: "Meleset tipis! Putar dial perlahan sampai terasa klik hijau."'
+                            );
+                          }
+                        }}
+                        className="w-full py-2.5 rounded-xl bg-[#22c55e] hover:bg-[#4ade80] text-[#090c12] font-display text-lg font-extrabold uppercase tracking-wider cursor-pointer"
+                      >
+                        Kunci Pin Tumbler
+                      </button>
+                    </>
+                  );
+                })()}
+              </div>
+            ) : (
+            <>
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between text-xs font-mono-num">
                 <span className="text-[#94a3b8]">Progres Pembobolan Brankas</span>
@@ -301,6 +419,8 @@ export const HeistBreachOverlay: React.FC<HeistBreachOverlayProps> = ({
                 ? 'Sedang Mengebor Brankas...'
                 : 'Tahan untuk Mengebor Brankas'}
             </button>
+            </>
+            )}
           </div>
         )}
       </div>

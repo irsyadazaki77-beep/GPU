@@ -1221,6 +1221,69 @@ class SoundEngine {
     this.playTone(260, 0.25, 'sawtooth', 0.18, 0.7, 'sfx');
     setTimeout(() => this.playTone(175, 0.45, 'sawtooth', 0.2, 0.5, 'sfx'), 200);
   }
+
+  /**
+   * Grand Plan 8.0: Turbo blow-off valve flutter when releasing Nitro NOS boost.
+   */
+  public playNitroBlowOffValve(): void {
+    this.playTone(1180, 0.07, 'triangle', 0.11, 0.55, 'sfx');
+    window.setTimeout(
+      () => this.playTone(860, 0.06, 'sine', 0.08, 0.65, 'sfx'),
+      65
+    );
+    window.setTimeout(
+      () => this.playTone(620, 0.05, 'sine', 0.05, 0.72, 'sfx'),
+      120
+    );
+  }
+
+  /**
+   * Grand Plan 8.0: Raspy straight-pipe "Knalpot Brong" exhaust pop-and-bang crackle.
+   */
+  public playKnalpotBrongBackfire(): void {
+    this.playTone(135, 0.07, 'sawtooth', 0.16, 0.45, 'sfx');
+    window.setTimeout(
+      () => this.playTone(98, 0.06, 'square', 0.12, 0.5, 'sfx'),
+      55
+    );
+  }
+
+  /**
+   * Grand Plan 8.0: Metallic tumbler click for Safe Dial Lock-Picking minigame.
+   */
+  public playSafeDialClick(isSweetSpot: boolean = false): void {
+    if (isSweetSpot) {
+      this.playTone(680, 0.11, 'triangle', 0.18, 1.35, 'sfx');
+      window.setTimeout(
+        () => this.playTone(1040, 0.14, 'sine', 0.14, 1.0, 'sfx'),
+        60
+      );
+    } else {
+      this.playTone(410, 0.035, 'square', 0.06, 0.85, 'sfx');
+    }
+  }
+
+  /**
+   * Grand Plan 8.0: Authentic Jakarta roadside Gerobak Bakso / Sate brass bell ("ting-ting").
+   */
+  public playGerobakBell(): void {
+    this.playTone(1480, 0.12, 'sine', 0.07, 1.0, 'ambience');
+    window.setTimeout(
+      () => this.playTone(1520, 0.15, 'sine', 0.06, 1.0, 'ambience'),
+      140
+    );
+  }
+
+  /**
+   * Grand Plan 8.0: Soft distant resonant chime echo during Senja dusk transitions.
+   */
+  public playAdzanDuskEcho(): void {
+    this.playTone(293.66, 0.75, 'sine', 0.045, 1.0, 'ambience');
+    window.setTimeout(
+      () => this.playTone(440.0, 0.9, 'sine', 0.04, 1.0, 'ambience'),
+      420
+    );
+  }
 }
 
 export const soundEngine = new SoundEngine();

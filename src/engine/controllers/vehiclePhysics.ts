@@ -142,3 +142,144 @@ export function stepDrivenVehicleKinematics(
     inFloodSplash,
   };
 }
+
+/* ==========================================================================
+ * GRAND PLAN 8.0: NITRO NOS BOOST & MOTORCYCLE STUNT PHYSICS
+ * ========================================================================== */
+
+export interface NitroTankState {
+  level: number; // 0..100
+  active: boolean;
+  cooldownSec: number;
+}
+
+export function createInitialNitroTankState(): NitroTankState {
+  return {
+    level: 100,
+    active: false,
+    cooldownSec: 0,
+  };
+}
+
+export interface NitroStepResult {
+  nextState: NitroTankState;
+  justReleased: boolean;
+  speedMultiplier: number;
+  accelerationMultiplier: number;
+  fovBoostDeg: number;
+}
+
+/**
+ * Steps the vehicle Nitro NOS tank: consumes fuel at 28/s while boosting,
+ * recharges passively at 11/s (or 24/s while drifting), and signals blow-off valve release.
+ */
+export function stepNitroBoostState(params: {
+  state: NitroTankState;
+  boostRequested: boolean;
+  forwardSpeed: number;
+  isDrifting: boolean;
+  isAircraft: boolean;
+  dt: number;
+}): NitroStepResult {
+  const dt = Math.max(0, Math.min(0.1, params.dt));
+  const wasActive = params.state.active;
+  const nextCooldown = Math.max(0, params.state.cooldownSec - dt);
+
+  const canEngage =
+    !params.isAircraft &&
+    params.boostRequested &&
+    params.forwardSpeed > 3.5 &&
+    (wasActive ? params.state.level > 1.5 : params.state.level >= 15 && nextCooldown <= 0);
+
+  if (canEngage) {
+    const nextLevel = Math.max(0, params.state.level - 28 * dt);
+    const stillActive = nextLevel > 0.5;
+    return {
+      nextState: {
+        level: nextLevel,
+        active: stillActive,
+        cooldownSec: stillActive ? 0 : 1.4,
+      },
+      justReleased: !stillActive,
+      speedMultiplier: stillActive ? 1.26 : 1.0,
+      accelerationMultiplier: stillActive ? 1.48 : 1.0,
+      fovBoostDeg: stillActive ? 8.5 : 0,
+    };
+  }
+
+  const rechargeRate = params.isDrifting ? 24 : 11;
+  const nextLevel = Math.min(100, params.state.level + rechargeRate * dt);
+  return {
+    nextState: {
+      level: nextLevel,
+      active: false,
+      cooldownSec: nextCooldown,
+    },
+    justReleased: wasActive,
+    speedMultiplier: 1.0,
+    accelerationMultiplier: 1.0,
+    fovBoostDeg: 0,
+  };
+}
+
+export interface MotorStuntPoseResult {
+  stuntKind: 'none' | 'wheelie' | 'stoppie';
+  pitchOffsetRad: number;
+  rollOffsetRad: number;
+  stuntScoreDelta: number;
+  label: string;
+}
+
+/**
+ * Evaluates motorcycle (ojek) wheelie, stoppie, and corner-lean roll angles.
+ */
+export function evaluateMotorcycleStuntPose(params: {
+  isMotorcycle: boolean;
+  speed: number;
+  turnInput: number;
+  wheelieHeld: boolean;
+  isBraking: boolean;
+  dt: number;
+}): MotorStuntPoseResult {
+  if (!params.isMotorcycle) {
+    return {
+      stuntKind: 'none',
+      pitchOffsetRad: 0,
+      rollOffsetRad: 0,
+      stuntScoreDelta: 0,
+      label: '',
+    };
+  }
+
+  const absSpeed = Math.abs(params.speed);
+  const speedRatio = Math.min(1, absSpeed / 18);
+  const cornerLean = -params.turnInput * 0.34 * speedRatio;
+
+  if (params.wheelieHeld && params.speed > 4.5 && !params.isBraking) {
+    return {
+      stuntKind: 'wheelie',
+      pitchOffsetRad: -0.38 * Math.min(1, params.speed / 12),
+      rollOffsetRad: cornerLean * 0.5,
+      stuntScoreDelta: Math.round(95 * Math.max(0, params.dt)),
+      label: 'WHEELIE JAWARA!',
+    };
+  }
+
+  if (params.isBraking && params.speed > 6.5) {
+    return {
+      stuntKind: 'stoppie',
+      pitchOffsetRad: 0.24 * Math.min(1, params.speed / 15),
+      rollOffsetRad: cornerLean * 0.4,
+      stuntScoreDelta: Math.round(80 * Math.max(0, params.dt)),
+      label: 'STOPPIE TAJAM!',
+    };
+  }
+
+  return {
+    stuntKind: 'none',
+    pitchOffsetRad: 0,
+    rollOffsetRad: cornerLean,
+    stuntScoreDelta: 0,
+    label: '',
+  };
+}

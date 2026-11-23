@@ -262,6 +262,14 @@ export interface EngineTelemetrySnapshot {
   dodgeRollActive?: boolean;
   dodgeRollCooldownSec?: number;
   lastHeadshotStamp?: number;
+  nitroLevel?: number;
+  nitroActive?: boolean;
+  motorStuntLabel?: string;
+  blackMarketNearby?: {
+    districtName: string;
+    distanceM: number;
+    open: boolean;
+  } | null;
   activeDynamicEncounter?: {
     id: string;
     title: string;
