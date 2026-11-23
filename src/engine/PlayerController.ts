@@ -92,6 +92,22 @@ import {
 } from './controllers/cameraRig';
 import { evaluateDroneEmpTargets } from './controllers/droneAndTakedown';
 import { stepDrivenVehicleKinematics } from './controllers/vehiclePhysics';
+import {
+  advanceMeleeComboStep,
+  createInitialDodgeRollState,
+  createInitialMeleeComboState,
+  evaluateBallisticHitDamage,
+  evaluateTacticalEnemyAction,
+  getEffectiveMagazineCapacity,
+  stepMeleeComboDecay,
+  stepTacticalDodgeRoll,
+  triggerTacticalDodgeRoll,
+} from './controllers/combatController';
+import {
+  ActiveDynamicEncounter,
+  spawnDynamicStreetEncounter,
+  stepDynamicStreetEncounter,
+} from './controllers/missionDirector';
 
 export interface EnemyEntity {
   id: string;
@@ -376,7 +392,13 @@ export class PlayerController {
     gatotkaca: 1,
   };
   private reloadTimer = 0;
+  private reloadTotalSec = 1.25;
   private meleeComboStep = 0;
+  private meleeComboState = createInitialMeleeComboState();
+  private dodgeRollState = createInitialDodgeRollState();
+  private activeDynamicEncounter: ActiveDynamicEncounter | null = null;
+  private completedDynamicEncounterIds: string[] = [];
+  private encounterSpawnCooldown = 4.0;
 
   constructor(
     scene: THREE.Scene,
@@ -1463,11 +1485,21 @@ export class PlayerController {
       }
     }
 
+    let meleeComboDamageMult = 1.0;
+    let meleeComboKnockback = 1.8;
+    let meleeComboLabel = '';
     if (!wSpec.isMelee) {
-      const magSize = WEAPON_MAGAZINE_SIZES[wSpec.id] || 12;
+      const magSize =
+        getEffectiveMagazineCapacity(
+          wSpec.id,
+          pState.weaponAttachments?.[wSpec.id] ?? []
+        ) ||
+        WEAPON_MAGAZINE_SIZES[wSpec.id] ||
+        12;
       const curClip = this.clipAmmo[wSpec.id] ?? magSize;
       if (curClip <= 0) {
-        this.reloadTimer = WEAPON_RELOAD_SEC[wSpec.id] || 1.2;
+        this.reloadTotalSec = WEAPON_RELOAD_SEC[wSpec.id] || 1.25;
+        this.reloadTimer = this.reloadTotalSec;
         this.clipAmmo[wSpec.id] = magSize;
         soundEngine.playTone(210, 0.08, 'triangle', 0.1, 1.35);
         return;
@@ -1481,13 +1513,19 @@ export class PlayerController {
       const nextClip = curClip - 1;
       this.clipAmmo[wSpec.id] = nextClip;
       if (nextClip <= 0 && (pState.ammo[wSpec.id] || 0) > 1) {
-        this.reloadTimer = WEAPON_RELOAD_SEC[wSpec.id] || 1.2;
+        this.reloadTotalSec = WEAPON_RELOAD_SEC[wSpec.id] || 1.25;
+        this.reloadTimer = this.reloadTotalSec;
         this.clipAmmo[wSpec.id] = magSize;
       }
     } else {
-      // 3-Hit GTA Melee Combo with subtle forward step lunge
-      this.meleeComboStep = (this.meleeComboStep + 1) % 3;
-      const lungeSpeed = this.meleeComboStep === 2 ? 7.5 : 4.2;
+      // 3-Hit Pencak Silat / GTA Melee Combo with forward step lunge & knockback scaling
+      const comboRes = advanceMeleeComboStep(this.meleeComboState);
+      this.meleeComboState = comboRes.nextCombo;
+      this.meleeComboStep = comboRes.stageExecuted - 1;
+      meleeComboDamageMult = comboRes.damageMultiplier;
+      meleeComboKnockback = comboRes.knockbackImpulse;
+      meleeComboLabel = comboRes.strikeLabel;
+      const lungeSpeed = comboRes.isFinisher ? 7.8 : 4.4;
       this.playerPhys.vx += Math.sin(this.playerPhys.facing) * lungeSpeed;
       this.playerPhys.vz += Math.cos(this.playerPhys.facing) * lungeSpeed;
     }
@@ -1681,10 +1719,21 @@ export class PlayerController {
       const minDot = wSpec.isMelee ? 0.25 : 0.72;
 
       if (dot >= minDot || dist < 2.2) {
-        const dmgMult = pState.fokusActive ? 1.75 : 1.0;
-        let dealtDmg = Math.round(wSpec.damage * dmgMult);
+        const dmgMult =
+          (pState.fokusActive ? 1.75 : 1.0) *
+          (wSpec.isMelee ? meleeComboDamageMult : 1.0);
         const isTpsAim = this.callbacks.getTpsAiming() || this.rightMouseHeld;
         const isFirstPerson = gameStore.getState().cameraViewMode === 'first_person';
+        const ballisticEval = evaluateBallisticHitDamage({
+          weaponId: wSpec.id,
+          baseDamage: Math.round(wSpec.damage * dmgMult),
+          distanceM: dist,
+          maxRangeM: wSpec.range,
+          aimAlignmentDot: dot,
+          tpsAiming: isTpsAim || isFirstPerson,
+          aimPrecisionLevel: pState.characterSkills?.aimPrecision ?? 1,
+        });
+        let dealtDmg = ballisticEval.finalDamage;
         const headshotRes = computeHeadshotResolution(
           isTpsAim,
           wSpec.id,
@@ -1693,9 +1742,13 @@ export class PlayerController {
           dot
         );
 
-        if (headshotRes.isHeadshot) {
-          dealtDmg = Math.round(dealtDmg * headshotRes.damageMultiplier);
-          en.staggerTimer = 0.45;
+        if (headshotRes.isHeadshot || ballisticEval.isHeadshot) {
+          dealtDmg = Math.max(
+            dealtDmg,
+            Math.round(wSpec.damage * dmgMult * headshotRes.damageMultiplier)
+          );
+          engineTelemetryRef.lastHeadshotStamp = Date.now();
+          en.staggerTimer = 0.55;
           en.staggerType = 'head';
           this.spawnParticles(en.x, 1.8, en.z, 16, 0xfacc15, 9);
           soundEngine.playTone(920, 0.08, 'triangle', 0.25, 2.8);
@@ -1706,9 +1759,17 @@ export class PlayerController {
             );
           }
         } else {
-          en.staggerTimer = 0.28;
+          en.staggerTimer =
+            wSpec.isMelee && this.meleeComboState.stage === 3 ? 0.65 : 0.28;
           en.staggerType = 'chest';
           this.spawnParticles(en.x, 1.2, en.z, 14, 0xef4444, 8);
+        }
+        if (wSpec.isMelee && meleeComboKnockback > 2.0) {
+          en.vx += dirX * meleeComboKnockback;
+          en.vz += dirZ * meleeComboKnockback;
+        }
+        if (wSpec.isMelee && meleeComboLabel) {
+          engineTelemetryRef.meleeComboLabel = meleeComboLabel;
         }
 
         en.hp -= en.tagged ? Math.round(dealtDmg * 1.25) : dealtDmg;
@@ -2494,10 +2555,17 @@ export class PlayerController {
       if (this.playerPhys.drivingVehicleId) {
         gameStore.cycleRadioStation();
       } else if (this.reloadTimer <= 0) {
-        const magSize = WEAPON_MAGAZINE_SIZES[pState.activeWeapon] || 0;
+        const magSize =
+          getEffectiveMagazineCapacity(
+            pState.activeWeapon,
+            pState.weaponAttachments?.[pState.activeWeapon] ?? []
+          ) ||
+          WEAPON_MAGAZINE_SIZES[pState.activeWeapon] ||
+          0;
         const curClip = this.clipAmmo[pState.activeWeapon] ?? magSize;
         if (magSize > 0 && curClip < magSize && (pState.ammo[pState.activeWeapon] || 0) > 0) {
-          this.reloadTimer = WEAPON_RELOAD_SEC[pState.activeWeapon] || 1.2;
+          this.reloadTotalSec = WEAPON_RELOAD_SEC[pState.activeWeapon] || 1.25;
+          this.reloadTimer = this.reloadTotalSec;
           this.clipAmmo[pState.activeWeapon] = magSize;
           soundEngine.playTone(230, 0.09, 'triangle', 0.11, 1.35);
         }
@@ -2508,10 +2576,19 @@ export class PlayerController {
         this.keysJustPressed.has('ControlLeft') ||
         virtualInputRef.rollTap) &&
       !this.playerPhys.drivingVehicleId &&
-      this.playerPhys.combatRollTimer <= 0
+      this.playerPhys.combatRollTimer <= 0 &&
+      !this.dodgeRollState.active &&
+      this.dodgeRollState.cooldownSec <= 0
     ) {
       virtualInputRef.rollTap = false;
-      this.playerPhys.combatRollTimer = 0.34;
+      const rollTrig = triggerTacticalDodgeRoll(
+        this.dodgeRollState,
+        Math.sin(this.playerPhys.facing),
+        Math.cos(this.playerPhys.facing),
+        this.playerPhys.facing
+      );
+      this.dodgeRollState = rollTrig.nextState;
+      this.playerPhys.combatRollTimer = 0.36;
       soundEngine.playTone(200, 0.1, 'triangle', 0.12, 1.35);
     }
 
@@ -3586,12 +3663,62 @@ export class PlayerController {
       const stepDist =
         Math.hypot(this.playerPhys.vx, this.playerPhys.vz) * simDt;
       this.playerPhys.walkDist += stepDist;
+      const rollStep = stepTacticalDodgeRoll(this.dodgeRollState, simDt);
+      this.dodgeRollState = rollStep.nextState;
+      if (rollStep.dx !== 0 || rollStep.dz !== 0) {
+        const rollCol = resolveCircleAABBCollision(
+          this.playerPhys.x + rollStep.dx * 0.45,
+          this.playerPhys.z + rollStep.dz * 0.45,
+          0.75,
+          undefined,
+          this.buildingGrid,
+          this.playerPhys.y
+        );
+        this.playerPhys.x = rollCol.x;
+        this.playerPhys.z = rollCol.z;
+      }
+      this.meleeComboState = stepMeleeComboDecay(this.meleeComboState, simDt);
+      const activeMagCap = getEffectiveMagazineCapacity(
+        pState.activeWeapon,
+        pState.weaponAttachments?.[pState.activeWeapon] ?? []
+      );
+      engineTelemetryRef.magazineInClip =
+        this.clipAmmo[pState.activeWeapon] ?? activeMagCap;
+      engineTelemetryRef.magazineCapacity = activeMagCap;
+      engineTelemetryRef.reloadingWeapon = this.reloadTimer > 0;
+      engineTelemetryRef.reloadProgressPct =
+        this.reloadTimer > 0
+          ? Math.max(
+              0,
+              Math.min(
+                100,
+                (1 - this.reloadTimer / Math.max(0.2, this.reloadTotalSec)) *
+                  100
+              )
+            )
+          : 0;
+      engineTelemetryRef.meleeComboStage = this.meleeComboState.stage;
+      engineTelemetryRef.meleeComboLabel = this.meleeComboState.lastStrikeLabel;
+      engineTelemetryRef.dodgeRollActive = this.dodgeRollState.active;
+      engineTelemetryRef.dodgeRollCooldownSec = this.dodgeRollState.cooldownSec;
+
       animateCharacterRig(this.playerRig, {
         elapsedTime: nowMs * 0.001,
         walkDist: this.playerPhys.walkDist,
-        isMoving: mag > 0.01,
+        isMoving: mag > 0.01 || this.dodgeRollState.active,
         isAiming: isTpsAim,
         isCrouching: this.stealthCrouching,
+        isReloading: this.reloadTimer > 0,
+        recoilKick: Math.min(0.25, this.crosshairSpread * 0.25),
+        meleeComboStage: this.meleeComboState.stage,
+        meleeSwingProgress:
+          this.meleeComboState.stage > 0 && this.playerPhys.attackCooldown > 0
+            ? Math.min(1, this.playerPhys.attackCooldown / 0.35)
+            : 0,
+        dodgeRollProgress: this.dodgeRollState.active
+          ? 1 - this.dodgeRollState.timerSec / 0.46
+          : 0,
+        hitFlinch: this.damagePulse,
         phaseOffset: 0,
         dt: simDt,
       });
@@ -4224,6 +4351,18 @@ export class PlayerController {
         : 48 * stealthProf.detectionRadiusMultiplier;
       if (en.windupTimer <= 0 && distToPlayer < detectRange) {
         en.alerted = true;
+        const tactical = evaluateTacticalEnemyAction({
+          policy: en.policy,
+          enemyX: en.x,
+          enemyZ: en.z,
+          playerX: this.playerPhys.x,
+          playerZ: this.playerPhys.z,
+          playerInCover: storeState.inCover,
+          moveSpeed: effectiveEnemySpeed,
+          preferredRange: spec.attackRange,
+          phaseTimer: en.phaseTimer,
+          enemyIndex: i,
+        });
         const moveRes = stepEnemyMovementPolicy(
           en.policy,
           en.x,
@@ -4234,9 +4373,13 @@ export class PlayerController {
           enemySimDt,
           en.phaseTimer
         );
+        const blendedX =
+          moveRes.nextX * 0.55 + (en.x + tactical.moveVx * enemySimDt) * 0.45;
+        const blendedZ =
+          moveRes.nextZ * 0.55 + (en.z + tactical.moveVz * enemySimDt) * 0.45;
         const col = resolveCircleAABBCollision(
-          moveRes.nextX,
-          moveRes.nextZ,
+          blendedX,
+          blendedZ,
           0.75,
           undefined,
           this.buildingGrid
@@ -4265,7 +4408,8 @@ export class PlayerController {
           en.cooldownTimer = spec.cooldown;
           if (
             distToPlayer <= spec.attackRange + 1.2 &&
-            this.playerPhys.combatRollTimer <= 0
+            this.playerPhys.combatRollTimer <= 0 &&
+            this.dodgeRollState.iFrameSec <= 0
           ) {
             const roleDmgMult =
               1 -
@@ -4361,6 +4505,76 @@ export class PlayerController {
 
     // Update Zero-GC Compacted Pooled Particles, Shockwaves & Bullet Tracers
     this.fxPool.step(dt);
+
+    // Dynamic Jakarta Street Encounters Loop
+    if (pState.currentInterior === 'exterior' && storeState.gameState === 'playing') {
+      if (!this.activeDynamicEncounter) {
+        this.encounterSpawnCooldown -= simDt;
+        if (this.encounterSpawnCooldown <= 0) {
+          this.activeDynamicEncounter = spawnDynamicStreetEncounter(
+            this.playerPhys.x,
+            this.playerPhys.z,
+            this.completedDynamicEncounterIds
+          );
+          this.encounterSpawnCooldown = 12.0;
+        }
+      } else {
+        const encStep = stepDynamicStreetEncounter(
+          this.activeDynamicEncounter,
+          this.playerPhys.x,
+          this.playerPhys.z,
+          pState.activeProtagonist,
+          simDt
+        );
+        if (encStep.justCompleted && encStep.nextEncounter) {
+          const doneSpec = encStep.nextEncounter.spec;
+          this.completedDynamicEncounterIds.push(doneSpec.id);
+          this.activeDynamicEncounter = null;
+          this.encounterSpawnCooldown = 25.0;
+          gameStore.setState((prev) => ({
+            playerState: {
+              ...prev.playerState,
+              rupiah: prev.playerState.rupiah + encStep.rewardRp,
+              score: prev.playerState.score + 450,
+              bestScore: Math.max(
+                prev.playerState.bestScore,
+                prev.playerState.score + 450
+              ),
+              reputation: {
+                ...prev.playerState.reputation,
+                [doneSpec.repBonus.faction]: Math.min(
+                  100,
+                  prev.playerState.reputation[doneSpec.repBonus.faction] +
+                    doneSpec.repBonus.delta
+                ),
+              },
+            },
+          }));
+          soundEngine.playPickup();
+        } else if (encStep.expired) {
+          this.activeDynamicEncounter = null;
+          this.encounterSpawnCooldown = 18.0;
+        } else {
+          this.activeDynamicEncounter = encStep.nextEncounter;
+        }
+      }
+    }
+    engineTelemetryRef.activeDynamicEncounter =
+      this.activeDynamicEncounter &&
+      (this.activeDynamicEncounter.engaged ||
+        Math.hypot(
+          this.playerPhys.x - this.activeDynamicEncounter.spec.x,
+          this.playerPhys.z - this.activeDynamicEncounter.spec.z
+        ) <= 38)
+        ? {
+            id: this.activeDynamicEncounter.spec.id,
+            title: this.activeDynamicEncounter.spec.title,
+            subtitle: this.activeDynamicEncounter.spec.subtitle,
+            progressPct: this.activeDynamicEncounter.progressPct,
+            remainingSec: this.activeDynamicEncounter.remainingSec,
+            rewardRp: this.activeDynamicEncounter.spec.rewardRp,
+          }
+        : null;
 
     // Clear expired combat combo & near-miss streak banners cleanly
     this.comboExpireAccum += dt;

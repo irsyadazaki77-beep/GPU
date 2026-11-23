@@ -28,13 +28,19 @@ export interface CharacterAnimationInput {
   isMoving: boolean;
   isAiming?: boolean;
   isCrouching?: boolean;
+  isReloading?: boolean;
+  recoilKick?: number;
+  meleeComboStage?: 0 | 1 | 2 | 3;
+  meleeSwingProgress?: number;
+  dodgeRollProgress?: number;
+  hitFlinch?: number;
   phaseOffset?: number;
   dt: number;
 }
 
 /**
- * Smooth procedural idle breathing, natural head look-around, and articulated arm/leg stride
- * animation shared across player, crew companions, and autonomous trio wingmen.
+ * Smooth procedural idle breathing, natural head look-around, articulated arm/leg stride,
+ * weapon recoil kick, magazine reload reach, 3-hit melee combo choreography, and dodge roll tuck.
  */
 export function animateCharacterRig(
   rig: CharacterRigHandle,
@@ -46,24 +52,47 @@ export function animateCharacterRig(
     isMoving,
     isAiming = false,
     isCrouching = false,
+    isReloading = false,
+    recoilKick = 0,
+    meleeComboStage = 0,
+    meleeSwingProgress = 0,
+    dodgeRollProgress = 0,
+    hitFlinch = 0,
     phaseOffset = 0,
     dt,
   } = input;
   const t = elapsedTime + phaseOffset;
 
-  // 1. Subtle idle chest breathing on torsoGroup (plus crouch lowering)
+  // 1. Subtle idle chest breathing on torsoGroup (plus crouch lowering, dodge roll tuck, or melee twist)
   const breath = Math.sin(t * 2.35);
-  const crouchDrop = isCrouching ? -0.34 : 0;
+  const crouchDrop = isCrouching || dodgeRollProgress > 0 ? -0.34 : 0;
   rig.torsoGroup.position.y = THREE.MathUtils.damp(
     rig.torsoGroup.position.y,
     crouchDrop + breath * 0.014,
     12,
     dt
   );
+  const rollPitch =
+    dodgeRollProgress > 0 ? Math.sin(dodgeRollProgress * Math.PI) * 0.95 : 0;
+  const flinchPitch = hitFlinch > 0 ? -hitFlinch * 0.28 : 0;
   rig.torsoGroup.rotation.x = THREE.MathUtils.damp(
     rig.torsoGroup.rotation.x,
-    isCrouching ? 0.24 : 0,
+    (isCrouching ? 0.24 : 0) + rollPitch + flinchPitch,
     12,
+    dt
+  );
+  const meleeTorsoYaw =
+    meleeComboStage > 0 && meleeSwingProgress > 0
+      ? (meleeComboStage === 2 ? -1 : 1) *
+        Math.sin(meleeSwingProgress * Math.PI) *
+        (meleeComboStage === 3 ? 0.55 : 0.36)
+      : isAiming
+        ? -0.14
+        : 0;
+  rig.torsoGroup.rotation.y = THREE.MathUtils.damp(
+    rig.torsoGroup.rotation.y,
+    meleeTorsoYaw,
+    14,
     dt
   );
   rig.torsoGroup.scale.set(1 + breath * 0.012, 1 + breath * 0.01, 1);
@@ -202,16 +231,72 @@ export function animateCharacterRig(
     }
   }
 
-  if (isAiming) {
+  if (isReloading) {
+    const reloadWave = Math.sin(t * 11.5);
     rig.rightArm.rotation.x = THREE.MathUtils.damp(
       rig.rightArm.rotation.x,
-      -Math.PI * 0.42,
+      -Math.PI * 0.28,
       14,
       dt
     );
     rig.rightForearm.rotation.x = THREE.MathUtils.damp(
       rig.rightForearm.rotation.x,
-      -0.14,
+      -0.62 + reloadWave * 0.12,
+      14,
+      dt
+    );
+    rig.leftArm.rotation.x = THREE.MathUtils.damp(
+      rig.leftArm.rotation.x,
+      -Math.PI * 0.32 + reloadWave * 0.15,
+      14,
+      dt
+    );
+    rig.leftForearm.rotation.x = THREE.MathUtils.damp(
+      rig.leftForearm.rotation.x,
+      -0.58,
+      14,
+      dt
+    );
+  } else if (meleeComboStage > 0 && meleeSwingProgress > 0) {
+    const swingArc = Math.sin(meleeSwingProgress * Math.PI);
+    const stagePitch =
+      meleeComboStage === 3
+        ? -Math.PI * 0.64 * swingArc
+        : -Math.PI * 0.45 * swingArc;
+    rig.rightArm.rotation.x = THREE.MathUtils.damp(
+      rig.rightArm.rotation.x,
+      stagePitch,
+      18,
+      dt
+    );
+    rig.rightForearm.rotation.x = THREE.MathUtils.damp(
+      rig.rightForearm.rotation.x,
+      -0.25 - swingArc * 0.4,
+      18,
+      dt
+    );
+  } else if (isAiming) {
+    rig.rightArm.rotation.x = THREE.MathUtils.damp(
+      rig.rightArm.rotation.x,
+      -Math.PI * 0.42 - recoilKick * 1.4,
+      16,
+      dt
+    );
+    rig.rightForearm.rotation.x = THREE.MathUtils.damp(
+      rig.rightForearm.rotation.x,
+      -0.14 - recoilKick * 0.9,
+      16,
+      dt
+    );
+    rig.leftArm.rotation.x = THREE.MathUtils.damp(
+      rig.leftArm.rotation.x,
+      -Math.PI * 0.36 - recoilKick * 1.1,
+      14,
+      dt
+    );
+    rig.leftForearm.rotation.x = THREE.MathUtils.damp(
+      rig.leftForearm.rotation.x,
+      -0.32,
       14,
       dt
     );

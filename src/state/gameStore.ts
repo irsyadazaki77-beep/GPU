@@ -253,6 +253,23 @@ export interface EngineTelemetrySnapshot {
   activeVehicleDamage: VehicleDamageState | null;
   nearbyMission: StoryMission | null;
   activeChoice: StoryChoiceOption | null;
+  magazineInClip?: number;
+  magazineCapacity?: number;
+  reloadingWeapon?: boolean;
+  reloadProgressPct?: number;
+  meleeComboStage?: 0 | 1 | 2 | 3;
+  meleeComboLabel?: string;
+  dodgeRollActive?: boolean;
+  dodgeRollCooldownSec?: number;
+  lastHeadshotStamp?: number;
+  activeDynamicEncounter?: {
+    id: string;
+    title: string;
+    subtitle: string;
+    progressPct: number;
+    remainingSec: number;
+    rewardRp: number;
+  } | null;
   perf: {
     fps: number;
     drawCalls: number;

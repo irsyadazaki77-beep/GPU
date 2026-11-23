@@ -43,14 +43,14 @@ function buildExpansionZonesGroup(uTimeUniform: { value: number }): {
   const group = new THREE.Group();
   group.name = 'JakartaExpansionZonesGroup';
 
-  // 1. Jakarta Bay & Kepulauan Seribu Water Basin (North Z <= -72 .. -248), GPU vertex wave shader
+  // 1. Jakarta Bay & Kepulauan Seribu Water Basin (North Z <= -72 .. -248), GPU multi-octave Gerstner wave shader
   const bayWaterMat = new THREE.MeshStandardMaterial({
     color: 0x0369a1,
-    roughness: 0.18,
-    metalness: 0.65,
-    envMapIntensity: 0.55,
+    roughness: 0.14,
+    metalness: 0.72,
+    envMapIntensity: 0.78,
     transparent: true,
-    opacity: 0.88,
+    opacity: 0.91,
   });
   bayWaterMat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = uTimeUniform;
@@ -59,13 +59,20 @@ function buildExpansionZonesGroup(uTimeUniform: { value: number }): {
         '#include <common>',
         `#include <common>
 uniform float uTime;
-varying vec3 vWaterWorldPos;`
+varying vec3 vWaterWorldPos;
+varying vec2 vWaveSlope;`
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
-float sanWaveY = sin(position.x * 0.14 + uTime * 2.1) * 0.11 + cos(position.z * 0.18 + uTime * 2.6) * 0.08;
-transformed.y += sanWaveY;`
+float wPhase1 = position.x * 0.13 + position.z * 0.08 + uTime * 2.15;
+float wPhase2 = -position.x * 0.09 + position.z * 0.17 + uTime * 2.65;
+float wPhase3 = (position.x + position.z) * 0.22 - uTime * 3.1;
+float gWaveY = sin(wPhase1) * 0.13 + cos(wPhase2) * 0.09 + sin(wPhase3) * 0.045;
+transformed.x -= cos(wPhase1) * 0.06;
+transformed.z -= sin(wPhase2) * 0.06;
+transformed.y += gWaveY;
+vWaveSlope = vec2(cos(wPhase1) * 0.16 - sin(wPhase2) * 0.09, sin(wPhase2) * 0.15 + cos(wPhase3) * 0.08);`
       )
       .replace(
         '#include <project_vertex>',
@@ -77,25 +84,32 @@ vWaterWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
         '#include <common>',
         `#include <common>
 uniform float uTime;
-varying vec3 vWaterWorldPos;`
+varying vec3 vWaterWorldPos;
+varying vec2 vWaveSlope;`
       )
       .replace(
         '#include <dithering_fragment>',
         `vec3 wView = normalize(cameraPosition - vWaterWorldPos);
 float r1 = sin(vWaterWorldPos.x * 0.65 + uTime * 2.2) * cos(vWaterWorldPos.z * 0.55 - uTime * 1.8);
 float r2 = sin((vWaterWorldPos.x + vWaterWorldPos.z) * 1.15 - uTime * 3.1);
-vec3 rippleN = normalize(vec3(r1 * 0.12, 1.0, r2 * 0.12));
-float wFresnel = pow(1.0 - max(dot(wView, rippleN), 0.0), 3.0);
-float sparkle = pow(max(dot(reflect(-wView, rippleN), normalize(vec3(0.45, 0.55, 0.7))), 0.0), 28.0);
-float shoreEdge = smoothstep(-80.0, -72.8, vWaterWorldPos.z);
-float foamLine = shoreEdge * (0.55 + 0.45 * sin(vWaterWorldPos.x * 0.8 + uTime * 3.6 + r1 * 2.0));
-gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.28, 0.56, 0.78), wFresnel * 0.48);
-gl_FragColor.rgb += vec3(0.95, 0.92, 0.82) * sparkle * 0.38;
-gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.88, 0.96, 1.0), clamp(foamLine * 0.65, 0.0, 0.72));
+float r3 = cos(vWaterWorldPos.x * 1.45 - vWaterWorldPos.z * 1.25 + uTime * 3.8) * 0.5;
+vec3 rippleN = normalize(vec3(vWaveSlope.x + (r1 + r3) * 0.11, 1.0, vWaveSlope.y + (r2 - r3) * 0.11));
+float wFresnel = pow(1.0 - max(dot(wView, rippleN), 0.0), 3.2);
+float sparkle = pow(max(dot(reflect(-wView, rippleN), normalize(vec3(0.42, 0.58, 0.7))), 0.0), 36.0);
+float shallowLagoon = smoothstep(-145.0, -73.0, vWaterWorldPos.z);
+vec3 lagoonTint = mix(vec3(0.02, 0.22, 0.42), vec3(0.05, 0.54, 0.68), shallowLagoon * 0.65);
+gl_FragColor.rgb = mix(gl_FragColor.rgb, lagoonTint, 0.42);
+float shoreEdge = smoothstep(-82.5, -72.6, vWaterWorldPos.z);
+float secondaryBreak = smoothstep(-89.0, -83.0, vWaterWorldPos.z) * (1.0 - shoreEdge);
+float foamLine = shoreEdge * (0.58 + 0.42 * sin(vWaterWorldPos.x * 0.85 + uTime * 3.8 + r1 * 2.2))
+               + secondaryBreak * max(0.0, sin(vWaterWorldPos.z * 1.6 + uTime * 3.2 + r2)) * 0.45;
+gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.32, 0.64, 0.86), wFresnel * 0.54);
+gl_FragColor.rgb += vec3(0.98, 0.94, 0.84) * sparkle * 0.46;
+gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.92, 0.98, 1.0), clamp(foamLine * 0.72, 0.0, 0.82));
 #include <dithering_fragment>`
       );
   };
-  bayWaterMat.customProgramCacheKey = () => 'san-nabilo-bay-waves-v2';
+  bayWaterMat.customProgramCacheKey = () => 'san-nabilo-bay-waves-v3';
 
   const bayGeo = new THREE.PlaneGeometry(540, 175, 48, 18);
   bayGeo.rotateX(-Math.PI / 2);

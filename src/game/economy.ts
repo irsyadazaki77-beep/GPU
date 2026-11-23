@@ -885,3 +885,62 @@ export function calculatePortfolioMetrics(
   };
 }
 
+/**
+ * Links high-intensity Wanted police lockdowns (★3–★5) in a district to live BAJSA stock prices,
+ * depressing local commercial activity while boosting tactical security contractor GATO.
+ */
+export function applyWantedHeatStockShock(
+  state: PlayerProgressState,
+  districtId: DistrictId,
+  wantedLevel: number,
+  timestampLabel: string = '12:00 WIB'
+): {
+  nextState: PlayerProgressState;
+  shocked: boolean;
+  news: FinancialNewsItem | null;
+} {
+  const clampedWanted = Math.max(0, Math.min(5, Math.floor(wantedLevel)));
+  if (clampedWanted < 3) {
+    return { nextState: state, shocked: false, news: null };
+  }
+
+  const link = DISTRICT_STOCK_LINK_MAP[districtId] || {
+    victimSymbol: 'SCBD' as StockSymbol,
+    boostSymbol: 'GATO' as StockSymbol,
+    sectorLabel: districtId.toUpperCase(),
+  };
+
+  const victimSymbol: StockSymbol =
+    link.victimSymbol === 'GATO' ? 'SCBD' : link.victimSymbol;
+  const boostSymbol: StockSymbol = 'GATO';
+  const dropPct = Number((0.06 + (clampedWanted - 2) * 0.04).toFixed(2));
+  const boostPct = Number((0.08 + (clampedWanted - 2) * 0.05).toFixed(2));
+
+  const nextState = triggerStockMarketImpact(
+    state,
+    victimSymbol,
+    boostSymbol,
+    dropPct,
+    boostPct
+  );
+
+  const news: FinancialNewsItem = {
+    id: `news_wanted_${districtId}_${clampedWanted}_${Date.now()}`,
+    headline: `SIAGA KEAMANAN ★${clampedWanted}: Penyekatan aparat di ${link.sectorLabel} menekan saham ${victimSymbol} (-${Math.round(
+      dropPct * 100
+    )}%) & melambungkan kontrak pertahanan ${boostSymbol} (+${Math.round(
+      boostPct * 100
+    )}%).`,
+    affectedSymbol: victimSymbol,
+    deltaPct: -Math.round(dropPct * 100),
+    timestampLabel,
+  };
+
+  return {
+    nextState,
+    shocked: true,
+    news,
+  };
+}
+
+

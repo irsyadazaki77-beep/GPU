@@ -269,27 +269,40 @@ export function resolveCircleAABBCollision(
   pz: number,
   radius: number,
   buildings?: BuildingFootprint[],
-  grid?: SpatialHashGrid<BuildingFootprint>
-): { x: number; z: number; collided: boolean } {
+  grid?: SpatialHashGrid<BuildingFootprint>,
+  elevationY: number = 0
+): {
+  x: number;
+  z: number;
+  collided: boolean;
+  normalX: number;
+  normalZ: number;
+} {
   let x = px;
   let z = pz;
   let collided = false;
+  let normalX = 0;
+  let normalZ = 0;
 
-  // World outer perimeter clamp (natural boundary at +-92m)
+  // World outer perimeter clamp (natural boundary at +-240m)
   const maxBound = WORLD_MAX_BOUND;
   if (x < -maxBound) {
     x = -maxBound;
     collided = true;
+    normalX = 1;
   } else if (x > maxBound) {
     x = maxBound;
     collided = true;
+    normalX = -1;
   }
   if (z < -maxBound) {
     z = -maxBound;
     collided = true;
+    normalZ = 1;
   } else if (z > maxBound) {
     z = maxBound;
     collided = true;
+    normalZ = -1;
   }
 
   let candidates: BuildingFootprint[];
@@ -314,6 +327,9 @@ export function resolveCircleAABBCollision(
   }
 
   for (const b of candidates) {
+    // Elevated overpass/aircraft separation: skip collision if actor is cleanly above building roof
+    if (elevationY > b.height + 0.5) continue;
+
     const halfW = b.width / 2;
     const halfD = b.depth / 2;
     const minX = b.x - halfW;
@@ -333,23 +349,63 @@ export function resolveCircleAABBCollision(
       const dist = Math.sqrt(distSq);
       if (dist > 0.0001) {
         const push = radius - dist;
-        x += (dx / dist) * push;
-        z += (dz / dist) * push;
+        const nx = dx / dist;
+        const nz = dz / dist;
+        x += nx * push;
+        z += nz * push;
+        normalX = nx;
+        normalZ = nz;
       } else {
         const leftPen = Math.abs(x - minX);
         const rightPen = Math.abs(maxX - x);
         const topPen = Math.abs(z - minZ);
         const botPen = Math.abs(maxZ - z);
         const minPen = Math.min(leftPen, rightPen, topPen, botPen);
-        if (minPen === leftPen) x = minX - radius;
-        else if (minPen === rightPen) x = maxX + radius;
-        else if (minPen === topPen) z = minZ - radius;
-        else z = maxZ + radius;
+        if (minPen === leftPen) {
+          x = minX - radius;
+          normalX = -1;
+          normalZ = 0;
+        } else if (minPen === rightPen) {
+          x = maxX + radius;
+          normalX = 1;
+          normalZ = 0;
+        } else if (minPen === topPen) {
+          z = minZ - radius;
+          normalX = 0;
+          normalZ = -1;
+        } else {
+          z = maxZ + radius;
+          normalX = 0;
+          normalZ = 1;
+        }
       }
     }
   }
 
-  return { x, z, collided };
+  return { x, z, collided, normalX, normalZ };
+}
+
+/**
+ * Projects a velocity vector along a collision wall normal so characters and vehicles
+ * glide smoothly past building corners instead of snagging.
+ */
+export function projectSlideVelocityAlongWall(
+  vx: number,
+  vz: number,
+  normalX: number,
+  normalZ: number,
+  restitution: number = 0.05
+): { vx: number; vz: number } {
+  const nLen = Math.hypot(normalX, normalZ);
+  if (nLen < 1e-5) return { vx, vz };
+  const nx = normalX / nLen;
+  const nz = normalZ / nLen;
+  const dot = vx * nx + vz * nz;
+  if (dot >= 0) return { vx, vz };
+  return {
+    vx: vx - (1 + Math.max(0, restitution)) * dot * nx,
+    vz: vz - (1 + Math.max(0, restitution)) * dot * nz,
+  };
 }
 
 const _camScratch: BuildingFootprint[] = [];

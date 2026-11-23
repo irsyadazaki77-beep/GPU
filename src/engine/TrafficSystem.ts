@@ -19,12 +19,15 @@ import {
   applyTirePuncture,
   applyVehicleImpactDamage,
   computeAmbientSkyAndMarinePose,
+  computeDistrictHeatModifier,
   computePoliceInterceptVector,
   createInitialTrafficSignalState,
   createInitialVehicleDamage,
+  evaluateHelicopterSpotlightCone,
   evaluateSpikeStripHit,
   generateInitialTrafficSpawns,
   getGroundElevationAt,
+  projectSlideVelocityAlongWall,
   resolveCircleAABBCollision,
   stepTrafficSignals,
   stepTrafficVehicleInPlace,
@@ -1051,7 +1054,14 @@ export class TrafficSystem {
       ) {
         const kiranaEmp =
           pState.activeProtagonist === 'kirana' && pState.fokusActive;
-        const pSpeed = kiranaEmp ? 1.5 : 13.5 + pState.wantedLevel * 1.4;
+        const heatMod = computeDistrictHeatModifier(
+          pState.wantedLevel,
+          pState.characterSkills?.negotiation ?? 1
+        );
+        const pSpeed = kiranaEmp
+          ? 1.5
+          : (13.2 + pState.wantedLevel * 1.2) *
+            heatMod.policeResponseSpeedMultiplier;
         const intercept = computePoliceInterceptVector(
           v.x,
           v.z,
@@ -1094,10 +1104,23 @@ export class TrafficSystem {
             nz,
             2.2,
             undefined,
-            this.buildingGrid
+            this.buildingGrid,
+            v.y
           );
-          v.x = col.x;
-          v.z = col.z;
+          if (col.collided) {
+            const slid = projectSlideVelocityAlongWall(
+              moveX * pSpeed,
+              moveZ * pSpeed,
+              col.normalX,
+              col.normalZ,
+              0.08
+            );
+            v.x = col.x + slid.vx * simDt * 0.35;
+            v.z = col.z + slid.vz * simDt * 0.35;
+          } else {
+            v.x = col.x;
+            v.z = col.z;
+          }
         }
         v.y = getGroundElevationAt(v.x, v.z, v.y);
       } else {
@@ -1360,6 +1383,23 @@ export class TrafficSystem {
         }
       } else {
         this.sirenLight.intensity = 0;
+      }
+
+      if (pState.wantedLevel >= 5 && this.policeHeliMesh.visible) {
+        const underOverpass =
+          Math.abs(playerZ - 80) < 9.5 && playerY < 3.2;
+        const spotEval = evaluateHelicopterSpotlightCone({
+          playerX,
+          playerZ,
+          chopperX: this.policeHeliMesh.position.x,
+          chopperZ: this.policeHeliMesh.position.z,
+          wantedLevel: pState.wantedLevel,
+          underOverpassCover: underOverpass,
+          kiranaBlackoutActive: Boolean(kiranaHack.cameraBlackout),
+        });
+        if (spotEval.illuminated) {
+          spottedByPolice = true;
+        }
       }
     } else {
       this.sirenLight.intensity = 0;

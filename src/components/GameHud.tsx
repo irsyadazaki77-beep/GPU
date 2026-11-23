@@ -29,7 +29,9 @@ import {
   gameStore,
   useGameStore,
 } from '../state/gameStore';
+import { getEffectiveMagazineCapacity } from '../engine/controllers/combatController';
 import { MiniMapRadar } from './MiniMapRadar';
+import { TacticalCombatHudCluster } from './hud/TacticalCombatHudCluster';
 
 interface GameHudProps {
   playerState: PlayerProgressState;
@@ -1654,8 +1656,44 @@ export const GameHud: React.FC<GameHudProps> = ({
             )}
           </div>
 
-          {/* BOTTOM-RIGHT: Sleek Driving Speedometer Arc + Minimal Character/Ability Dock */}
+          {/* BOTTOM-RIGHT: Sleek Driving Speedometer Arc + Tactical Combat Cluster + District Reveal */}
           <div className="flex flex-col items-end gap-2 pointer-events-auto min-w-0 sm:shrink-0">
+          {!drivingVehicle && (
+            <TacticalCombatHudCluster
+              activeWeapon={playerState.activeWeapon}
+              isMeleeWeapon={
+                getEffectiveWeaponSpec(playerState.activeWeapon, playerState)
+                  .isMelee
+              }
+              magazineInClip={
+                engineTelemetryRef.magazineInClip ??
+                getEffectiveMagazineCapacity(
+                  playerState.activeWeapon,
+                  playerState.weaponAttachments?.[playerState.activeWeapon] ?? []
+                )
+              }
+              magazineCapacity={
+                engineTelemetryRef.magazineCapacity ??
+                getEffectiveMagazineCapacity(
+                  playerState.activeWeapon,
+                  playerState.weaponAttachments?.[playerState.activeWeapon] ?? []
+                )
+              }
+              reloadingWeapon={Boolean(engineTelemetryRef.reloadingWeapon)}
+              reloadProgressPct={engineTelemetryRef.reloadProgressPct ?? 0}
+              meleeComboStage={engineTelemetryRef.meleeComboStage ?? 0}
+              meleeComboLabel={engineTelemetryRef.meleeComboLabel ?? ''}
+              dodgeRollActive={Boolean(engineTelemetryRef.dodgeRollActive)}
+              dodgeRollCooldownSec={engineTelemetryRef.dodgeRollCooldownSec ?? 0}
+              headshotBannerActive={
+                Boolean(engineTelemetryRef.lastHeadshotStamp) &&
+                Date.now() - (engineTelemetryRef.lastHeadshotStamp ?? 0) < 1600
+              }
+              activeDynamicEncounter={
+                engineTelemetryRef.activeDynamicEncounter ?? null
+              }
+            />
+          )}
           {drivingVehicle && vehicleSpec && (
             <div className="flex items-center gap-2.5 sm:gap-3 aaa-glass-subtle px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl shadow-xl animate-aaa-up">
               <div className="relative w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center shrink-0">

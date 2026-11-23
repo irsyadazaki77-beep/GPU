@@ -183,9 +183,58 @@ export interface WantedCooldownStepResult {
   cleared: boolean;
 }
 
+export interface HelicopterSpotlightEvaluation {
+  illuminated: boolean;
+  distanceFromBeamCenter: number;
+  exposureIntensity: number;
+}
+
+/**
+ * Evaluates whether the player is currently caught inside the ★5 police helicopter spotlight cone.
+ * Hiding under an overpass or triggering Kirana's cyber blackout blocks aerial thermal/spotlight lock.
+ */
+export function evaluateHelicopterSpotlightCone(params: {
+  playerX: number;
+  playerZ: number;
+  chopperX: number;
+  chopperZ: number;
+  wantedLevel: number;
+  underOverpassCover: boolean;
+  kiranaBlackoutActive: boolean;
+  beamRadius?: number;
+}): HelicopterSpotlightEvaluation {
+  const spec = getWantedTierSpec(params.wantedLevel);
+  const radius = Math.max(4, params.beamRadius ?? 13.5);
+  const dist = Math.hypot(
+    params.playerX - params.chopperX,
+    params.playerZ - params.chopperZ
+  );
+
+  if (
+    !spec ||
+    !spec.enableHelicopterSpotlight ||
+    params.underOverpassCover ||
+    params.kiranaBlackoutActive ||
+    dist > radius
+  ) {
+    return {
+      illuminated: false,
+      distanceFromBeamCenter: dist,
+      exposureIntensity: 0,
+    };
+  }
+
+  return {
+    illuminated: true,
+    distanceFromBeamCenter: dist,
+    exposureIntensity: Math.max(0.15, 1 - dist / radius),
+  };
+}
+
 /**
  * Steps the line-of-sight cooldown timer when evading police pursuit.
- * Hiding under Semanggi overpass cover or activating Kirana's district blackout accelerates decay.
+ * Hiding under Semanggi overpass cover or activating Kirana's district blackout accelerates decay,
+ * whereas being illuminated by the ★5 police helicopter spotlight pauses cooldown decay.
  */
 export function stepWantedSystemCooldown(
   wantedLevel: number,
@@ -193,7 +242,8 @@ export function stepWantedSystemCooldown(
   hasPoliceLineOfSight: boolean,
   underOverpassCover: boolean,
   kiranaBlackoutActive: boolean,
-  dt: number
+  dt: number,
+  inChopperSpotlight: boolean = false
 ): WantedCooldownStepResult {
   const clampedWanted = Math.max(0, Math.min(5, Math.floor(wantedLevel)));
   if (clampedWanted === 0) {
@@ -206,8 +256,14 @@ export function stepWantedSystemCooldown(
   }
 
   const spec = WANTED_TIER_SPECS[clampedWanted as 1 | 2 | 3 | 4 | 5];
+  const aerialLock =
+    inChopperSpotlight &&
+    spec.enableHelicopterSpotlight &&
+    !underOverpassCover &&
+    !kiranaBlackoutActive;
   // If Kirana's camera/chopper hack is active, helicopter & CCTV lose sight unless police are right next to player
-  const effectiveLineOfSight = hasPoliceLineOfSight && !kiranaBlackoutActive;
+  const effectiveLineOfSight =
+    (hasPoliceLineOfSight && !kiranaBlackoutActive) || aerialLock;
 
   if (effectiveLineOfSight) {
     return {
@@ -240,6 +296,38 @@ export function stepWantedSystemCooldown(
     flashingCooldown: true,
     remainingSeconds: Math.max(0, spec.baseCooldownSeconds - nextElapsed),
     cleared: false,
+  };
+}
+
+export interface DistrictHeatModifier {
+  heatLevel: number;
+  shopPriceMultiplier: number;
+  bribeCostMultiplier: number;
+  policeResponseSpeedMultiplier: number;
+  lockdownActive: boolean;
+}
+
+/**
+ * Computes systemic District Heat modifiers linking active wanted level & lockdown state
+ * to local vendor/garage prices, police bribe costs, and pursuit response speed.
+ */
+export function computeDistrictHeatModifier(
+  wantedLevel: number,
+  negSkillLevel: number = 1
+): DistrictHeatModifier {
+  const clamped = Math.max(0, Math.min(5, Math.floor(wantedLevel)));
+  const spec = getWantedTierSpec(clamped);
+  const lockdownActive = Boolean(spec?.districtLockdown);
+  const negDiscount = Math.min(0.4, Math.max(0, negSkillLevel - 1) * 0.1);
+
+  return {
+    heatLevel: clamped,
+    shopPriceMultiplier: Number((1 + clamped * 0.06 + (lockdownActive ? 0.15 : 0)).toFixed(2)),
+    bribeCostMultiplier: Number(
+      Math.max(0.5, (1 + clamped * 0.18 + (lockdownActive ? 0.25 : 0)) * (1 - negDiscount)).toFixed(2)
+    ),
+    policeResponseSpeedMultiplier: Number((1 + clamped * 0.08).toFixed(2)),
+    lockdownActive,
   };
 }
 

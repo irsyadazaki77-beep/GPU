@@ -26,6 +26,7 @@ export {
   SpatialHashGrid,
   createBuildingSpatialGrid,
   resolveCircleAABBCollision,
+  projectSlideVelocityAlongWall,
   resolveCameraWallPullIn,
   stepSidewalkPatrol,
 } from './world/spatial';
