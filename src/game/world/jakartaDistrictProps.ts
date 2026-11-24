@@ -1,12 +1,20 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { proceduralTextures } from '../../engine/ProceduralTextures';
 import type { Point2D } from '../../engine/visualOverhaulMath';
+import { SPBU_STATIONS } from '../tacticalGadgets';
 import { isNearBuilding, isOnRoadway } from './spatial';
 
 export interface JakartaDistrictPropsHandle {
   group: THREE.Group;
   lightAnchors: Point2D[];
   setWeatherTransition: (nightFactor: number, elapsedTime: number) => void;
+  setSpbuDestroyedIds: (destroyedIds: readonly string[]) => void;
+  updateDigitalVmsStatus: (
+    headline: string,
+    subline: string,
+    accentColor: string
+  ) => void;
   dispose: () => void;
 }
 
@@ -608,6 +616,7 @@ export function buildJakartaDistrictProps(
   fountainJetsGroup.position.set(0, 0.72, 32);
   const jetGeo = new THREE.ConeGeometry(0.14, 2.6, 6, 1, true);
   jetGeo.translate(0, 1.3, 0);
+  const outerPlumes: THREE.Mesh[] = [];
   for (let i = 0; i < 8; i++) {
     const ang = (i / 8) * Math.PI * 2;
     const jet = new THREE.Mesh(jetGeo, fountainJetMat);
@@ -615,20 +624,360 @@ export function buildJakartaDistrictProps(
     jet.rotation.z = Math.cos(ang) * 0.24;
     jet.rotation.x = -Math.sin(ang) * 0.24;
     fountainJetsGroup.add(jet);
+    outerPlumes.push(jet);
+  }
+  // Inner high central crown plumes + animated surface ripple rings
+  const innerCrownJetGeo = new THREE.ConeGeometry(0.18, 3.6, 8, 1, true);
+  innerCrownJetGeo.translate(0, 1.8, 0);
+  const innerCrownJets: THREE.Mesh[] = [];
+  for (let c = 0; c < 4; c++) {
+    const cAng = (c / 4) * Math.PI * 2 + Math.PI / 4;
+    const cJet = new THREE.Mesh(innerCrownJetGeo, fountainJetMat);
+    cJet.position.set(Math.cos(cAng) * 1.15, 0.1, Math.sin(cAng) * 1.15);
+    cJet.rotation.z = Math.cos(cAng) * 0.12;
+    cJet.rotation.x = -Math.sin(cAng) * 0.12;
+    fountainJetsGroup.add(cJet);
+    innerCrownJets.push(cJet);
+  }
+  const rippleRingMat = new THREE.MeshBasicMaterial({
+    color: 0xbae6fd,
+    transparent: true,
+    opacity: 0.42,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const rippleGeo = new THREE.RingGeometry(1.6, 1.85, 24);
+  rippleGeo.rotateX(-Math.PI / 2);
+  const fountainRipples: THREE.Mesh[] = [];
+  for (let r = 0; r < 2; r++) {
+    const rip = new THREE.Mesh(rippleGeo, rippleRingMat);
+    rip.position.set(0, 0.06, 0);
+    fountainJetsGroup.add(rip);
+    fountainRipples.push(rip);
   }
   group.add(fountainJetsGroup);
   lightAnchors.push({ x: 0, z: 32 });
+
+  // =========================================================================
+  // 7. 3 ICONIC SPBU PERTAMINA PASTI PAS FUEL & SERVICE STATIONS
+  // =========================================================================
+  const spbuCanopyWhiteMat = new THREE.MeshStandardMaterial({
+    color: 0xf8fafc,
+    roughness: 0.35,
+    metalness: 0.25,
+  });
+  const spbuRedMat = new THREE.MeshStandardMaterial({
+    color: 0xdc2626,
+    emissive: 0x991b1b,
+    emissiveIntensity: 0.35,
+    roughness: 0.32,
+    metalness: 0.28,
+  });
+  const spbuBlueMat = new THREE.MeshStandardMaterial({
+    color: 0x0284c7,
+    emissive: 0x0369a1,
+    emissiveIntensity: 0.35,
+    roughness: 0.35,
+    metalness: 0.3,
+  });
+  const spbuGreenMat = new THREE.MeshStandardMaterial({
+    color: 0x16a34a,
+    emissive: 0x15803d,
+    emissiveIntensity: 0.45,
+    roughness: 0.35,
+  });
+  const spbuCeilingGlowMat = new THREE.MeshBasicMaterial({
+    color: 0xfefce8,
+  });
+  const spbuServiceRingMat = new THREE.MeshBasicMaterial({
+    color: 0x22c55e,
+    transparent: true,
+    opacity: 0.48,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const spbuCharredMat = new THREE.MeshStandardMaterial({
+    color: 0x171717,
+    emissive: 0x7c2d12,
+    emissiveIntensity: 0.55,
+    roughness: 0.92,
+  });
+
+  const spbuDispenserRefs = new Map<
+    string,
+    {
+      intactGroup: THREE.Group;
+      wreckGroup: THREE.Group;
+      serviceRing: THREE.Mesh;
+    }
+  >();
+
+  for (const st of SPBU_STATIONS) {
+    const stGroup = new THREE.Group();
+    stGroup.position.set(st.x, 0.05, st.z);
+    stGroup.rotation.y = st.rotY;
+
+    // Concrete forecourt apron slab
+    const apron = new THREE.Mesh(
+      new RoundedBoxGeometry(9.6, 0.14, 7.2, 2, 0.04),
+      new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.85 })
+    );
+    apron.position.y = 0.04;
+    apron.receiveShadow = true;
+    stGroup.add(apron);
+
+    // 4 steel support columns
+    const colGeo = new THREE.CylinderGeometry(0.2, 0.24, 4.5, 10);
+    for (const [cx, cz] of [
+      [-3.1, -1.8],
+      [3.1, -1.8],
+      [-3.1, 1.8],
+      [3.1, 1.8],
+    ]) {
+      const col = new THREE.Mesh(colGeo, spbuCanopyWhiteMat);
+      col.position.set(cx, 2.3, cz);
+      col.castShadow = true;
+      stGroup.add(col);
+    }
+
+    // Pertamina Tri-Color Canopy Fascia (Red top band + White core + Blue/Green accent)
+    const canopyCore = new THREE.Mesh(
+      new RoundedBoxGeometry(8.2, 0.52, 5.4, 3, 0.08),
+      spbuCanopyWhiteMat
+    );
+    canopyCore.position.y = 4.65;
+    canopyCore.castShadow = true;
+    stGroup.add(canopyCore);
+
+    const canopyRedStripe = new THREE.Mesh(
+      new RoundedBoxGeometry(8.32, 0.24, 5.52, 2, 0.05),
+      spbuRedMat
+    );
+    canopyRedStripe.position.y = 4.86;
+    stGroup.add(canopyRedStripe);
+
+    const canopyBlueStripe = new THREE.Mesh(
+      new THREE.BoxGeometry(8.28, 0.12, 5.48),
+      spbuBlueMat
+    );
+    canopyBlueStripe.position.y = 4.44;
+    stGroup.add(canopyBlueStripe);
+
+    const ceilingLight = new THREE.Mesh(
+      new THREE.PlaneGeometry(6.8, 4.0),
+      spbuCeilingGlowMat
+    );
+    ceilingLight.rotation.x = Math.PI / 2;
+    ceilingLight.position.y = 4.37;
+    stGroup.add(ceilingLight);
+
+    // Roadside Pertamina Totem Price Sign
+    const totem = new THREE.Mesh(
+      new RoundedBoxGeometry(0.95, 4.6, 0.34, 2, 0.06),
+      spbuRedMat
+    );
+    totem.position.set(4.3, 2.35, 2.7);
+    stGroup.add(totem);
+    const totemLed = new THREE.Mesh(
+      new THREE.BoxGeometry(0.76, 1.35, 0.38),
+      spbuGreenMat
+    );
+    totemLed.position.set(4.3, 3.1, 2.7);
+    stGroup.add(totemLed);
+
+    // Intact Fuel Dispensers
+    const intactGroup = new THREE.Group();
+    for (const px of [-1.45, 1.45]) {
+      const island = new THREE.Mesh(
+        new RoundedBoxGeometry(1.3, 0.18, 2.6, 2, 0.04),
+        spbuCanopyWhiteMat
+      );
+      island.position.set(px, 0.14, 0);
+      intactGroup.add(island);
+
+      const pumpBody = new THREE.Mesh(
+        new RoundedBoxGeometry(0.68, 1.55, 0.56, 2, 0.06),
+        spbuBlueMat
+      );
+      pumpBody.position.set(px, 0.98, 0);
+      intactGroup.add(pumpBody);
+
+      const pumpHeader = new THREE.Mesh(
+        new RoundedBoxGeometry(0.74, 0.34, 0.6, 2, 0.05),
+        spbuRedMat
+      );
+      pumpHeader.position.set(px, 1.85, 0);
+      intactGroup.add(pumpHeader);
+    }
+    stGroup.add(intactGroup);
+
+    // Wrecked / Exploded Dispenser Debris (hidden until detonated)
+    const wreckGroup = new THREE.Group();
+    wreckGroup.visible = false;
+    for (const px of [-1.45, 1.45]) {
+      const charredStub = new THREE.Mesh(
+        new THREE.BoxGeometry(0.72, 0.68, 0.62),
+        spbuCharredMat
+      );
+      charredStub.position.set(px, 0.38, 0);
+      charredStub.rotation.set(0.18, px * 0.2, -0.24);
+      wreckGroup.add(charredStub);
+    }
+    stGroup.add(wreckGroup);
+
+    // Glowing Green Service Pad Ring
+    const sRingGeo = new THREE.RingGeometry(2.6, 3.1, 28);
+    sRingGeo.rotateX(-Math.PI / 2);
+    const serviceRing = new THREE.Mesh(sRingGeo, spbuServiceRingMat);
+    serviceRing.position.set(0, 0.13, 0);
+    stGroup.add(serviceRing);
+
+    spbuDispenserRefs.set(st.id, { intactGroup, wreckGroup, serviceRing });
+    group.add(stGroup);
+    lightAnchors.push({ x: st.x, z: st.z });
+  }
+
+  // =========================================================================
+  // 8. OVERHEAD DIGITAL VMS TRAFFIC GANTRIES (Sudirman & Gatot Subroto)
+  // =========================================================================
+  let vmsCanvas: HTMLCanvasElement | null = null;
+  let vmsCtx: CanvasRenderingContext2D | null = null;
+  let vmsTexture: THREE.CanvasTexture | null = null;
+  let lastVmsKey = '';
+
+  if (typeof document !== 'undefined') {
+    vmsCanvas = document.createElement('canvas');
+    vmsCanvas.width = 512;
+    vmsCanvas.height = 128;
+    vmsCtx = vmsCanvas.getContext('2d');
+    vmsTexture = new THREE.CanvasTexture(vmsCanvas);
+    vmsTexture.colorSpace = THREE.SRGBColorSpace;
+  }
+
+  const renderVmsCanvas = (
+    headline: string,
+    subline: string,
+    accentColor: string
+  ) => {
+    if (!vmsCtx || !vmsCanvas || !vmsTexture) return;
+    const key = `${headline}|${subline}|${accentColor}`;
+    if (key === lastVmsKey) return;
+    lastVmsKey = key;
+
+    vmsCtx.fillStyle = '#05080f';
+    vmsCtx.fillRect(0, 0, 512, 128);
+    vmsCtx.strokeStyle = accentColor;
+    vmsCtx.lineWidth = 4;
+    vmsCtx.strokeRect(6, 6, 500, 116);
+
+    vmsCtx.fillStyle = accentColor;
+    vmsCtx.font = 'bold 30px monospace';
+    vmsCtx.textAlign = 'center';
+    vmsCtx.textBaseline = 'middle';
+    vmsCtx.fillText(headline.slice(0, 28), 256, 46);
+
+    vmsCtx.fillStyle = '#e2e8f0';
+    vmsCtx.font = 'bold 20px monospace';
+    vmsCtx.fillText(subline.slice(0, 38), 256, 88);
+    vmsTexture.needsUpdate = true;
+  };
+
+  renderVmsCanvas(
+    'DISHUB DKI · LALU LINTAS LANCAR',
+    'PATUHI BATAS KECEPATAN KORIDOR PROTOKOL',
+    '#22c55e'
+  );
+
+  const vmsSteelMat = new THREE.MeshStandardMaterial({
+    color: 0x334155,
+    roughness: 0.48,
+    metalness: 0.72,
+  });
+  const vmsScreenMat = new THREE.MeshBasicMaterial({
+    map: vmsTexture ?? undefined,
+    color: 0xffffff,
+  });
+
+  const vmsPlacements: { x: number; z: number; rotY: number; span: number }[] = [
+    { x: 0, z: 52, rotY: 0, span: 15.6 }, // Over Jl. Jend. Sudirman
+    { x: 46, z: 80, rotY: Math.PI / 2, span: 13.6 }, // Over Jl. Gatot Subroto
+  ];
+
+  for (const vp of vmsPlacements) {
+    const vg = new THREE.Group();
+    vg.position.set(vp.x, 0, vp.z);
+    vg.rotation.y = vp.rotY;
+
+    const legGeo = new THREE.CylinderGeometry(0.22, 0.26, 6.8, 8);
+    for (const sx of [-vp.span * 0.5, vp.span * 0.5]) {
+      const leg = new THREE.Mesh(legGeo, vmsSteelMat);
+      leg.position.set(sx, 3.4, 0);
+      vg.add(leg);
+    }
+    const crossBeam = new THREE.Mesh(
+      new THREE.BoxGeometry(vp.span + 0.6, 0.36, 0.36),
+      vmsSteelMat
+    );
+    crossBeam.position.set(0, 6.65, 0);
+    vg.add(crossBeam);
+
+    const housing = new THREE.Mesh(
+      new RoundedBoxGeometry(7.6, 1.85, 0.42, 2, 0.06),
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.6 })
+    );
+    housing.position.set(0, 6.65, 0);
+    vg.add(housing);
+
+    const screenGeo = new THREE.PlaneGeometry(7.2, 1.62);
+    const frontScreen = new THREE.Mesh(screenGeo, vmsScreenMat);
+    frontScreen.position.set(0, 6.65, 0.23);
+    const backScreen = new THREE.Mesh(screenGeo, vmsScreenMat);
+    backScreen.position.set(0, 6.65, -0.23);
+    backScreen.rotation.y = Math.PI;
+    vg.add(frontScreen, backScreen);
+
+    group.add(vg);
+  }
+
+  const setSpbuDestroyedIds = (destroyedIds: readonly string[]) => {
+    for (const [id, refs] of spbuDispenserRefs.entries()) {
+      const isDead = destroyedIds.includes(id);
+      refs.intactGroup.visible = !isDead;
+      refs.wreckGroup.visible = isDead;
+      refs.serviceRing.visible = !isDead;
+    }
+  };
 
   const setWeatherTransition = (nightFactor: number, elapsedTime: number) => {
     const n = Math.max(0, Math.min(1, nightFactor));
     warungLanternMat.emissiveIntensity = 0.25 + n * 1.95;
     jpoLedMat.emissiveIntensity = 0.55 + n * 1.35;
     neonBoardMat.emissiveIntensity = 0.22 + n * 1.45;
-    fountainJetMat.opacity = 0.38 + n * 0.35 + Math.sin(elapsedTime * 4.2) * 0.08;
-    fountainJetsGroup.scale.y = 0.92 + Math.sin(elapsedTime * 3.1) * 0.1;
+    spbuRedMat.emissiveIntensity = 0.28 + n * 0.95;
+    spbuBlueMat.emissiveIntensity = 0.28 + n * 0.95;
+    spbuServiceRingMat.opacity = 0.34 + Math.sin(elapsedTime * 3.8) * 0.14;
+
+    fountainJetMat.opacity = 0.42 + n * 0.35 + Math.sin(elapsedTime * 4.2) * 0.08;
+    fountainJetsGroup.scale.y = 0.94 + Math.sin(elapsedTime * 3.1) * 0.1;
+    for (let i = 0; i < outerPlumes.length; i++) {
+      outerPlumes[i].scale.y = 0.85 + Math.sin(elapsedTime * 4.6 + i * 0.8) * 0.22;
+    }
+    for (let c = 0; c < innerCrownJets.length; c++) {
+      innerCrownJets[c].scale.y = 0.9 + Math.cos(elapsedTime * 3.8 + c * 1.4) * 0.24;
+    }
+    for (let r = 0; r < fountainRipples.length; r++) {
+      const phase = ((elapsedTime * 0.65 + r * 0.5) % 1);
+      const scale = 0.85 + phase * 1.45;
+      fountainRipples[r].scale.set(scale, scale, 1);
+    }
   };
 
   const dispose = () => {
+    if (vmsTexture) {
+      vmsTexture.dispose();
+    }
     const disposedGeos = new Set<THREE.BufferGeometry>();
     const disposedMats = new Set<THREE.Material>();
     group.traverse((obj) => {
@@ -658,6 +1007,8 @@ export function buildJakartaDistrictProps(
     group,
     lightAnchors,
     setWeatherTransition,
+    setSpbuDestroyedIds,
+    updateDigitalVmsStatus: renderVmsCanvas,
     dispose,
   };
 }

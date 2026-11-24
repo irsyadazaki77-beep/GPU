@@ -8,6 +8,7 @@ import type {
   StockMarketEntry,
   StockSymbol,
   StockTickerSpec,
+  TurfRaidEvent,
   WarungServeQuality,
   WarungSnackId,
   WarungSnackSpec,
@@ -942,5 +943,95 @@ export function applyWantedHeatStockShock(
     news,
   };
 }
+
+/* ==========================================================================
+ * GRAND PLAN 9.0: RIVAL GANG TURF RAID DEFENSE EVENTS
+ * ========================================================================== */
+
+/**
+ * Selects a vulnerable player-owned district (defenseLevel <= 2) to trigger a live Turf Raid defense event.
+ */
+export function createTurfRaidEvent(
+  state: PlayerProgressState,
+  districts: {
+    id: DistrictId;
+    name: string;
+    centerX: number;
+    centerZ: number;
+  }[],
+  seedIndex: number = 0
+): TurfRaidEvent | null {
+  const turfMap = state.districtTurf || {};
+  const vulnerable = districts.filter((d) => {
+    const t = turfMap[d.id];
+    return t && t.owner === 'player' && t.defenseLevel <= 2;
+  });
+  if (vulnerable.length === 0) return null;
+
+  const pick =
+    vulnerable[Math.abs(Math.floor(seedIndex)) % vulnerable.length];
+  return {
+    id: `turf_raid_${pick.id}_${Date.now()}`,
+    districtId: pick.id,
+    districtName: pick.name,
+    targetX: pick.centerX,
+    targetZ: pick.centerZ,
+    remainingSec: 75,
+    raidersRemaining: 4,
+    rewardRp: 150000,
+  };
+}
+
+/**
+ * Resolves a successful Turf Raid defense: awards Rp 150.000, upgrades district defenseLevel (+1 up to 3), and grants Street Rep.
+ */
+export function resolveTurfRaidVictory(
+  state: PlayerProgressState,
+  raid: TurfRaidEvent
+): PlayerProgressState {
+  const nextTurf = { ...(state.districtTurf || {}) };
+  const current = nextTurf[raid.districtId];
+  if (current) {
+    nextTurf[raid.districtId] = {
+      ...current,
+      owner: 'player',
+      defenseLevel: Math.min(3, current.defenseLevel + 1),
+    };
+  }
+  return {
+    ...state,
+    rupiah: state.rupiah + raid.rewardRp,
+    score: state.score + 420,
+    bestScore: Math.max(state.bestScore, state.score + 420),
+    districtTurf: nextTurf,
+    reputation: {
+      ...state.reputation,
+      rakyat: Math.min(100, (state.reputation.rakyat ?? 0) + 12),
+    },
+  };
+}
+
+/**
+ * Resolves an ignored/expired Turf Raid: rival syndicate reclaims the undefended district.
+ */
+export function resolveTurfRaidFailure(
+  state: PlayerProgressState,
+  raid: TurfRaidEvent
+): PlayerProgressState {
+  const nextTurf = { ...(state.districtTurf || {}) };
+  const current = nextTurf[raid.districtId];
+  if (current) {
+    nextTurf[raid.districtId] = {
+      ...current,
+      owner: 'syndicate',
+      defenseLevel: 1,
+    };
+  }
+  return {
+    ...state,
+    districtTurf: nextTurf,
+  };
+}
+
 
 

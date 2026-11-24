@@ -53,8 +53,11 @@ import {
   PoliceVisionCone,
   ProtagonistId,
   RADIO_STATIONS,
+  RaceRecordEntry,
   RaceRivalTelemetry,
+  SPBU_SERVICE_PRICE_RP,
   STORY_MISSIONS,
+  STREET_RACES,
   SaveSlotId,
   SquadOrderMode,
   StreetBountySpec,
@@ -63,9 +66,12 @@ import {
   StoryChoiceOption,
   StoryMission,
   StuntJumpResult,
+  TACTICAL_GADGET_SPECS,
+  TacticalGadgetKind,
   TrafficSignalPhase,
   TrioSquadTelemetryMember,
   TrioSynergyState,
+  TurfRaidEvent,
   VehicleDamageState,
   VehicleType,
   ViralCloutState,
@@ -80,6 +86,7 @@ import {
   captureDistrictTurf,
   claimDailyChallengeReward,
   collectNusantaraPackage,
+  computeHighStakesRaceTerms,
   computeHospitalRespawnState,
   computeViralCloutState,
   createDailyChallengesForDate,
@@ -91,8 +98,12 @@ import {
   createQuickPassengerFare,
   createSeedNabiloGramPosts,
   createStreetRaceSession,
+  createTurfRaidEvent,
   createTurfWarSession,
   cycleCameraViewMode as cycleCameraModePure,
+  resolveTurfRaidFailure,
+  resolveTurfRaidVictory,
+  updatePersonalBestRaceRecord,
   formatJakartaClock,
   incrementTrioSynergy,
   resolveCombatComboState,
@@ -510,6 +521,18 @@ export interface GameStoreSnapshot {
   socialHubLoading: boolean;
   sabotagedHeistCctvIds: string[];
   multiplayerLobby: MultiplayerLobbyState | null;
+  // Grand Plan 9.0 State
+  vehicleFuelPct: number;
+  nearbySpbuName: string | null;
+  destroyedSpbuIds: string[];
+  activeGadgetKind: TacticalGadgetKind;
+  smokeGrenades: number;
+  molotovs: number;
+  inSmokeScreen: boolean;
+  patwalSirenActive: boolean;
+  activeTurfRaid: TurfRaidEvent | null;
+  highStakesRaceMode: boolean;
+  raceBestTimes: Record<string, RaceRecordEntry>;
 }
 
 export function buildInitialStateForStage(
@@ -1738,18 +1761,45 @@ export const gameStore = {
     emitChange();
   },
 
-  startStreetRace: (raceId: string) => {
+  startStreetRace: (raceId: string, forceHighStakes?: boolean) => {
     const session = createStreetRaceSession(raceId);
     if (!session) return null;
+    const baseSpec = STREET_RACES.find((r) => r.id === raceId);
+    const useHighStakes = forceHighStakes ?? state.highStakesRaceMode;
+    const terms = computeHighStakesRaceTerms(
+      baseSpec?.entryFeeRp ?? 25000,
+      session.rewardRp,
+      useHighStakes
+    );
+    if (useHighStakes && state.playerState.rupiah < terms.entryFeeRp) {
+      state = {
+        ...state,
+        lastOutcomeText: `Saldo tidak cukup untuk Taruhan Gengsi (butuh Rp ${terms.entryFeeRp.toLocaleString('id-ID')}).`,
+      };
+      emitChange();
+      return null;
+    }
     soundEngine.playPickup();
+    const stakedSession: ActiveStreetRaceSession = {
+      ...session,
+      rewardRp: terms.firstPlaceRewardRp,
+    };
     state = {
       ...state,
       phoneOpen: false,
-      activeRace: session,
-      lastOutcomeText: `Balap Liar dimulai: ${session.raceName} (3 Rival AI)`,
+      playerState: useHighStakes
+        ? {
+            ...state.playerState,
+            rupiah: Math.max(0, state.playerState.rupiah - terms.entryFeeRp),
+          }
+        : state.playerState,
+      activeRace: stakedSession,
+      lastOutcomeText: useHighStakes
+        ? `TARUHAN GENGSI dimulai: ${session.raceName} (-Rp ${terms.entryFeeRp.toLocaleString('id-ID')} · Hadiah 2.5x!)`
+        : `Balap Liar dimulai: ${session.raceName} (3 Rival AI)`,
     };
     emitChange();
-    return session;
+    return stakedSession;
   },
 
   updateActiveRace: (patch: Partial<ActiveStreetRaceSession>) => {
@@ -1776,6 +1826,19 @@ export const gameStore = {
         ? advanceDailyChallengeProgress(state.dailyChallenges, 'street_race_win', 1)
         : { next: state.dailyChallenges, justCompletedTitle: null };
 
+    const recRes = updatePersonalBestRaceRecord(
+      state.raceBestTimes,
+      race.raceId,
+      Math.max(4, race.elapsedSec),
+      race.checkpoints.length
+    );
+    const medalTag =
+      recRes.medal === 'emas'
+        ? 'Medali EMAS'
+        : recRes.medal === 'perak'
+        ? 'Medali PERAK'
+        : 'Medali PERUNGGU';
+
     soundEngine.playVictoryFanfare();
     state = {
       ...state,
@@ -1789,19 +1852,26 @@ export const gameStore = {
         ),
         reputation: {
           ...state.playerState.reputation,
-          jalanan: Math.min(100, state.playerState.reputation.jalanan + (place === 1 ? 10 : 5)),
+          jalanan: Math.min(
+            100,
+            state.playerState.reputation.jalanan +
+              (place === 1 ? (state.highStakesRaceMode ? 18 : 10) : 5)
+          ),
         },
       },
       viralClout: nextClout,
       trioSynergy: nextSyn,
       dailyChallenges: dcRes.next,
+      raceBestTimes: recRes.nextRecords,
       activeRace: {
         ...race,
         status: 'finished',
         position: place,
         finishedPlace: place,
       },
-      lastOutcomeText: `${payout.label} · +Rp ${payout.rewardRp.toLocaleString('id-ID')}${
+      lastOutcomeText: `${payout.label} (${medalTag}${
+        recRes.isNewBest ? ' · REKOR WAKTU BARU!' : ''
+      }) · +Rp ${payout.rewardRp.toLocaleString('id-ID')}${
         dcRes.justCompletedTitle ? ` · Tantangan Selesai: ${dcRes.justCompletedTitle}` : ''
       }`,
     };
@@ -2595,6 +2665,179 @@ export const gameStore = {
   setMultiplayerLobbyState: (lobby: MultiplayerLobbyState | null) => {
     state = { ...state, multiplayerLobby: lobby };
     emitChange();
+  },
+
+  /* ==========================================================================
+   * GRAND PLAN 9.0 ACTIONS: SPBU, TACTICAL GADGETS, SIREN, TURF RAIDS & WAGERS
+   * ========================================================================== */
+
+  refuelAndRepairAtSpbu: (stationName: string): boolean => {
+    if (state.playerState.rupiah < SPBU_SERVICE_PRICE_RP) {
+      state = {
+        ...state,
+        lastOutcomeText: `Saldo kurang untuk Isi BBM & Servis Kilat (butuh Rp ${SPBU_SERVICE_PRICE_RP.toLocaleString('id-ID')}).`,
+      };
+      emitChange();
+      return false;
+    }
+    const tx: CashLedgerEntry = {
+      id: `tx_spbu_${Date.now()}`,
+      label: `Isi BBM & Servis: ${stationName}`,
+      amountRp: -SPBU_SERVICE_PRICE_RP,
+      category: 'belanja',
+      timestampLabel: 'Baru saja',
+    };
+    state = {
+      ...state,
+      vehicleFuelPct: 100,
+      cashLedger: [tx, ...state.cashLedger].slice(0, 18),
+      playerState: {
+        ...state.playerState,
+        rupiah: state.playerState.rupiah - SPBU_SERVICE_PRICE_RP,
+      },
+      lastOutcomeText: `BBM Penuh 100% & Servis Sasis Tuntas di ${stationName} (-Rp ${SPBU_SERVICE_PRICE_RP.toLocaleString('id-ID')})!`,
+    };
+    emitChange();
+    return true;
+  },
+
+  markSpbuDestroyed: (spbuId: string, wantedGain: number = 2) => {
+    if (state.destroyedSpbuIds.includes(spbuId)) return;
+    state = {
+      ...state,
+      destroyedSpbuIds: [...state.destroyedSpbuIds, spbuId],
+      playerState: {
+        ...state.playerState,
+        wantedLevel: Math.min(5, state.playerState.wantedLevel + wantedGain),
+      },
+      lastOutcomeText: `POMPA SPBU MELEDAK HEBAT! Aparat menyiagakan kejaran ★${Math.min(5, state.playerState.wantedLevel + wantedGain)}!`,
+    };
+    emitChange();
+  },
+
+  cycleTacticalGadget: () => {
+    const nextKind: TacticalGadgetKind =
+      state.activeGadgetKind === 'smoke_grenade' ? 'molotov' : 'smoke_grenade';
+    const spec = TACTICAL_GADGET_SPECS[nextKind];
+    soundEngine.playPickup();
+    state = {
+      ...state,
+      activeGadgetKind: nextKind,
+      lastOutcomeText: `Gadget Taktis Aktif: ${spec.name}`,
+    };
+    emitChange();
+    return nextKind;
+  },
+
+  consumeTacticalGadget: (): TacticalGadgetKind | null => {
+    const kind = state.activeGadgetKind;
+    if (kind === 'smoke_grenade') {
+      if (state.smokeGrenades <= 0) return null;
+      state = { ...state, smokeGrenades: state.smokeGrenades - 1 };
+      emitChange();
+      return 'smoke_grenade';
+    }
+    if (state.molotovs <= 0) return null;
+    state = { ...state, molotovs: state.molotovs - 1 };
+    emitChange();
+    return 'molotov';
+  },
+
+  restockTacticalGadgets: (): boolean => {
+    const costRp = 35000;
+    if (state.playerState.rupiah < costRp) return false;
+    soundEngine.playPickup();
+    state = {
+      ...state,
+      smokeGrenades: TACTICAL_GADGET_SPECS.smoke_grenade.maxCarry,
+      molotovs: TACTICAL_GADGET_SPECS.molotov.maxCarry,
+      playerState: {
+        ...state.playerState,
+        rupiah: state.playerState.rupiah - costRp,
+      },
+      lastOutcomeText: `Suplai Granat Asap & Bom Molotov penuh kembali (-Rp ${costRp.toLocaleString('id-ID')})!`,
+    };
+    emitChange();
+    return true;
+  },
+
+  togglePatwalSiren: (): boolean => {
+    const next = !state.patwalSirenActive;
+    state = {
+      ...state,
+      patwalSirenActive: next,
+      lastOutcomeText: next
+        ? 'SIRINE PATWAL AKTIF! Kendaraan di depan wajib menepi!'
+        : 'Sirine Patwal dimatikan.',
+    };
+    emitChange();
+    return next;
+  },
+
+  triggerTurfRaid: (seedIndex: number = Date.now()) => {
+    if (state.activeTurfRaid) return state.activeTurfRaid;
+    const raid = createTurfRaidEvent(
+      state.playerState,
+      JAKARTA_DISTRICTS,
+      seedIndex
+    );
+    if (!raid) return null;
+    soundEngine.playPoliceSiren();
+    state = {
+      ...state,
+      activeTurfRaid: raid,
+      customWaypoint: {
+        x: raid.targetX,
+        z: raid.targetZ,
+        label: `Pertahankan Wilayah: ${raid.districtName}`,
+        category: 'district',
+      },
+      lastOutcomeText: `DARURAT WILAYAH! Geng rival menyerbu ${raid.districtName} — segera pertahankan dalam ${raid.remainingSec}d!`,
+    };
+    emitChange();
+    return raid;
+  },
+
+  defendTurfRaidVictory: () => {
+    const raid = state.activeTurfRaid;
+    if (!raid) return;
+    soundEngine.playVictoryFanfare();
+    const nextPlayer = resolveTurfRaidVictory(state.playerState, raid);
+    state = {
+      ...state,
+      activeTurfRaid: null,
+      customWaypoint: null,
+      playerState: nextPlayer,
+      lastOutcomeText: `WILAYAH AMAN! Serbuan di ${raid.districtName} dipukul mundur (+Rp ${raid.rewardRp.toLocaleString('id-ID')} & Benteng Naik)!`,
+    };
+    emitChange();
+  },
+
+  failTurfRaidTimeout: () => {
+    const raid = state.activeTurfRaid;
+    if (!raid) return;
+    const nextPlayer = resolveTurfRaidFailure(state.playerState, raid);
+    state = {
+      ...state,
+      activeTurfRaid: null,
+      playerState: nextPlayer,
+      lastOutcomeText: `Wilayah ${raid.districtName} jatuh kembali ke tangan sindikat rival!`,
+    };
+    emitChange();
+  },
+
+  toggleHighStakesRaceMode: (): boolean => {
+    const next = !state.highStakesRaceMode;
+    soundEngine.playPickup();
+    state = {
+      ...state,
+      highStakesRaceMode: next,
+      lastOutcomeText: next
+        ? 'Mode TARUHAN GENGSI Aktif (Biaya Masuk 2x -> Hadiah Juara 2.5x + Rep Ekstra)!'
+        : 'Mode Taruhan Gengsi dinonaktifkan.',
+    };
+    emitChange();
+    return next;
   },
 };
 

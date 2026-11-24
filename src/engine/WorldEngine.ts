@@ -101,6 +101,8 @@ export interface WorldControllerHandle {
   toggleDroneRecon: () => void;
   startVigilantePatrol: () => void;
   spawnRivalBoss: (bossId: string) => void;
+  throwTacticalGadget?: () => boolean;
+  refuelAtNearbySpbu?: () => boolean;
 }
 
 export interface WorldHudPayload {
@@ -200,6 +202,7 @@ export class WorldEngine {
   private lastPedHitAt = 0;
   private lastMaghribBedugAt = 0;
   private lastHarborFoghornAt = 0;
+  private turfRaidCheckAccum = 0;
   private radioBroadcastAccum = 0;
   private speedTrapCooldowns: Record<string, number> = {};
   private lastLaserAlarmAt = 0;
@@ -327,7 +330,28 @@ export class WorldEngine {
         onCompleteActiveObjective: () => this.props.onCompleteActiveObjective(),
         onToggleTpsAim: () => this.props.onToggleTpsAim(),
         onEnterOrExitInterior: (t) => this.props.onEnterOrExitInterior(t),
-        onCombatHitFeedback: (evt) => this.props.onCombatHitFeedback?.(evt),
+        onCombatHitFeedback: (evt) => {
+          this.props.onCombatHitFeedback?.(evt);
+          if (this.activeWorldCallouts.length < 6) {
+            const p = this.playerController.playerPhys;
+            const fx = Math.sin(p.facing);
+            const fz = Math.cos(p.facing);
+            this.calloutCounter += 1;
+            this.activeWorldCallouts.push({
+              id: `dmg_${this.calloutCounter}`,
+              text: evt.isHeadshot
+                ? `HEADSHOT -${evt.damage}!`
+                : evt.isCrit
+                ? `KRITIS -${evt.damage}!`
+                : `-${evt.damage}`,
+              x: p.x + fx * 4.5 + (Math.random() - 0.5) * 1.1,
+              y: p.y + 2.15 + Math.random() * 0.35,
+              z: p.z + fz * 4.5 + (Math.random() - 0.5) * 1.1,
+              createdAt: performance.now(),
+              durationMs: 950,
+            });
+          }
+        },
         onPlayerHitAngle: (ang) => this.props.onPlayerHitAngle?.(ang),
         onHornTriggered: (hx, hy, hz) => {
           this.netSync.sendCoopEvent({ type: 'horn', x: hx, y: hy, z: hz });
@@ -797,6 +821,12 @@ export class WorldEngine {
           RIVAL_BOSS_CATALOG.find((b) => b.id === bossId) ||
           RIVAL_BOSS_CATALOG[0];
         this.playerController.spawnRivalBoss(spec);
+      },
+      throwTacticalGadget: () => {
+        return this.playerController.throwActiveTacticalGadget();
+      },
+      refuelAtNearbySpbu: () => {
+        return this.playerController.triggerSpbuServiceIfNear();
       },
     };
   }
@@ -1624,6 +1654,86 @@ export class WorldEngine {
       } else {
         this.cityRenderer.setTurfWarZoneMarker(null, null);
       }
+
+      // Grand Plan 9.0: Step Active Rival Gang Turf Raid Defense & Live Digital VMS Gantries
+      const curStore = gameStore.getState();
+      const activeRaid = curStore.activeTurfRaid;
+      if (activeRaid && pState.currentInterior === 'exterior') {
+        if (!activeTw) {
+          this.cityRenderer.setTurfWarZoneMarker(
+            activeRaid.targetX,
+            activeRaid.targetZ,
+            18
+          );
+        }
+        const distRaid = Math.hypot(
+          phys.x - activeRaid.targetX,
+          phys.z - activeRaid.targetZ
+        );
+        if (distRaid <= 18) {
+          this.playerController.spawnParticles(
+            activeRaid.targetX,
+            phys.y + 1.5,
+            activeRaid.targetZ,
+            24,
+            0x22c55e,
+            7.5
+          );
+          gameStore.defendTurfRaidVictory();
+        } else {
+          const nextRem = activeRaid.remainingSec - dt;
+          if (nextRem <= 0) {
+            gameStore.failTurfRaidTimeout();
+          } else if (Math.floor(nextRem) !== Math.floor(activeRaid.remainingSec)) {
+            gameStore.setState({
+              activeTurfRaid: { ...activeRaid, remainingSec: nextRem },
+            });
+          } else {
+            activeRaid.remainingSec = nextRem;
+          }
+        }
+      } else if (
+        !activeTw &&
+        !curStore.activeRace &&
+        !curStore.activeHeistBreach &&
+        pState.currentInterior === 'exterior'
+      ) {
+        this.turfRaidCheckAccum += dt;
+        if (this.turfRaidCheckAccum >= 95) {
+          this.turfRaidCheckAccum = 0;
+          gameStore.triggerTurfRaid(Math.floor(now));
+        }
+      }
+
+      // Sync SPBU Pertamina destroyed state & Overhead Digital VMS Traffic Gantries
+      const vmsHeadline =
+        pState.wantedLevel >= 3
+          ? `SIAGA APARAT ★${pState.wantedLevel} · PENYEKATAN JALUR`
+          : activeRaid
+          ? `PERINGATAN DARURAT · ${activeRaid.districtName.toUpperCase()}`
+          : this.props.weatherMode === 'hujan'
+          ? 'BMKG DKI · WASPADA HUJAN DERAS & GENANGAN'
+          : 'DISHUB DKI · KORIDOR PROTOKOL LANCAR';
+      const vmsSubline =
+        pState.wantedLevel >= 3
+          ? 'WARGA DIMINTA HINDARI ZONA OPERASI PATWAL'
+          : activeRaid
+          ? `PERTAHANKAN WILAYAH DALAM ${Math.ceil(activeRaid.remainingSec)} DETIK`
+          : this.props.weatherMode === 'hujan'
+          ? 'KURANGI KECEPATAN · NYALAKAN LAMPU UTAMA'
+          : `BAJSA AKTIF · PATUHI RAMBU & KAMERA ETLE`;
+      const vmsAccent =
+        pState.wantedLevel >= 3 || activeRaid
+          ? '#ef4444'
+          : this.props.weatherMode === 'hujan'
+          ? '#38bdf8'
+          : '#22c55e';
+      this.cityRenderer.syncSpbuAndVmsState(
+        curStore.destroyedSpbuIds,
+        vmsHeadline,
+        vmsSubline,
+        vmsAccent
+      );
 
       // Publish 60fps mutable telemetry snapshot (0 React re-renders!)
       engineTelemetryRef.playerX = phys.x;

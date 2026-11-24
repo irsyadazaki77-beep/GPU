@@ -1541,6 +1541,20 @@ if (uWetness > 0.04) {
     this.streetscape.setTrafficSignalPhase(phase);
   }
 
+  public syncSpbuAndVmsState(
+    destroyedSpbuIds: readonly string[],
+    vmsHeadline: string,
+    vmsSubline: string,
+    vmsAccentColor: string
+  ): void {
+    this.districtProps.setSpbuDestroyedIds(destroyedSpbuIds);
+    this.districtProps.updateDigitalVmsStatus(
+      vmsHeadline,
+      vmsSubline,
+      vmsAccentColor
+    );
+  }
+
   private buildOuterMegapolitanBlocks(maxAnisotropy: number): {
     group: THREE.Group;
     colliders: BuildingFootprint[];

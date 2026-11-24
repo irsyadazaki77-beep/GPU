@@ -16,9 +16,11 @@ import {
   CAMERA_VIEW_LABELS,
   PROTAGONIST_PROFILES,
   RADIO_STATIONS,
+  SPBU_SERVICE_PRICE_RP,
   SQUAD_ORDER_LABELS,
   VEHICLE_SPECS,
   WEATHER_MODES,
+  findRoadNavRoute,
   formatJakartaClock,
   formatRupiah,
   getEffectiveWeaponSpec,
@@ -240,7 +242,33 @@ export const GameHud: React.FC<GameHudProps> = ({
   const activeVigilante = useGameStore((s) => s.activeVigilante);
   const activeRivalBoss = useGameStore((s) => s.activeRivalBoss);
   const multiplayerLobby = useGameStore((s) => s.multiplayerLobby);
+  const vehicleFuelPct = useGameStore((s) => s.vehicleFuelPct);
+  const nearbySpbuName = useGameStore((s) => s.nearbySpbuName);
+  const activeGadgetKind = useGameStore((s) => s.activeGadgetKind);
+  const smokeGrenades = useGameStore((s) => s.smokeGrenades);
+  const molotovs = useGameStore((s) => s.molotovs);
+  const inSmokeScreen = useGameStore((s) => s.inSmokeScreen);
+  const patwalSirenActive = useGameStore((s) => s.patwalSirenActive);
+  const activeTurfRaid = useGameStore((s) => s.activeTurfRaid);
   const activeRoadEvent = worldClockEventState.activeEvent;
+
+  const gpsTargetCoords = customWaypoint
+    ? { x: customWaypoint.x, z: customWaypoint.z, label: customWaypoint.label }
+    : activeChoice?.targetX !== undefined && activeChoice?.targetZ !== undefined
+      ? {
+          x: activeChoice.targetX,
+          z: activeChoice.targetZ,
+          label: activeMission?.title || 'Objektif Misi',
+        }
+      : null;
+  const liveGpsRoute = gpsTargetCoords
+    ? findRoadNavRoute(
+        engineTelemetryRef.playerX,
+        engineTelemetryRef.playerZ,
+        gpsTargetCoords.x,
+        gpsTargetCoords.z
+      )
+    : null;
 
   const claimableChallengesCount = dailyChallenges.items.filter(
     (c) => !c.claimed && c.progress >= c.target
@@ -450,6 +478,16 @@ export const GameHud: React.FC<GameHudProps> = ({
               : `Masuk ${nearbyInterior?.name}`,
           accent: '#10b981',
           onClick: onEnterOrExitInterior,
+        }
+      : nearbySpbuName
+      ? {
+          keycap: 'E',
+          label: `Isi BBM & Servis Kilat (${formatRupiah(SPBU_SERVICE_PRICE_RP)})`,
+          accent: '#22c55e',
+          onClick: () => {
+            gameStore.refuelAndRepairAtSpbu(nearbySpbuName);
+            onRepairVehicle?.();
+          },
         }
       : nearbyMission && !activeMission
       ? {
@@ -1129,6 +1167,53 @@ export const GameHud: React.FC<GameHudProps> = ({
             </div>
           )}
 
+          {/* Grand Plan 9.0: Live Turn-by-Turn Road GPS Navigation Banner */}
+          {liveGpsRoute && gpsTargetCoords && !suppressClutter && (
+            <div
+              data-testid="hud-gps-turn-banner"
+              className="aaa-glass-subtle rounded-lg px-3 py-1.5 border-l-2 border-l-[#c084fc] w-72 flex items-center justify-between gap-2"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-6 h-6 rounded bg-[#c084fc]/20 border border-[#c084fc]/50 text-[#e9d5ff] font-mono-num text-xs font-extrabold flex items-center justify-center shrink-0">
+                  {liveGpsRoute.nextTurnDirection === 'left'
+                    ? '↰'
+                    : liveGpsRoute.nextTurnDirection === 'right'
+                      ? '↱'
+                      : liveGpsRoute.nextTurnDirection === 'uturn'
+                        ? '↶'
+                        : '↑'}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[11px] font-mono-num font-bold text-[#f3e8ff] truncate">
+                    {liveGpsRoute.turnInstruction}
+                  </div>
+                  <div className="text-[10px] font-mono-num text-[#cbd5e1] truncate">
+                    {gpsTargetCoords.label} · ~{liveGpsRoute.estimatedTimeSec}d
+                  </div>
+                </div>
+              </div>
+              <span className="text-[10px] font-mono-num font-bold text-[#c084fc] shrink-0">
+                {liveGpsRoute.totalDistanceM}m
+              </span>
+            </div>
+          )}
+
+          {/* Grand Plan 9.0: Rival Gang Turf Raid Defense Alert */}
+          {activeTurfRaid && (
+            <div
+              data-testid="hud-turf-raid-banner"
+              className="aaa-glass-subtle rounded-lg px-3 py-1.5 border-l-2 border-l-[#ef4444] w-72 animate-pulse"
+            >
+              <div className="flex items-center justify-between text-[11px] font-mono-num font-bold text-[#fca5a5]">
+                <span>SERANGAN WILAYAH: {activeTurfRaid.districtName}</span>
+                <span>{Math.ceil(activeTurfRaid.remainingSec)}d</span>
+              </div>
+              <div className="text-[10px] font-mono-num text-[#e2e8f0]">
+                Segera masuk ring merah wilayah (+{formatRupiah(activeTurfRaid.rewardRp)})
+              </div>
+            </div>
+          )}
+
           {speedTrapBanner && (
             <div
               data-testid="speed-trap-banner"
@@ -1689,6 +1774,19 @@ export const GameHud: React.FC<GameHudProps> = ({
                 Boolean(engineTelemetryRef.lastHeadshotStamp) &&
                 Date.now() - (engineTelemetryRef.lastHeadshotStamp ?? 0) < 1600
               }
+              activeGadgetKind={activeGadgetKind}
+              smokeGrenades={smokeGrenades}
+              molotovs={molotovs}
+              inSmokeScreen={inSmokeScreen}
+              onCycleGadget={() => gameStore.cycleTacticalGadget()}
+              onThrowGadget={() => {
+                window.dispatchEvent(
+                  new KeyboardEvent('keydown', { code: 'Digit8' })
+                );
+                window.dispatchEvent(
+                  new KeyboardEvent('keyup', { code: 'Digit8' })
+                );
+              }}
               activeDynamicEncounter={
                 engineTelemetryRef.activeDynamicEncounter ?? null
               }
@@ -1775,24 +1873,67 @@ export const GameHud: React.FC<GameHudProps> = ({
                   </span>
                 </div>
                 {!vehicleSpec.isAircraft && (
-                  <div className="flex items-center gap-1.5 mt-1 w-full justify-end">
-                    <span className="text-[9px] font-mono-num text-[#38bdf8] font-bold">
-                      NOS [SHIFT]
-                    </span>
-                    <div className="w-20 h-1.5 rounded-full bg-white/15 overflow-hidden">
-                      <div
-                        className={`h-full transition-all duration-100 ${
-                          engineTelemetryRef.nitroActive
-                            ? 'bg-[#38bdf8]'
-                            : 'bg-[#0284c7]'
+                  <div className="flex flex-col items-end gap-1 mt-1 w-full">
+                    <div className="flex items-center gap-1.5 justify-end">
+                      <span className="text-[9px] font-mono-num text-[#38bdf8] font-bold">
+                        NOS [SHIFT]
+                      </span>
+                      <div className="w-20 h-1.5 rounded-full bg-white/15 overflow-hidden">
+                        <div
+                          className={`h-full transition-all duration-100 ${
+                            engineTelemetryRef.nitroActive
+                              ? 'bg-[#38bdf8]'
+                              : 'bg-[#0284c7]'
+                          }`}
+                          style={{
+                            width: `${Math.max(
+                              0,
+                              Math.min(100, engineTelemetryRef.nitroLevel ?? 100)
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 justify-end">
+                      {(drivingVehicle === 'polisi' ||
+                        drivingVehicle === 'barracuda') && (
+                        <button
+                          type="button"
+                          data-testid="hud-patwal-siren-btn"
+                          onClick={() => gameStore.togglePatwalSiren()}
+                          className={`px-1.5 py-0.5 rounded font-mono-num text-[9px] font-extrabold cursor-pointer ${
+                            patwalSirenActive
+                              ? 'bg-[#ef4444] text-white animate-pulse'
+                              : 'bg-white/10 text-[#94a3b8]'
+                          }`}
+                        >
+                          [G] SIRINE {patwalSirenActive ? 'ON' : 'OFF'}
+                        </button>
+                      )}
+                      <span
+                        data-testid="hud-fuel-pct"
+                        className={`text-[9px] font-mono-num font-bold ${
+                          vehicleFuelPct <= 15
+                            ? 'text-[#ef4444] animate-pulse'
+                            : 'text-[#22c55e]'
                         }`}
-                        style={{
-                          width: `${Math.max(
-                            0,
-                            Math.min(100, engineTelemetryRef.nitroLevel ?? 100)
-                          )}%`,
-                        }}
-                      />
+                      >
+                        BBM {Math.round(vehicleFuelPct)}%
+                      </span>
+                      <div className="w-16 h-1.5 rounded-full bg-white/15 overflow-hidden">
+                        <div
+                          className={`h-full transition-all duration-150 ${
+                            vehicleFuelPct <= 15
+                              ? 'bg-[#ef4444]'
+                              : vehicleFuelPct <= 35
+                                ? 'bg-[#f59e0b]'
+                                : 'bg-[#22c55e]'
+                          }`}
+                          style={{
+                            width: `${Math.max(0, Math.min(100, vehicleFuelPct))}%`,
+                          }}
+                        />
+                      </div>
                     </div>
                   </div>
                 )}

@@ -447,6 +447,138 @@ class CityAudioSynthesizer {
     gain.connect(this.masterGain);
   }
 
+  /**
+   * Molotov cocktail glass shatter + roaring flame ignition burst
+   */
+  public playMolotovShatter(): void {
+    const masterSfx = this.getSfxMasterGain();
+    if (masterSfx <= 0.001) return;
+    const ctx = this.ensureContext();
+    if (!ctx || !this.masterGain || ctx.state !== 'running') return;
+    const now = ctx.currentTime;
+
+    // High glass clink bursts
+    for (let i = 0; i < 3; i++) {
+      const t0 = now + i * 0.025;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(2400 + i * 520, t0);
+      osc.frequency.exponentialRampToValueAtTime(880, t0 + 0.06);
+      gain.gain.setValueAtTime(0.08, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.07);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(t0);
+      osc.stop(t0 + 0.08);
+    }
+
+    // Flame whoosh thump
+    const whooshOsc = ctx.createOscillator();
+    const whooshGain = ctx.createGain();
+    whooshOsc.type = 'sawtooth';
+    whooshOsc.frequency.setValueAtTime(140, now + 0.03);
+    whooshOsc.frequency.exponentialRampToValueAtTime(48, now + 0.42);
+    whooshGain.gain.setValueAtTime(0.14, now + 0.03);
+    whooshGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+    whooshOsc.connect(whooshGain);
+    whooshGain.connect(this.masterGain);
+    whooshOsc.start(now + 0.03);
+    whooshOsc.stop(now + 0.48);
+  }
+
+  /**
+   * Pressurized tactical smoke grenade canister pop + hiss
+   */
+  public playSmokeCanisterHiss(): void {
+    const masterSfx = this.getSfxMasterGain();
+    if (masterSfx <= 0.001) return;
+    const ctx = this.ensureContext();
+    if (!ctx || !this.masterGain || ctx.state !== 'running') return;
+    const now = ctx.currentTime;
+
+    if (!this.noiseBuffer) {
+      const len = ctx.sampleRate * 1.2;
+      this.noiseBuffer = ctx.createBuffer(1, len, ctx.sampleRate);
+      const ch = this.noiseBuffer.getChannelData(0);
+      for (let i = 0; i < len; i++) {
+        ch[i] = Math.random() * 2 - 1;
+      }
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1850, now);
+    filter.Q.setValueAtTime(1.1, now);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.11, now + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    src.start(now);
+    src.stop(now + 0.68);
+  }
+
+  /**
+   * Pertamina SPBU nozzle click & quick service completion chime
+   */
+  public playSpbuRefuelChime(): void {
+    const masterSfx = this.getSfxMasterGain();
+    if (masterSfx <= 0.001) return;
+    const ctx = this.ensureContext();
+    if (!ctx || !this.masterGain || ctx.state !== 'running') return;
+    const master = this.masterGain;
+    const now = ctx.currentTime;
+
+    const notes = [523.25, 659.25, 783.99];
+    notes.forEach((freq, idx) => {
+      const t0 = now + idx * 0.085;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t0);
+      gain.gain.setValueAtTime(0.09, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.18);
+      osc.connect(gain);
+      gain.connect(master);
+      osc.start(t0);
+      osc.stop(t0 + 0.2);
+    });
+  }
+
+  /**
+   * Crisp electronic Patwal siren whoop/chirp toggle
+   */
+  public playSirenToggleChirp(enabled: boolean): void {
+    const masterSfx = this.getSfxMasterGain();
+    if (masterSfx <= 0.001) return;
+    const ctx = this.ensureContext();
+    if (!ctx || !this.masterGain || ctx.state !== 'running') return;
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    if (enabled) {
+      osc.frequency.setValueAtTime(580, now);
+      osc.frequency.exponentialRampToValueAtTime(1280, now + 0.16);
+    } else {
+      osc.frequency.setValueAtTime(980, now);
+      osc.frequency.exponentialRampToValueAtTime(420, now + 0.14);
+    }
+    gain.gain.setValueAtTime(0.095, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.2);
+  }
+
   public dispose(): void {
     try {
       this.engineOscMain?.stop();

@@ -8,6 +8,7 @@ import {
   MRT_STATIONS,
   PROTAGONIST_PROFILES,
   ProtagonistId,
+  SPBU_STATIONS,
   STREET_RACES,
   STUNT_RAMPS_CATALOG,
   computeMrtTrainState,
@@ -434,6 +435,30 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({ onClickRadar }) => {
         ctx.beginPath();
         ctx.arc(bx, bz, 3.4, 0, Math.PI * 2);
         ctx.fill();
+      }
+
+      // 9b-1. SPBU Pertamina Fuel & Service Stations + Active Turf Raid Ring
+      for (const st of SPBU_STATIONS) {
+        const sx = cx + (st.x - px) * zoom;
+        const sz = cy + (st.z - pz) * zoom;
+        const isDead = store.destroyedSpbuIds.includes(st.id);
+        ctx.fillStyle = isDead ? '#475569' : '#22c55e';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.fillRect(sx - 3.2, sz - 3.2, 6.4, 6.4);
+        ctx.strokeRect(sx - 3.2, sz - 3.2, 6.4, 6.4);
+      }
+      if (store.activeTurfRaid) {
+        const tr = store.activeTurfRaid;
+        const trx = cx + (tr.targetX - px) * zoom;
+        const trz = cy + (tr.targetZ - pz) * zoom;
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(trx, trz, 18 * zoom, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
       }
 
       // 9b-2. Active World Clock Road Event (Traffic Jam / Construction Hazard & Detour Path)

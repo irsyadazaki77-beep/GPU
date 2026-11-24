@@ -1,6 +1,6 @@
 import React from 'react';
 import { formatRupiah } from '../../game/rules';
-import type { WeaponId } from '../../game/types';
+import type { TacticalGadgetKind, WeaponId } from '../../game/types';
 
 export interface TacticalCombatHudClusterProps {
   activeWeapon: WeaponId;
@@ -14,6 +14,10 @@ export interface TacticalCombatHudClusterProps {
   dodgeRollActive: boolean;
   dodgeRollCooldownSec: number;
   headshotBannerActive: boolean;
+  activeGadgetKind?: TacticalGadgetKind;
+  smokeGrenades?: number;
+  molotovs?: number;
+  inSmokeScreen?: boolean;
   activeDynamicEncounter: {
     id: string;
     title: string;
@@ -23,6 +27,8 @@ export interface TacticalCombatHudClusterProps {
     rewardRp: number;
   } | null;
   onTriggerReload?: () => void;
+  onThrowGadget?: () => void;
+  onCycleGadget?: () => void;
 }
 
 export const TacticalCombatHudCluster: React.FC<
@@ -38,9 +44,19 @@ export const TacticalCombatHudCluster: React.FC<
   dodgeRollActive,
   dodgeRollCooldownSec,
   headshotBannerActive,
+  activeGadgetKind = 'smoke_grenade',
+  smokeGrenades = 0,
+  molotovs = 0,
+  inSmokeScreen = false,
   activeDynamicEncounter,
   onTriggerReload,
+  onThrowGadget,
+  onCycleGadget,
 }) => {
+  const gadgetCount =
+    activeGadgetKind === 'smoke_grenade' ? smokeGrenades : molotovs;
+  const gadgetLabel =
+    activeGadgetKind === 'smoke_grenade' ? 'ASAP' : 'MOLOTOV';
   return (
     <div
       data-testid="tactical-combat-hud-cluster"
@@ -146,7 +162,46 @@ export const TacticalCombatHudCluster: React.FC<
               ? `GULING ${dodgeRollCooldownSec.toFixed(1)}d`
               : '[ALT] GULING'}
         </div>
+
+        {/* Grand Plan 9.0: Throwable Tactical Gadget Slot ([8] Throw / [9] Cycle) */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            data-testid="hud-tactical-gadget-btn"
+            onClick={onThrowGadget}
+            title="Tekan [8] untuk Melempar Gadget Taktis"
+            className={`px-2 py-1 rounded-lg aaa-glass-subtle font-mono-num text-[10px] font-bold cursor-pointer transition-colors ${
+              gadgetCount <= 0
+                ? 'text-[#64748b]'
+                : activeGadgetKind === 'molotov'
+                  ? 'text-[#fb923c] border border-[#f97316]/45 hover:bg-[#f97316]/15'
+                  : 'text-[#67e8f9] border border-[#22d3ee]/45 hover:bg-[#22d3ee]/15'
+            }`}
+          >
+            [8] {gadgetLabel} ({gadgetCount})
+          </button>
+          {onCycleGadget && (
+            <button
+              type="button"
+              data-testid="hud-cycle-gadget-btn"
+              onClick={onCycleGadget}
+              title="Tekan [9] untuk Ganti Jenis Gadget"
+              className="px-1.5 py-1 rounded-lg aaa-glass-subtle font-mono-num text-[9px] text-[#94a3b8] hover:text-white cursor-pointer"
+            >
+              [9]
+            </button>
+          )}
+        </div>
       </div>
+
+      {inSmokeScreen && (
+        <div
+          data-testid="hud-smoke-screen-badge"
+          className="px-2.5 py-0.5 rounded bg-[#334155]/90 border border-[#94a3b8]/50 text-[#e2e8f0] font-mono-num text-[9px] font-extrabold uppercase tracking-wider"
+        >
+          TABIR ASAP AKTIF · SILUMAN APARAT
+        </div>
+      )}
     </div>
   );
 };

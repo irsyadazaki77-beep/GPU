@@ -8,6 +8,8 @@ import {
   MRT_STATIONS,
   PROTAGONIST_PROFILES,
   ProtagonistId,
+  SPBU_SERVICE_PRICE_RP,
+  SPBU_STATIONS,
   STORY_MISSIONS,
   STREET_RACES,
   applyTurfWarStockShock,
@@ -80,6 +82,8 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
   const worldTimeMinutes = useGameStore((s) => s.worldTimeMinutes);
   const autoTimeCycle = useGameStore((s) => s.autoTimeCycle);
   const worldClockEventState = useGameStore((s) => s.worldClockEventState);
+  const destroyedSpbuIds = useGameStore((s) => s.destroyedSpbuIds);
+  const activeTurfRaid = useGameStore((s) => s.activeTurfRaid);
   const activeRoadEvent = worldClockEventState.activeEvent;
 
   const [filter, setFilter] = useState<MapFilterCategory>('all');
@@ -198,7 +202,24 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
       });
     }
 
-    // 7. ETLE Speed Traps & MRT Ratangga Stations
+    // 7. ETLE Speed Traps, SPBU Pertamina Hubs & MRT Ratangga Stations
+    for (const spbu of SPBU_STATIONS) {
+      const dead = destroyedSpbuIds.includes(spbu.id);
+      list.push({
+        id: spbu.id,
+        label: spbu.name,
+        subtitle: dead
+          ? 'Pompa SPBU Rusak / Terbakar'
+          : `Isi BBM 100% & Servis Sasis (${formatRupiah(SPBU_SERVICE_PRICE_RP)})`,
+        x: spbu.x,
+        z: spbu.z,
+        category: 'property',
+        filterGroup: 'properti_transit',
+        color: dead ? '#64748b' : '#22c55e',
+        badge: 'P',
+      });
+    }
+
     for (const trap of JAKARTA_SPEED_TRAPS) {
       list.push({
         id: `etle_${trap.id}`,
@@ -520,6 +541,18 @@ export const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('!', ex, ez + 0.5);
+      }
+
+      if (activeTurfRaid) {
+        const trx = originX + activeTurfRaid.targetX * scale;
+        const trz = originY + activeTurfRaid.targetZ * scale;
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.arc(trx, trz, 18 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
       }
 
       if (customWaypoint) {

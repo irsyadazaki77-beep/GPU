@@ -283,3 +283,88 @@ export function evaluateMotorcycleStuntPose(params: {
     label: '',
   };
 }
+
+/* ==========================================================================
+ * GRAND PLAN 9.0: STUNT LANDING SUSPENSION SQUASH & FUEL ENDURANCE
+ * ========================================================================== */
+
+export interface StuntLandingImpactResult {
+  landedHard: boolean;
+  squashDepthM: number;
+  sparkCount: number;
+  cameraShakeAmp: number;
+  chassisDamage: number;
+}
+
+/**
+ * Evaluates vertical stunt landing impact when transitioning from airborne to ground contact.
+ */
+export function evaluateStuntLandingImpact(
+  dropHeightM: number,
+  horizontalSpeed: number
+): StuntLandingImpactResult {
+  if (dropHeightM < 0.75) {
+    return {
+      landedHard: false,
+      squashDepthM: 0,
+      sparkCount: 0,
+      cameraShakeAmp: 0,
+      chassisDamage: 0,
+    };
+  }
+  const normalizedDrop = Math.min(1, (dropHeightM - 0.75) / 5.5);
+  const speedFactor = Math.min(1.25, 0.6 + Math.abs(horizontalSpeed) / 22);
+  const squashDepthM = Number((0.12 + normalizedDrop * 0.26).toFixed(3));
+  const sparkCount =
+    dropHeightM >= 1.35 ? Math.round(6 + normalizedDrop * 16 * speedFactor) : 0;
+  const cameraShakeAmp = Number((0.08 + normalizedDrop * 0.24).toFixed(3));
+  const chassisDamage =
+    dropHeightM >= 4.2 ? Math.round((dropHeightM - 4.0) * 3.5) : 0;
+
+  return {
+    landedHard: true,
+    squashDepthM,
+    sparkCount,
+    cameraShakeAmp,
+    chassisDamage,
+  };
+}
+
+export interface FuelStepResult {
+  nextFuelPct: number;
+  speedCapMultiplier: number;
+  lowFuelWarning: boolean;
+}
+
+/**
+ * Steps light realistic fuel consumption (0..100%) on ground vehicles.
+ * Empty tank triggers 28% limp-home speed cap rather than soft-locking the player.
+ */
+export function stepVehicleFuelConsumption(params: {
+  fuelPct: number;
+  speedRatio: number;
+  nitroActive: boolean;
+  isAircraft: boolean;
+  dt: number;
+}): FuelStepResult {
+  const clamped = Math.max(0, Math.min(100, params.fuelPct));
+  if (params.isAircraft) {
+    return {
+      nextFuelPct: clamped,
+      speedCapMultiplier: 1.0,
+      lowFuelWarning: false,
+    };
+  }
+  const simDt = Math.max(0, Math.min(0.1, params.dt));
+  const sr = Math.max(0, Math.min(1.3, params.speedRatio));
+  const idleBurn = 0.015;
+  const driveBurn = sr * 0.22 + (params.nitroActive ? 0.55 : 0);
+  const nextFuelPct = Math.max(0, clamped - (idleBurn + driveBurn) * simDt);
+
+  return {
+    nextFuelPct,
+    speedCapMultiplier: nextFuelPct <= 0.05 ? 0.28 : nextFuelPct < 8 ? 0.78 : 1.0,
+    lowFuelWarning: nextFuelPct > 0 && nextFuelPct <= 15,
+  };
+}
+

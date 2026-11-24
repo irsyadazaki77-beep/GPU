@@ -14,6 +14,7 @@ export * from './grandPlan5Systems';
 export * from './grandPlan6Systems';
 export * from './questDirector';
 export * from './blackMarket';
+export * from './tacticalGadgets';
 export {
   WORLD_MAX_BOUND,
   CITY_BUILDINGS,

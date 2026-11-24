@@ -42,12 +42,19 @@ import {
   getActiveWingmanIds,
   getEffectiveWeaponSpec,
   getGroundElevationAt,
+  createInitialVehicleDamage,
+  createThrownGadgetZone,
+  evaluateMolotovBurnAt,
+  evaluateSmokeScreenEffect,
+  evaluateSpbuPumpExplosion,
+  findNearestSpbuStation,
   getPlayerStaminaSpeedMultiplier,
   getVehicleHandlingPenalty,
   isPlayerNearMrtStation,
   resolveCircleAABBCollision,
   resolveCoopPassengerOffset,
   scoreStuntJump,
+  stepActiveTacticalZones,
   stepDroneReconPose,
   stepEnemyMovementPolicy,
   stepParachuteGlide,
@@ -65,6 +72,7 @@ import {
   syncCharacterWeaponVisual,
 } from '../game/world/geometryBuilders';
 import type {
+  ActiveTacticalZone,
   CombatHitFeedbackEvent,
   TrafficSignalPhase,
   VehicleType,
@@ -94,8 +102,10 @@ import { evaluateDroneEmpTargets } from './controllers/droneAndTakedown';
 import {
   createInitialNitroTankState,
   evaluateMotorcycleStuntPose,
+  evaluateStuntLandingImpact,
   stepDrivenVehicleKinematics,
   stepNitroBoostState,
+  stepVehicleFuelConsumption,
 } from './controllers/vehiclePhysics';
 import {
   advanceMeleeComboStep,
@@ -319,6 +329,12 @@ export class PlayerController {
   private activeBossEnemyId: string | null = null;
   private readonly turfWarEnemyIds = new Set<string>();
   private captainEnemyId: string | null = null;
+  // Grand Plan 9.0: Tactical Throwables, Stunt Landing Squash & Fuel Endurance
+  private activeTacticalZones: ActiveTacticalZone[] = [];
+  private tacticalParticleAccum = 0;
+  private landingSquashOffset = 0;
+  private landingSquashVel = 0;
+  private fuelSyncAccum = 0;
   private readonly stuntJump = {
     airborne: false,
     ramp: null as StuntRampSpec | null,
@@ -779,6 +795,7 @@ export class PlayerController {
     soundEngine.playPropCrash(0);
     this.callbacks.onWeaponNoise?.(bx, bz, radius * 2.2, true);
     this.callbacks.onExplosionShockwaveProps?.(bx, bz, radius);
+    this.checkAndDetonateSpbuAt(bx, bz, Math.max(4.5, radius * 0.65));
 
     const activeChoice = this.callbacks.getActiveChoice();
     for (const en of this.enemies) {
@@ -1012,6 +1029,148 @@ export class PlayerController {
       this.droneReconActive,
       this.droneReconPose.empCooldownSec <= 0
     );
+  }
+
+  private checkAndDetonateSpbuAt(
+    impactX: number,
+    impactZ: number,
+    impactRadiusM: number = 3.4
+  ): boolean {
+    const storeSnap = gameStore.getState();
+    const evalRes = evaluateSpbuPumpExplosion({
+      impactX,
+      impactZ,
+      impactRadiusM,
+      destroyedIds: storeSnap.destroyedSpbuIds,
+    });
+    if (!evalRes.triggered || !evalRes.station) return false;
+
+    const st = evalRes.station;
+    gameStore.markSpbuDestroyed(st.id, evalRes.wantedStarsAdded);
+    cityAudio.playCollisionThud(1.0);
+    this.spawnParticles(st.x, 1.4, st.z, 36, 0xf97316, 16);
+    this.spawnParticles(st.x, 2.2, st.z, 24, 0xfef08a, 12);
+    this.spawnShockwave(st.x, 0.35, st.z, evalRes.blastRadiusM, 0xef4444, 0.65);
+    this.triggerFlashLight(st.x, 2.8, st.z, 0xf97316, 22);
+    this.cameraTrauma = 1.0;
+    this.callbacks.onWeaponNoise?.(st.x, st.z, 28, true);
+    this.callbacks.onExplosionShockwaveProps?.(st.x, st.z, evalRes.blastRadiusM);
+
+    for (const en of this.enemies) {
+      if (en.state !== 'alive') continue;
+      const d = Math.hypot(en.x - st.x, en.z - st.z);
+      if (d <= evalRes.blastRadiusM) {
+        en.hp -= Math.round(
+          evalRes.peakDamage * (1 - (d / evalRes.blastRadiusM) * 0.55)
+        );
+        if (en.hp <= 0) {
+          this.markEnemyKo(en, this.callbacks.getActiveChoice());
+        }
+      }
+    }
+    const dPlayer = Math.hypot(
+      this.playerPhys.x - st.x,
+      this.playerPhys.z - st.z
+    );
+    if (dPlayer <= evalRes.blastRadiusM) {
+      const pDmg = Math.max(
+        12,
+        Math.round(48 * (1 - dPlayer / evalRes.blastRadiusM))
+      );
+      this.callbacks.onPlayerDamage(pDmg);
+    }
+    return true;
+  }
+
+  public throwActiveTacticalGadget(): boolean {
+    const storeSnap = gameStore.getState();
+    if (storeSnap.playerState.currentInterior !== 'exterior') return false;
+    const consumed = gameStore.consumeTacticalGadget();
+    if (!consumed) {
+      gameStore.setState({
+        lastOutcomeText:
+          'Stok gadget taktis habis! Isi ulang di Warung / Pasar Gelap.',
+      });
+      return false;
+    }
+
+    const zone = createThrownGadgetZone(
+      consumed,
+      this.playerPhys.x,
+      this.playerPhys.z,
+      this.playerPhys.facing
+    );
+    this.activeTacticalZones.push(zone);
+    const groundY = getGroundElevationAt(zone.x, zone.z);
+
+    if (consumed === 'smoke_grenade') {
+      cityAudio.playSmokeCanisterHiss();
+      this.spawnParticles(zone.x, groundY + 1.1, zone.z, 28, 0xcbd5e1, 7.5);
+      this.spawnShockwave(
+        zone.x,
+        groundY + 0.15,
+        zone.z,
+        zone.radius * 0.85,
+        0x94a3b8,
+        0.55
+      );
+      gameStore.setState({
+        lastOutcomeText:
+          'GRANAT ASAP DISEBAR! Jarak pandang aparat terhalang!',
+      });
+    } else {
+      cityAudio.playMolotovShatter();
+      this.spawnParticles(zone.x, groundY + 0.9, zone.z, 26, 0xf97316, 8.5);
+      this.spawnParticles(zone.x, groundY + 1.2, zone.z, 14, 0xfacc15, 6.5);
+      this.spawnShockwave(
+        zone.x,
+        groundY + 0.12,
+        zone.z,
+        zone.radius,
+        0xf97316,
+        0.48
+      );
+      this.triggerFlashLight(zone.x, groundY + 1.8, zone.z, 0xf97316, 14);
+      this.callbacks.onWeaponNoise?.(zone.x, zone.z, 18, true);
+      this.checkAndDetonateSpbuAt(zone.x, zone.z, zone.radius);
+      gameStore.setState({
+        lastOutcomeText:
+          'BOM MOLOTOV PECAH! Zona api membakar musuh di sekitar!',
+      });
+    }
+    return true;
+  }
+
+  public triggerSpbuServiceIfNear(): boolean {
+    const storeSnap = gameStore.getState();
+    if (storeSnap.playerState.currentInterior !== 'exterior') return false;
+    const st = findNearestSpbuStation(
+      this.playerPhys.x,
+      this.playerPhys.z,
+      storeSnap.destroyedSpbuIds
+    );
+    if (!st) return false;
+    const ok = gameStore.refuelAndRepairAtSpbu(st.name);
+    if (!ok) return false;
+
+    cityAudio.playSpbuRefuelChime();
+    this.nitroTankState.level = 100;
+    if (this.playerPhys.drivingVehicleId) {
+      const veh = this.traffic.getVehicleById(this.playerPhys.drivingVehicleId);
+      if (veh) {
+        veh.damage = createInitialVehicleDamage();
+        gameStore.setState({ activeVehicleDamage: { ...veh.damage } });
+      }
+    }
+    this.spawnParticles(
+      this.playerPhys.x,
+      this.playerPhys.y + 1.2,
+      this.playerPhys.z,
+      20,
+      0x22c55e,
+      6.5
+    );
+    return true;
   }
 
   public spawnRivalBoss(boss: RivalBossSpec): void {
@@ -1850,6 +2009,29 @@ export class PlayerController {
     }
 
     if (!wSpec.isMelee) {
+      // Brass shell casing ejection & SPBU fuel dispenser gunshot detonation check
+      const rightX = Math.cos(this.playerPhys.facing);
+      const rightZ = -Math.sin(this.playerPhys.facing);
+      this.spawnParticles(
+        muzzleX + rightX * 0.35,
+        muzzleY - 0.08,
+        muzzleZ + rightZ * 0.35,
+        2,
+        0xfacc15,
+        3.2
+      );
+      for (let dSample = 4; dSample <= Math.min(24, wSpec.range); dSample += 5) {
+        if (
+          this.checkAndDetonateSpbuAt(
+            muzzleX + fwdX * dSample,
+            muzzleZ + fwdZ * dSample,
+            2.8
+          )
+        ) {
+          break;
+        }
+      }
+
       // Allow bullets to damage NPC traffic & police vehicles (GTA-style vehicle shootouts!)
       for (const veh of this.traffic.vehicles) {
         if (veh.id === this.playerPhys.drivingVehicleId || veh.damage.exploded) {
@@ -2536,8 +2718,22 @@ export class PlayerController {
       virtualInputRef.enterVehicleTap = false;
       this.toggleEnterExitVehicle();
     }
+    if (this.keysJustPressed.has('Digit8')) {
+      this.throwActiveTacticalGadget();
+    } else if (this.keysJustPressed.has('Digit9')) {
+      gameStore.cycleTacticalGadget();
+    }
     if (this.keysJustPressed.has('KeyG')) {
-      if (nearbyInterior || pState.currentInterior !== 'exterior') {
+      const curDrivingVeh = this.playerPhys.drivingVehicleId
+        ? this.traffic.getVehicleById(this.playerPhys.drivingVehicleId)
+        : null;
+      if (
+        curDrivingVeh &&
+        (curDrivingVeh.type === 'polisi' || curDrivingVeh.type === 'barracuda')
+      ) {
+        const enabled = gameStore.togglePatwalSiren();
+        cityAudio.playSirenToggleChirp(enabled);
+      } else if (nearbyInterior || pState.currentInterior !== 'exterior') {
         this.callbacks.onEnterOrExitInterior(nearbyInterior);
       } else if (!this.toggleCoopPassengerOrMrt()) {
         this.toggleEnterExitVehicle();
@@ -2562,7 +2758,22 @@ export class PlayerController {
     }
     if (this.keysJustPressed.has('KeyR')) {
       if (this.playerPhys.drivingVehicleId) {
-        gameStore.cycleRadioStation();
+        const curVeh = this.traffic.getVehicleById(this.playerPhys.drivingVehicleId);
+        const isTilted =
+          curVeh &&
+          (Math.abs(curVeh.rollAngle) > 0.2 ||
+            Math.abs(curVeh.pitchAngle) > 0.22);
+        if (curVeh && (isTilted || this.keysHeld.has('ShiftLeft'))) {
+          curVeh.rollAngle = 0;
+          curVeh.pitchAngle = 0;
+          curVeh.y = getGroundElevationAt(curVeh.x, curVeh.z, curVeh.y) + 0.35;
+          soundEngine.playPickup();
+          gameStore.setState({
+            lastOutcomeText: 'Dongkrak Darurat Aktif! Posisi kendaraan ditegakkan.',
+          });
+        } else {
+          gameStore.cycleRadioStation();
+        }
       } else if (this.reloadTimer <= 0) {
         const magSize =
           getEffectiveMagazineCapacity(
@@ -2657,8 +2868,32 @@ export class PlayerController {
       }
     }
 
+    // Grand Plan 9.0: Nearby SPBU Pertamina Quick Refuel & Service [E]
+    const nearbySpbu =
+      pState.currentInterior === 'exterior'
+        ? findNearestSpbuStation(
+            this.playerPhys.x,
+            this.playerPhys.z,
+            storeState.destroyedSpbuIds
+          )
+        : null;
+    const nextSpbuName = nearbySpbu ? nearbySpbu.name : null;
+    if (nextSpbuName !== storeState.nearbySpbuName) {
+      gameStore.setState({ nearbySpbuName: nextSpbuName });
+    }
+    let spbuHandled = false;
+    if (
+      nearbySpbu &&
+      !modalBlocking &&
+      (this.keysJustPressed.has('KeyE') || virtualInputRef.interactTap)
+    ) {
+      virtualInputRef.interactTap = false;
+      spbuHandled = this.triggerSpbuServiceIfNear();
+    }
+
     let nearbyMission: StoryMission | null = null;
     if (
+      !spbuHandled &&
       !activeChoice &&
       nextStoryMission &&
       !storeState.activeRace &&
@@ -2962,6 +3197,14 @@ export class PlayerController {
         engineTelemetryRef.stuntAirTimeSec = this.stuntJump.airTime;
 
         if (activeVehicle.y <= surfaceElev && this.stuntJump.vy < 0) {
+          const approxDropHeightM = Math.max(
+            0.8,
+            (this.stuntJump.vy * this.stuntJump.vy) / (2 * 18.5)
+          );
+          const landingEval = evaluateStuntLandingImpact(
+            approxDropHeightM,
+            activeVehicle.speed
+          );
           activeVehicle.y = surfaceElev;
           const distM = Math.hypot(
             nextVX - this.stuntJump.launchX,
@@ -2975,11 +3218,33 @@ export class PlayerController {
           this.stuntJump.airTime = 0;
           this.stuntJump.slowMoTimer = 0;
           engineTelemetryRef.stuntAirTimeSec = 0;
-          this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.34);
+          this.landingSquashVel = -landingEval.squashDepthM * 16;
+          this.cameraTrauma = Math.min(
+            1,
+            this.cameraTrauma + Math.max(0.34, landingEval.cameraShakeAmp)
+          );
           this.spawnParticles(nextVX, surfaceElev + 0.35, nextVZ, 18, 0xf59e0b, 8);
+          if (landingEval.sparkCount > 0) {
+            this.spawnParticles(
+              nextVX,
+              surfaceElev + 0.16,
+              nextVZ,
+              landingEval.sparkCount,
+              0xfef08a,
+              9.5
+            );
+          }
+          if (landingEval.chassisDamage > 0) {
+            this.traffic.applyVehicleImpact(
+              activeVehicle,
+              landingEval.chassisDamage,
+              'front'
+            );
+          }
           this.spawnShockwave(nextVX, surfaceElev, nextVZ, 7.5, 0xfacc15, 0.42);
           this.triggerFlashLight(nextVX, surfaceElev + 1.4, nextVZ, 0xfacc15, 10);
           soundEngine.playPropCrash(0);
+          cityAudio.playCollisionThud(Math.min(1, landingEval.squashDepthM * 2.5));
 
           if (launchedRamp && distM >= 8) {
             const stuntRes = scoreStuntJump(
@@ -3227,9 +3492,55 @@ export class PlayerController {
         simDt
       );
 
+      // Grand Plan 9.0: High-speed SPBU ram detonation, Stunt Landing Spring Squash & Fuel Tick
+      if (!vSpec.isAircraft && Math.abs(prevSpeed) > 10.5) {
+        this.checkAndDetonateSpbuAt(activeVehicle.x, activeVehicle.z, 2.5);
+      }
+      if (!vSpec.isAircraft) {
+        // Underdamped suspension spring bounce after stunt jump landing
+        const springAcc =
+          -this.landingSquashOffset * 95 - this.landingSquashVel * 11;
+        this.landingSquashVel += springAcc * simDt;
+        this.landingSquashOffset += this.landingSquashVel * simDt;
+        if (
+          Math.abs(this.landingSquashOffset) < 0.002 &&
+          Math.abs(this.landingSquashVel) < 0.01
+        ) {
+          this.landingSquashOffset = 0;
+          this.landingSquashVel = 0;
+        }
+
+        const fuelStep = stepVehicleFuelConsumption({
+          fuelPct: storeState.vehicleFuelPct,
+          speedRatio: Math.abs(activeVehicle.speed) / Math.max(1, vSpec.maxSpeed),
+          nitroActive: this.nitroTankState.active,
+          isAircraft: false,
+          dt: simDt,
+        });
+        if (fuelStep.speedCapMultiplier < 1.0) {
+          const cap = vSpec.maxSpeed * fuelStep.speedCapMultiplier;
+          if (Math.abs(activeVehicle.speed) > cap) {
+            activeVehicle.speed = Math.sign(activeVehicle.speed) * cap;
+          }
+        }
+        this.fuelSyncAccum += simDt;
+        if (
+          this.fuelSyncAccum >= 0.25 &&
+          Math.abs(fuelStep.nextFuelPct - storeState.vehicleFuelPct) >= 0.05
+        ) {
+          this.fuelSyncAccum = 0;
+          gameStore.setState({ vehicleFuelPct: fuelStep.nextFuelPct });
+        } else {
+          storeState.vehicleFuelPct = fuelStep.nextFuelPct;
+        }
+      } else {
+        this.landingSquashOffset = 0;
+        this.landingSquashVel = 0;
+      }
+
       activeVehicle.mesh.position.set(
         activeVehicle.x,
-        activeVehicle.y,
+        activeVehicle.y + this.landingSquashOffset,
         activeVehicle.z
       );
       activeVehicle.mesh.rotation.y =
@@ -4242,11 +4553,70 @@ export class PlayerController {
     let spottedByPolice = trafficRes.spottedByPolice;
     const signalPhase = trafficRes.signalPhase;
 
+    // Grand Plan 9.0: Step Active Tactical Zones (Smoke Screen Concealment & Molotov Burn DoT)
+    if (this.activeTacticalZones.length > 0) {
+      this.activeTacticalZones = stepActiveTacticalZones(
+        this.activeTacticalZones,
+        simDt
+      );
+      this.tacticalParticleAccum += simDt;
+      const emitNow = this.tacticalParticleAccum >= 0.085;
+      if (emitNow) this.tacticalParticleAccum = 0;
+
+      for (const tz of this.activeTacticalZones) {
+        if (emitNow) {
+          const gy = getGroundElevationAt(tz.x, tz.z);
+          const ang = Math.random() * Math.PI * 2;
+          const rDist = Math.random() * tz.radius * 0.72;
+          const px = tz.x + Math.cos(ang) * rDist;
+          const pz = tz.z + Math.sin(ang) * rDist;
+          if (tz.kind === 'smoke_grenade') {
+            this.spawnParticles(px, gy + 0.85, pz, 3, 0xcbd5e1, 3.6);
+          } else {
+            this.spawnParticles(px, gy + 0.45, pz, 3, 0xf97316, 4.8);
+          }
+        }
+      }
+
+      const smokeEval = evaluateSmokeScreenEffect(
+        this.activeTacticalZones,
+        this.playerPhys.x,
+        this.playerPhys.z
+      );
+      if (smokeEval.inSmoke !== storeState.inSmokeScreen) {
+        gameStore.setState({ inSmokeScreen: smokeEval.inSmoke });
+      }
+      if (smokeEval.inSmoke) {
+        spottedByPolice = false;
+      }
+
+      for (const en of this.enemies) {
+        if (en.state !== 'alive') continue;
+        const burnEval = evaluateMolotovBurnAt(
+          this.activeTacticalZones,
+          en.x,
+          en.z,
+          simDt
+        );
+        if (burnEval.burning) {
+          en.hp -= burnEval.damage;
+          en.hitFlashTimer = Math.max(en.hitFlashTimer, 0.05);
+          if (en.hp <= 0) {
+            this.markEnemyKo(en, activeChoice);
+          }
+        }
+      }
+    } else if (storeState.inSmokeScreen) {
+      gameStore.setState({ inSmokeScreen: false });
+    }
+
     if (pState.wantedLevel > 0) {
+      const detectRange = gameStore.getState().inSmokeScreen ? 7.5 : 25;
       for (const en of this.enemies) {
         if (
           en.state === 'alive' &&
-          Math.hypot(en.x - this.playerPhys.x, en.z - this.playerPhys.z) < 25
+          Math.hypot(en.x - this.playerPhys.x, en.z - this.playerPhys.z) <
+            detectRange
         ) {
           spottedByPolice = true;
           break;

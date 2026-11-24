@@ -256,6 +256,10 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
   const [screen, setScreen] = useState<AppScreenId>(phoneTargetScreen || 'home');
   const [feedFilter, setFeedFilter] = useState<'all' | 'trending' | 'mine'>('all');
   const cashLedger = useGameStore((s) => s.cashLedger);
+  const highStakesRaceMode = useGameStore((s) => s.highStakesRaceMode);
+  const raceBestTimes = useGameStore((s) => s.raceBestTimes);
+  const smokeGrenades = useGameStore((s) => s.smokeGrenades);
+  const molotovs = useGameStore((s) => s.molotovs);
   const claimedBounties = useGameStore((s) => s.claimedBounties);
   const customWaypoint = useGameStore((s) => s.customWaypoint);
   const worldTimeMinutes = useGameStore((s) => s.worldTimeMinutes);
@@ -624,35 +628,74 @@ export const NabiloPhoneModal: React.FC<NabiloPhoneModalProps> = ({
                 </p>
               </button>
 
-              <div className="text-xs font-semibold text-[#94a3b8] pt-1">
-                Sirkuit Balap Liar
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs font-semibold text-[#94a3b8]">
+                  Sirkuit Balap Liar
+                </span>
+                <button
+                  type="button"
+                  data-testid="phone-toggle-high-stakes-btn"
+                  onClick={() => gameStore.toggleHighStakesRaceMode()}
+                  className={`px-2 py-0.5 rounded font-mono-num text-[10px] font-bold cursor-pointer transition-colors ${
+                    highStakesRaceMode
+                      ? 'bg-[#f59e0b] text-[#090c12]'
+                      : 'bg-white/10 text-[#cbd5e1] hover:bg-white/20'
+                  }`}
+                >
+                  {highStakesRaceMode ? 'TARUHAN GENGSI 2.5x ON' : 'Taruhan Gengsi 2.5x'}
+                </button>
               </div>
               <div className="divide-y divide-white/10">
-                {STREET_RACES.map((race) => (
-                  <div
-                    key={race.id}
-                    className="py-2.5 flex items-center justify-between gap-2"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold text-[#f4f1ea] truncate">
-                        {race.name}
-                      </div>
-                      <div className="text-[11px] font-mono-num text-[#22c55e]">
-                        Hadiah {formatRupiah(race.rewardRp)}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onStartStreetRace(race.id);
-                        onClose();
-                      }}
-                      className="px-3 py-1 rounded-md bg-[#38bdf8] text-[#090c12] text-[11px] font-bold cursor-pointer shrink-0"
+                {STREET_RACES.map((race) => {
+                  const rec = raceBestTimes[race.id];
+                  const shownReward = highStakesRaceMode
+                    ? Math.round(race.rewardRp * 2.5)
+                    : race.rewardRp;
+                  return (
+                    <div
+                      key={race.id}
+                      className="py-2.5 flex items-center justify-between gap-2"
                     >
-                      Balap
-                    </button>
-                  </div>
-                ))}
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-[#f4f1ea] truncate">
+                          {race.name}
+                        </div>
+                        <div className="text-[11px] font-mono-num text-[#22c55e] flex items-center gap-1.5">
+                          <span>Hadiah {formatRupiah(shownReward)}</span>
+                          {rec && (
+                            <span className="text-[#facc15]">
+                              · {rec.bestSec.toFixed(1)}d ({rec.medal.toUpperCase()})
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onStartStreetRace(race.id);
+                          onClose();
+                        }}
+                        className="px-3 py-1 rounded-md bg-[#38bdf8] text-[#090c12] text-[11px] font-bold cursor-pointer shrink-0"
+                      >
+                        Balap
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="pt-2 border-t border-white/10 flex items-center justify-between gap-2">
+                <div className="text-[11px] text-[#cbd5e1]">
+                  Suplai Taktis: Asap ({smokeGrenades}) · Molotov ({molotovs})
+                </div>
+                <button
+                  type="button"
+                  data-testid="phone-restock-gadgets-btn"
+                  onClick={() => gameStore.restockTacticalGadgets()}
+                  className="px-2.5 py-1 rounded-md bg-[#22c55e]/20 border border-[#22c55e]/50 text-[#4ade80] text-[10px] font-mono-num font-bold cursor-pointer hover:bg-[#22c55e]/30"
+                >
+                  Isi Penuh (Rp 35.000)
+                </button>
               </div>
             </div>
           )}

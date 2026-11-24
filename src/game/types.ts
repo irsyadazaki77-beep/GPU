@@ -1343,4 +1343,47 @@ export interface MultiplayerLobbyState {
   sharedHeistPotRp: number;
 }
 
+export type TacticalGadgetKind = 'smoke_grenade' | 'molotov';
+
+export interface SpbuStationSpec {
+  id: string;
+  name: string;
+  districtId: DistrictId;
+  x: number;
+  z: number;
+  rotY: number;
+  serviceRadius: number;
+}
+
+export interface ActiveTacticalZone {
+  id: string;
+  kind: TacticalGadgetKind;
+  x: number;
+  z: number;
+  radius: number;
+  remainingSec: number;
+  totalDurationSec: number;
+}
+
+export interface TurfRaidEvent {
+  id: string;
+  districtId: DistrictId;
+  districtName: string;
+  targetX: number;
+  targetZ: number;
+  remainingSec: number;
+  raidersRemaining: number;
+  rewardRp: number;
+}
+
+export type RaceTimeMedal = 'emas' | 'perak' | 'perunggu';
+
+export interface RaceRecordEntry {
+  raceId: string;
+  bestSec: number;
+  medal: RaceTimeMedal;
+  updatedAt: number;
+}
+
+
 

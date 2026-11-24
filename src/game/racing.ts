@@ -2,6 +2,8 @@ import type {
   ActiveWorldRoadEvent,
   BuildingFootprint,
   CustomRaceTrackSpec,
+  RaceRecordEntry,
+  RaceTimeMedal,
   RoadsideSpawnLayout,
   SidewalkBounds,
   StreetRaceSpec,
@@ -1604,4 +1606,79 @@ export function importCustomRaceTrackJson(
     return { track: null, error: 'JSON sirkuit rusak atau gagal di-parse.' };
   }
 }
+
+/* ==========================================================================
+ * GRAND PLAN 9.0: HIGH-STAKES STREET RACE WAGERS & PERSONAL BEST MEDALS
+ * ========================================================================== */
+
+export function computeHighStakesRaceTerms(
+  baseEntryFeeRp: number,
+  baseRewardRp: number,
+  highStakes: boolean
+): {
+  entryFeeRp: number;
+  firstPlaceRewardRp: number;
+  repBonus: number;
+} {
+  if (!highStakes) {
+    return {
+      entryFeeRp: baseEntryFeeRp,
+      firstPlaceRewardRp: baseRewardRp,
+      repBonus: 6,
+    };
+  }
+  return {
+    entryFeeRp: Math.round(baseEntryFeeRp * 2),
+    firstPlaceRewardRp: Math.round(baseRewardRp * 2.5),
+    repBonus: 18,
+  };
+}
+
+export function evaluateRaceTimeMedal(
+  elapsedSec: number,
+  checkpointCount: number
+): RaceTimeMedal {
+  const goldParSec = Math.max(12, checkpointCount * 5.2);
+  const silverParSec = goldParSec * 1.32;
+  if (elapsedSec <= goldParSec) return 'emas';
+  if (elapsedSec <= silverParSec) return 'perak';
+  return 'perunggu';
+}
+
+export function updatePersonalBestRaceRecord(
+  records: Record<string, RaceRecordEntry>,
+  raceId: string,
+  elapsedSec: number,
+  checkpointCount: number,
+  nowMs: number = Date.now()
+): {
+  nextRecords: Record<string, RaceRecordEntry>;
+  isNewBest: boolean;
+  medal: RaceTimeMedal;
+} {
+  const roundedSec = Math.max(1, Math.round(elapsedSec * 100) / 100);
+  const medal = evaluateRaceTimeMedal(roundedSec, checkpointCount);
+  const prev = records[raceId];
+  if (prev && prev.bestSec <= roundedSec) {
+    return {
+      nextRecords: records,
+      isNewBest: false,
+      medal,
+    };
+  }
+  return {
+    nextRecords: {
+      ...records,
+      [raceId]: {
+        raceId,
+        bestSec: roundedSec,
+        medal,
+        updatedAt: nowMs,
+      },
+    },
+    isNewBest: true,
+    medal,
+  };
+}
+
 

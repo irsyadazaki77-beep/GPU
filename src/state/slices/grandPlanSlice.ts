@@ -9,7 +9,10 @@ import type {
   GlobalLeaderboardEntry,
   MultiplayerLobbyState,
   PlayerProgressState,
+  RaceRecordEntry,
   SpeedTrapFlashBanner,
+  TacticalGadgetKind,
+  TurfRaidEvent,
   VigilantePatrolSession,
 } from '../../game/types';
 
@@ -28,6 +31,18 @@ export interface GrandPlanSliceState {
   socialHubLoading: boolean;
   sabotagedHeistCctvIds: string[];
   multiplayerLobby: MultiplayerLobbyState | null;
+  // Grand Plan 9.0: Fuel/SPBU, Tactical Throwables, Patwal Siren, Turf Raids & Race Records
+  vehicleFuelPct: number;
+  nearbySpbuName: string | null;
+  destroyedSpbuIds: string[];
+  activeGadgetKind: TacticalGadgetKind;
+  smokeGrenades: number;
+  molotovs: number;
+  inSmokeScreen: boolean;
+  patwalSirenActive: boolean;
+  activeTurfRaid: TurfRaidEvent | null;
+  highStakesRaceMode: boolean;
+  raceBestTimes: Record<string, RaceRecordEntry>;
 }
 
 export function createInitialGrandPlanSliceState(initialSave?: {
@@ -48,6 +63,17 @@ export function createInitialGrandPlanSliceState(initialSave?: {
     socialHubLoading: false,
     sabotagedHeistCctvIds: [],
     multiplayerLobby: null,
+    vehicleFuelPct: 100,
+    nearbySpbuName: null,
+    destroyedSpbuIds: [],
+    activeGadgetKind: 'smoke_grenade',
+    smokeGrenades: 3,
+    molotovs: 2,
+    inSmokeScreen: false,
+    patwalSirenActive: false,
+    activeTurfRaid: null,
+    highStakesRaceMode: false,
+    raceBestTimes: {},
   };
 }
 

@@ -64,6 +64,9 @@ export interface VehicleEntity extends TrafficAISteppable {
 
 export class TrafficSystem {
   public readonly vehicles: VehicleEntity[] = [];
+  public getVehicleById(id: string): VehicleEntity | undefined {
+    return this.vehicles.find((v) => v.id === id);
+  }
   public readonly vehicleHeadlight: THREE.SpotLight;
   public readonly sirenLight: THREE.PointLight;
   public readonly policeHeliMesh: THREE.Group;
@@ -799,10 +802,11 @@ export class TrafficSystem {
         const sirenOn =
           pState.wantedLevel > 0 ||
           (v.id === drivingVehicleId &&
-            (v.type === 'polisi' || v.type === 'barracuda'));
+            (v.type === 'polisi' || v.type === 'barracuda') &&
+            gameStore.getState().patwalSirenActive);
         sirenRedMat.emissiveIntensity = sirenOn
           ? sirenPhaseRed
-            ? 2.8
+            ? 3.4
             : 0.25
           : 0.45;
         sirenBlueMat.emissiveIntensity = sirenOn
@@ -1204,6 +1208,23 @@ export class TrafficSystem {
                     : 1.04;
                 cityAudio.playTrafficResponseHorn(pitch, 0.08);
               }
+            }
+          } else if (
+            fwdP < -2.0 &&
+            fwdP > -26.0 &&
+            Boolean(drivingVehicleId) &&
+            gameStore.getState().patwalSirenActive
+          ) {
+            // Player Patwal/Barracuda siren behind AI car -> AI yields laterally to shoulder!
+            const latP = Math.abs(dxP * cosH - dzP * sinH);
+            if (latP < 4.2) {
+              v.weaveOffset = THREE.MathUtils.damp(
+                v.weaveOffset ?? 0,
+                1.85,
+                4.5,
+                simDt
+              );
+              v.speed *= Math.exp(-1.2 * simDt);
             }
           }
         }
